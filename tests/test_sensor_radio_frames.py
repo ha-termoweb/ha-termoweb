@@ -14,6 +14,7 @@ _install_stubs()
 
 from custom_components.termoweb.const import DOMAIN, signal_radio_frames
 from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.runtime import require_runtime
 from homeassistant.core import HomeAssistant
 
 DEV_ID = "aabbcc001122"
@@ -104,13 +105,25 @@ async def test_no_device_points_via_a_device_that_is_never_created(brand) -> Non
     await sensors.async_setup_entry(hass, entry, added.extend)
     for entity in added:
         entity.hass = hass
+    termoweb = importlib.import_module("custom_components.termoweb")
+    termoweb._register_hub_devices(hass, entry, require_runtime(hass, entry.entry_id))
+    registry = importlib.import_module("homeassistant.helpers.device_registry")
+    dev_reg = registry.async_get(hass)
     infos = [entity.device_info for entity in added]
-    created = {ident for info in infos for ident in info["identifiers"]}
+    created = {
+        dev_reg.async_get_or_create(config_entry_id=entry.entry_id, **info).id
+        for info in infos
+    }
     for info in infos:
-        assert info.get("via_device") in created | {None}
+        assert "via_device" not in info
+        assert info.get("via_device_id") in created | {None}
         assert info["manufacturer"] == "Radio"
     gateway = next(i for i in infos if (DOMAIN, DEV_ID) in i["identifiers"])
+    site = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, DEV_ID, "site"), entry.entry_id
+    )
     if brand == "radio_monitor":
-        assert "via_device" not in gateway
+        assert "via_device_id" not in gateway
+        assert site is None
     else:
-        assert gateway["via_device"] == (DOMAIN, DEV_ID, "site")
+        assert gateway["via_device_id"] == site.id

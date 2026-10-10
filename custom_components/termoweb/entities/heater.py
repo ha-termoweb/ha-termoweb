@@ -39,7 +39,7 @@ from custom_components.termoweb.inventory import (
     normalize_node_type,
 )
 from custom_components.termoweb.runtime import EntryRuntime, require_runtime
-from custom_components.termoweb.utils import translate_default_device_name
+from custom_components.termoweb.utils import build_node_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -765,13 +765,11 @@ class HeaterNodeBase(CoordinatorEntity):
     def device_info(self) -> DeviceInfo:
         """Expose Home Assistant device metadata for the heater."""
         model = "Accumulator" if self._node_type == "acm" else "Heater"
-        info = DeviceInfo(
-            identifiers=cast(
-                set[tuple[str, str]], {(DOMAIN, self._dev_id, self._addr)}
-            ),
+        return build_node_device_info(
+            self.hass,
+            self._entry_id,
+            self._dev_id,
+            self._addr,
             name=self._device_name,
-            manufacturer="TermoWeb",
             model=model,
-            via_device=(DOMAIN, self._dev_id),
         )
-        return translate_default_device_name(info, self._addr)

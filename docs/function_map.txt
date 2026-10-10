@@ -18,6 +18,8 @@ custom_components/termoweb/__init__.py :: async_setup_entry._recalc_poll_interva
     Suspend REST polling when websocket trackers are healthy and fresh.
 custom_components/termoweb/__init__.py :: async_setup_entry._on_ws_status
     Recalculate polling intervals when websocket state changes.
+custom_components/termoweb/__init__.py :: _register_hub_devices
+    Register the site and gateway devices so child devices can name their ids.
 custom_components/termoweb/__init__.py :: _collect_shutdown_targets
     Return shutdown targets or ``None`` if shutdown already ran.
 custom_components/termoweb/__init__.py :: _shutdown_ws_tasks
@@ -1832,6 +1834,8 @@ custom_components/termoweb/utils.py :: async_get_integration_version
     Return the installed integration version string.
 custom_components/termoweb/utils.py :: _entry_gateway_record
     Return the running runtime of ``entry_id``, or None.
+custom_components/termoweb/utils.py :: _link_via_device
+    Set ``via_device_id`` to the entry's registered ``parent`` device, if any.
 custom_components/termoweb/utils.py :: _has_capability
     Return the running backend's capability flag; True (the cloud default) if unknown.
 custom_components/termoweb/utils.py :: apply_entry_device_overrides
@@ -1842,6 +1846,8 @@ custom_components/termoweb/utils.py :: build_gateway_device_info
     Return canonical ``DeviceInfo`` for the TermoWeb gateway.
 custom_components/termoweb/utils.py :: build_power_monitor_device_info
     Return canonical ``DeviceInfo`` for a TermoWeb power monitor.
+custom_components/termoweb/utils.py :: build_node_device_info
+    Return ``DeviceInfo`` for a heater, accumulator or thermostat node.
 custom_components/termoweb/utils.py :: translate_default_device_name
     Attach a device translation key when ``info`` carries a default node name.
 scripts/generate_function_map.py :: DocExtractor.__init__

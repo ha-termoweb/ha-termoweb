@@ -253,23 +253,15 @@ async def test_failed_first_refresh_cleans_up(
     assert config_entry.runtime_data._shutdown_complete  # noqa: SLF001
 
 
-@pytest.mark.xfail(
-    # Not strict: whether the site device exists before the gateway depends on
-    # platform setup order, so the bug only shows up on some runs.
-    strict=False,
-    reason="The gateway device names a 'site' via_device that is not registered "
-    "when the gateway is, so the link is dropped (HA logs it; still not an "
-    "error in 2026.10). Order-dependent; fixed by the via_device_id migration.",
-)
 async def test_setup_registers_no_dangling_via_device(
-    hass: HomeAssistant, cloud: FakeCloud, config_entry: MockConfigEntry
+    hass: HomeAssistant,
+    cloud: FakeCloud,
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The gateway device is linked to the site device it names as via_device."""
+    """Site, gateway and node devices are linked by via_device_id, not via_device."""
     assert await _setup(hass, config_entry)
 
-    # HA reports a dangling via_device only once per call site, and since
-    # 2026.10 the via_device deprecation notice takes that slot, so check the
-    # registry link itself rather than the log.
     dev_reg = dr.async_get(hass)
     dev_id = config_entry.runtime_data.dev_id
     entry_id = config_entry.entry_id
@@ -278,3 +270,12 @@ async def test_setup_registers_no_dangling_via_device(
     assert gateway is not None
     assert site is not None
     assert gateway.via_device_id == site.id
+    assert site.via_device_id is None
+    nodes = [
+        device
+        for device in dr.async_entries_for_config_entry(dev_reg, entry_id)
+        if device.id not in (gateway.id, site.id)
+    ]
+    assert nodes
+    assert all(device.via_device_id == gateway.id for device in nodes)
+    assert "via_device" not in caplog.text

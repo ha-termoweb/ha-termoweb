@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import importlib
 import logging
 import types
 from typing import Any, Callable
@@ -408,8 +409,14 @@ class TestBuildInstallationDeviceInfo:
 class TestBuildGatewayDeviceInfoChanges:
     def test_via_device_points_to_installation(self) -> None:
         hass = types.SimpleNamespace(data={})
+        registry = importlib.import_module("homeassistant.helpers.device_registry")
+        assert "via_device_id" not in build_gateway_device_info(hass, "entry", "dev123")
+        site = registry.async_get(hass).async_get_or_create(
+            config_entry_id="entry", identifiers={(DOMAIN, "dev123", "site")}
+        )
         info = build_gateway_device_info(hass, "entry", "dev123")
-        assert info["via_device"] == (DOMAIN, "dev123", "site")
+        assert info["via_device_id"] == site.id
+        assert "via_device" not in info
 
     def test_sw_version_from_fw_version(self) -> None:
         """Gateway device shows fw_version as sw_version."""
