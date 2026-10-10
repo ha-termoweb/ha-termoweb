@@ -372,8 +372,6 @@ async def async_setup_entry(  # noqa: C901
         ws_trackers={},
         version=version,
         brand=brand,
-        boost_runtime={},
-        boost_temperature={},
     )
     entry.runtime_data = runtime
     # Runs on unload (after the platforms) and when setup fails from here on,

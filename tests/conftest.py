@@ -2137,7 +2137,6 @@ def heater_hass_data() -> Callable[..., "EntryRuntime"]:
         dev_id: str,
         coordinator: Any,
         *,
-        boost_runtime: Mapping[str, Mapping[str, int]] | None = None,
         ws_state: Mapping[str, Any] | None = None,
         extra: Mapping[str, Any] | None = None,
         inventory: "Inventory" | None = None,
@@ -2157,10 +2156,6 @@ def heater_hass_data() -> Callable[..., "EntryRuntime"]:
             inventory=container,
             allow_missing_inventory=container is None,
         )
-        if boost_runtime is not None:
-            runtime.boost_runtime = {
-                key: dict(value) for key, value in boost_runtime.items()
-            }
         if container is None:
             container = runtime.inventory
         if ws_state is not None:

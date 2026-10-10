@@ -23,7 +23,6 @@ from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.const import BRAND_DUCAHEAT, CONF_BRAND, DOMAIN
 from custom_components.termoweb.entities import climate as climate_module
 from custom_components.termoweb.entities import heater as heater_module
-from custom_components.termoweb.entities.heater import get_boost_temperature
 
 from .conftest import PASSWORD, USERNAME, FakeCloud
 
@@ -348,14 +347,15 @@ async def test_boost_temperature_not_kept_when_write_fails(
     """The boost temperature number keeps its value when the device write fails."""
     await _setup(hass, config_entry)
     before = hass.states.get(BOOST_TEMP).state
-    stored = get_boost_temperature(hass, config_entry.entry_id, "acm", "2")
+    view = config_entry.runtime_data.coordinator.domain_view
+    stored = view.get_heater_state("acm", "2").boost_temp
 
     writes.fail_all()
     with pytest.raises(HomeAssistantError, match="Boost preset write"):
         await _service(hass, "number", "set_value", BOOST_TEMP, value=25)
 
     assert hass.states.get(BOOST_TEMP).state == before
-    assert get_boost_temperature(hass, config_entry.entry_id, "acm", "2") == stored
+    assert view.get_heater_state("acm", "2").boost_temp == stored
 
 
 async def test_boost_temperature_kept_when_write_succeeds(

@@ -35,7 +35,6 @@ from ..identifiers import build_heater_unique_id, thermostat_fallback_name
 from ..inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
 from ..runtime import require_runtime
 from .heater import (
-    DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
     HeaterPlatformDetails,
     NodeRefreshFallback,
@@ -969,15 +968,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
     def _preferred_boost_minutes(self) -> int:
         """Return the configured boost duration in minutes."""
 
-        hass = getattr(self, "hass", None)
-        if hass is None:
-            return DEFAULT_BOOST_DURATION
-        return resolve_boost_runtime_minutes(
-            hass,
-            self._entry_id,
-            self._node_type,
-            self._addr,
-        )
+        return resolve_boost_runtime_minutes(self.accumulator_state())
 
     @property
     def hvac_modes(self) -> list[HVACMode]:

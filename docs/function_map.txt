@@ -84,6 +84,8 @@ custom_components/termoweb/backend/base.py :: Backend.set_node_lock
     Toggle child lock state using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_node_display_select
     Toggle display-identify cues using the backend client.
+custom_components/termoweb/backend/base.py :: Backend.set_power_limit
+    Set the installation-wide power limit using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.create_ws_client
     Create a websocket client for the given device.
 custom_components/termoweb/backend/base.py :: Backend.fetch_hourly_samples
@@ -357,7 +359,7 @@ custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_de
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_update
     Merge incremental node updates from the websocket feed.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_power_limit_update
-    Apply a system-level power_limit push to the runtime.
+    Route a system-level power_limit push into the domain store.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._apply_nodes_payload
     Update cached nodes from the websocket payload and notify listeners.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._translate_path_deltas
@@ -900,6 +902,8 @@ custom_components/termoweb/coordinator.py :: StateCoordinator.gateway_connected
     Return True when the coordinator reports the gateway online.
 custom_components/termoweb/coordinator.py :: StateCoordinator.update_gateway_connection
     Update the gateway connection state in the domain store.
+custom_components/termoweb/coordinator.py :: StateCoordinator.apply_power_limit
+    Store a gateway power limit and notify listeners when it changed.
 custom_components/termoweb/coordinator.py :: StateCoordinator.apply_energy_snapshot
     Store an energy snapshot in the domain state store.
 custom_components/termoweb/coordinator.py :: StateCoordinator._device_record
@@ -1056,6 +1060,10 @@ custom_components/termoweb/domain/state.py :: DomainStateStore.set_gateway_conne
     Store the latest gateway connection state.
 custom_components/termoweb/domain/state.py :: DomainStateStore.get_gateway_connection_state
     Return a defensive copy of the gateway connection state.
+custom_components/termoweb/domain/state.py :: DomainStateStore.set_power_limit
+    Store the gateway power limit in watts and return ``True`` when changed.
+custom_components/termoweb/domain/state.py :: DomainStateStore.get_power_limit
+    Return the gateway power limit in watts when known.
 custom_components/termoweb/domain/state.py :: DomainStateStore.replace_state
     Replace the stored state for ``(node_type, addr)`` when valid.
 custom_components/termoweb/domain/state.py :: _copy_state_field_value
@@ -1078,6 +1086,8 @@ custom_components/termoweb/domain/view.py :: DomainStateView.get_power_monitor_s
     Return the power monitor state for ``addr`` when present.
 custom_components/termoweb/domain/view.py :: DomainStateView.get_gateway_connection_state
     Return the gateway connection state when available.
+custom_components/termoweb/domain/view.py :: DomainStateView.get_power_limit
+    Return the gateway power limit in watts when known.
 custom_components/termoweb/domain/view.py :: DomainStateView.get_energy_snapshot
     Return the latest energy snapshot for this gateway.
 custom_components/termoweb/domain/view.py :: DomainStateView.get_energy_metric
@@ -1322,20 +1332,8 @@ custom_components/termoweb/entities/heater.py :: HeaterPlatformDetails.resolve_n
     Resolve the friendly name for ``(node_type, addr)``.
 custom_components/termoweb/entities/heater.py :: HeaterPlatformDetails.iter_metadata
     Yield heater metadata derived from the inventory.
-custom_components/termoweb/entities/heater.py :: _boost_runtime_store
-    Return the mutable boost runtime store for ``runtime``.
-custom_components/termoweb/entities/heater.py :: _boost_temperature_store
-    Return the mutable boost temperature store for ``runtime``.
-custom_components/termoweb/entities/heater.py :: get_boost_runtime_minutes
-    Return the stored boost runtime for the specified node.
-custom_components/termoweb/entities/heater.py :: get_boost_temperature
-    Return the stored boost temperature for the specified node.
-custom_components/termoweb/entities/heater.py :: set_boost_runtime_minutes
-    Persist ``minutes`` as the preferred boost runtime for ``node``.
-custom_components/termoweb/entities/heater.py :: set_boost_temperature
-    Persist ``temperature`` as the preferred boost setpoint.
 custom_components/termoweb/entities/heater.py :: resolve_boost_runtime_minutes
-    Return the preferred boost runtime or ``default`` when unset.
+    Return the device's default boost duration, or ``default`` when unknown.
 custom_components/termoweb/entities/heater.py :: ws_echo_expected
     Return True when a healthy WebSocket is expected to echo a write.
 custom_components/termoweb/entities/heater.py :: NodeRefreshFallback.__init__
@@ -1421,7 +1419,7 @@ custom_components/termoweb/entities/heater.py :: HeaterNodeBase._setpoint_range
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase.device_info
     Expose Home Assistant device metadata for the heater.
 custom_components/termoweb/entities/number.py :: _restore_boost_value
-    Restore a boost preference from cache, state, or settings.
+    Restore the fallback boost value shown until the device reports one.
 custom_components/termoweb/entities/number.py :: _async_write_boost_preset
     Write accumulator boost defaults to the device and patch cached state.
 custom_components/termoweb/entities/number.py :: async_setup_entry
@@ -1443,7 +1441,7 @@ custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber._initial_minutes_from_settings
     Return the bootstrap value sourced from cached settings.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber._apply_minutes
-    Update the cached minutes and persist when requested.
+    Update the fallback minutes shown until the device reports boost_time.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber._validate_minutes
     Return a supported minute value, falling back to the default.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber._hours_to_minutes
@@ -1468,10 +1466,12 @@ custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumb
     Handle slider updates that adjust the boost temperature.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumber.extra_state_attributes
     Expose the preferred temperature as an attribute.
+custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumber._current_temperature
+    Return the device boost_temp when valid, else the fallback value.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumber._initial_temperature_from_settings
     Return the bootstrap value sourced from cached settings.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumber._apply_temperature
-    Update the cached temperature and persist when requested.
+    Update the fallback temperature shown until the device reports one.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumber._validate_temperature
     Return a valid boost temperature within supported limits.
 custom_components/termoweb/entities/sensor.py :: _looks_like_integer_string

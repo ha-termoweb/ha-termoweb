@@ -3,14 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import (
-    Awaitable,
-    Callable,
-    Iterable,
-    Iterator,
-    Mapping,
-    MutableMapping,
-)
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, fields
 from datetime import datetime, timedelta
 import logging
@@ -24,7 +17,11 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from custom_components.termoweb.boost import coerce_boost_minutes, supports_boost
+from custom_components.termoweb.boost import (
+    ALLOWED_BOOST_MINUTES_SET,
+    coerce_boost_minutes,
+    supports_boost,
+)
 from custom_components.termoweb.coerce import as_bool, as_float
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.domain import DomainStateView
@@ -133,192 +130,15 @@ class HeaterPlatformDetails:
         )
 
 
-def _boost_runtime_store(
-    runtime: EntryRuntime | None,
-    *,
-    create: bool,
-) -> dict[str, dict[str, int]]:
-    """Return the mutable boost runtime store for ``runtime``."""
-
-    if runtime is None:
-        return {}
-    if not create and not runtime.boost_runtime:
-        return {}
-    return runtime.boost_runtime
-
-
-def _boost_temperature_store(
-    runtime: EntryRuntime,
-    *,
-    create: bool,
-) -> dict[str, dict[str, float]]:
-    """Return the mutable boost temperature store for ``runtime``."""
-
-    if not create and not runtime.boost_temperature:
-        return {}
-    return runtime.boost_temperature
-
-
-def get_boost_runtime_minutes(
-    hass: HomeAssistant,
-    entry_id: str,
-    node_type: str,
-    addr: str,
-) -> int | None:
-    """Return the stored boost runtime for the specified node."""
-
-    try:
-        runtime = require_runtime(hass, entry_id)
-    except LookupError:
-        return None
-
-    node_type_norm = normalize_node_type(
-        node_type,
-        use_default_when_falsey=True,
-    )
-    addr_norm = normalize_node_addr(
-        addr,
-        use_default_when_falsey=True,
-    )
-    if not node_type_norm or not addr_norm:
-        return None
-
-    store = _boost_runtime_store(runtime, create=False)
-    bucket = store.get(node_type_norm)
-    if not isinstance(bucket, MutableMapping):
-        return None
-
-    stored = bucket.get(addr_norm)
-    minutes = coerce_boost_minutes(stored)
-    if minutes is None:
-        return None
-
-    return minutes
-
-
-def get_boost_temperature(
-    hass: HomeAssistant,
-    entry_id: str,
-    node_type: str,
-    addr: str,
-) -> float | None:
-    """Return the stored boost temperature for the specified node."""
-
-    try:
-        runtime = require_runtime(hass, entry_id)
-    except LookupError:
-        return None
-
-    node_type_norm = normalize_node_type(
-        node_type,
-        use_default_when_falsey=True,
-    )
-    addr_norm = normalize_node_addr(
-        addr,
-        use_default_when_falsey=True,
-    )
-    if not node_type_norm or not addr_norm:
-        return None
-
-    store = _boost_temperature_store(runtime, create=False)
-    bucket = store.get(node_type_norm)
-    if not isinstance(bucket, MutableMapping):
-        return None
-
-    return as_float(bucket.get(addr_norm))
-
-
-def set_boost_runtime_minutes(
-    hass: HomeAssistant,
-    entry_id: str,
-    node_type: str,
-    addr: str,
-    minutes: int | None,
-) -> None:
-    """Persist ``minutes`` as the preferred boost runtime for ``node``."""
-
-    try:
-        runtime = require_runtime(hass, entry_id)
-    except LookupError:
-        return
-
-    node_type_norm = normalize_node_type(
-        node_type,
-        use_default_when_falsey=True,
-    )
-    addr_norm = normalize_node_addr(
-        addr,
-        use_default_when_falsey=True,
-    )
-    if not node_type_norm or not addr_norm:
-        return
-
-    store = _boost_runtime_store(runtime, create=True)
-
-    if minutes is None:
-        bucket = store.get(node_type_norm)
-        if isinstance(bucket, MutableMapping):
-            bucket.pop(addr_norm, None)
-            if not bucket:
-                store.pop(node_type_norm, None)
-        return
-
-    validated = coerce_boost_minutes(minutes)
-    if validated is None:
-        return
-
-    bucket = store.setdefault(node_type_norm, {})
-    bucket[addr_norm] = validated
-
-
-def set_boost_temperature(
-    hass: HomeAssistant,
-    entry_id: str,
-    node_type: str,
-    addr: str,
-    temperature: float,
-) -> None:
-    """Persist ``temperature`` as the preferred boost setpoint."""
-
-    try:
-        runtime = require_runtime(hass, entry_id)
-    except LookupError:
-        return
-
-    node_type_norm = normalize_node_type(
-        node_type,
-        use_default_when_falsey=True,
-    )
-    addr_norm = normalize_node_addr(
-        addr,
-        use_default_when_falsey=True,
-    )
-    if not node_type_norm or not addr_norm:
-        return
-
-    store = _boost_temperature_store(runtime, create=True)
-    bucket = store.setdefault(node_type_norm, {})
-    if not isinstance(bucket, MutableMapping):
-        bucket = {}
-        store[node_type_norm] = bucket
-
-    bucket[addr_norm] = float(temperature)
-
-
 def resolve_boost_runtime_minutes(
-    hass: HomeAssistant,
-    entry_id: str,
-    node_type: str,
-    addr: str,
+    state: DomainState | None,
     *,
     default: int = DEFAULT_BOOST_DURATION,
 ) -> int:
-    """Return the preferred boost runtime or ``default`` when unset."""
+    """Return the device's default boost duration, or ``default`` when unknown."""
 
-    stored = get_boost_runtime_minutes(hass, entry_id, node_type, addr)
-    if stored is not None:
-        return stored
-    return default
+    minutes = coerce_boost_minutes(getattr(state, "boost_time", None))
+    return minutes if minutes in ALLOWED_BOOST_MINUTES_SET else default
 
 
 def ws_echo_expected(coordinator: Any) -> bool:

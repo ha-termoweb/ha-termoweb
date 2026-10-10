@@ -33,11 +33,7 @@ from .heater import (
     HeaterNodeBase,
     NodeRefreshFallback,
     async_backend_write,
-    get_boost_runtime_minutes,
-    get_boost_temperature,
     heater_platform_details_for_entry,
-    set_boost_runtime_minutes,
-    set_boost_temperature,
     to_device_temperature,
 )
 
@@ -49,25 +45,20 @@ _T = TypeVar("_T")
 
 async def _restore_boost_value(
     entity: RestoreEntity,
-    hass,
     *,
-    cached_lookup: Callable[[], _T | None],
     last_state_parser: Callable[[Any], _T | None],
     settings_lookup: Callable[[], _T],
-    applier: Callable[[_T | None, bool], None],
+    applier: Callable[[_T | None], None],
 ) -> None:
-    """Restore a boost preference from cache, state, or settings."""
+    """Restore the fallback boost value shown until the device reports one."""
 
     value: _T | None = None
-    if hass is not None:
-        value = cached_lookup()
-    if value is None:
-        last_state = await entity.async_get_last_state()
-        if last_state is not None:
-            value = last_state_parser(last_state.state)
+    last_state = await entity.async_get_last_state()
+    if last_state is not None:
+        value = last_state_parser(last_state.state)
     if value is None:
         value = settings_lookup()
-    applier(value, persist=hass is not None)
+    applier(value)
 
 
 async def _async_write_boost_preset(
@@ -249,20 +240,8 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
         await RestoreEntity.async_added_to_hass(self)
         self.async_on_remove(self._refresh_fallback.cancel)
 
-        hass = self.hass
         await _restore_boost_value(
             self,
-            hass,
-            cached_lookup=lambda: (
-                None
-                if hass is None
-                else get_boost_runtime_minutes(
-                    hass,
-                    self._entry_id,
-                    self._node_type,
-                    self._addr,
-                )
-            ),
             last_state_parser=self._hours_to_minutes,
             settings_lookup=self._initial_minutes_from_settings,
             applier=self._apply_minutes,
@@ -287,7 +266,7 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
         # A failed device write raises here, so the value is only kept once
         # the device accepted it.
         await _async_write_boost_preset(self, boost_time=minutes)
-        self._apply_minutes(minutes, persist=True)
+        self._apply_minutes(minutes)
         self.async_write_ha_state()
         self._refresh_fallback.schedule()
 
@@ -315,19 +294,10 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
             return candidate
         return DEFAULT_BOOST_DURATION
 
-    def _apply_minutes(self, minutes: int | None, *, persist: bool) -> None:
-        """Update the cached minutes and persist when requested."""
+    def _apply_minutes(self, minutes: int | None) -> None:
+        """Update the fallback minutes shown until the device reports boost_time."""
 
-        resolved = self._validate_minutes(minutes)
-        self._minutes = resolved
-        if persist and self.hass is not None:
-            set_boost_runtime_minutes(
-                self.hass,
-                self._entry_id,
-                self._node_type,
-                self._addr,
-                resolved,
-            )
+        self._minutes = self._validate_minutes(minutes)
 
     def _validate_minutes(self, minutes: int | None) -> int:
         """Return a supported minute value, falling back to the default."""
@@ -398,20 +368,8 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
         await RestoreEntity.async_added_to_hass(self)
         self.async_on_remove(self._refresh_fallback.cancel)
 
-        hass = self.hass
         await _restore_boost_value(
             self,
-            hass,
-            cached_lookup=lambda: (
-                None
-                if hass is None
-                else get_boost_temperature(
-                    hass,
-                    self._entry_id,
-                    self._node_type,
-                    self._addr,
-                )
-            ),
             last_state_parser=as_float,
             settings_lookup=self._initial_temperature_from_settings,
             applier=self._apply_temperature,
@@ -454,7 +412,7 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
     def native_value(self) -> float:
         """Return the preferred boost temperature."""
 
-        return self._temperature
+        return self._current_temperature()
 
     async def async_set_native_value(self, value: float) -> None:
         """Handle slider updates that adjust the boost temperature."""
@@ -468,7 +426,7 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
         # A failed device write raises here, so the value is only kept once
         # the device accepted it.
         await _async_write_boost_preset(self, boost_temp=temperature)
-        self._apply_temperature(temperature, persist=True)
+        self._apply_temperature(temperature)
         self.async_write_ha_state()
         self._refresh_fallback.schedule()
 
@@ -476,7 +434,14 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose the preferred temperature as an attribute."""
 
-        return {"preferred_temperature": self._temperature}
+        return {"preferred_temperature": self._current_temperature()}
+
+    def _current_temperature(self) -> float:
+        """Return the device boost_temp when valid, else the fallback value."""
+
+        state = self.accumulator_state()
+        device = self._validate_temperature(getattr(state, "boost_temp", None))
+        return self._temperature if device is None else device
 
     def _initial_temperature_from_settings(self) -> float:
         """Return the bootstrap value sourced from cached settings."""
@@ -493,21 +458,13 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
             return self._default_temperature()
         return self._validate_temperature(candidate) or self._default_temperature()
 
-    def _apply_temperature(self, value: float | None, *, persist: bool) -> None:
-        """Update the cached temperature and persist when requested."""
+    def _apply_temperature(self, value: float | None) -> None:
+        """Update the fallback temperature shown until the device reports one."""
 
         temperature = self._validate_temperature(value)
         if temperature is None:
             temperature = self._default_temperature()
         self._temperature = temperature
-        if persist and self.hass is not None:
-            set_boost_temperature(
-                self.hass,
-                self._entry_id,
-                self._node_type,
-                self._addr,
-                temperature,
-            )
 
     def _validate_temperature(self, value: Any) -> float | None:
         """Return a valid boost temperature within supported limits."""
@@ -630,25 +587,20 @@ class PowerLimitNumber(CoordinatorEntity, NumberEntity):
     @property
     def available(self) -> bool:
         """Return True when the power limit value is known."""
-        try:
-            runtime = require_runtime(self.hass, self._entry_id)
-            return runtime.power_limit is not None
-        except LookupError:
-            return False
+        return self.native_value is not None
 
     @property
     def native_value(self) -> int | None:
-        """Return the current power limit in watts."""
-        try:
-            runtime = require_runtime(self.hass, self._entry_id)
-            return runtime.power_limit
-        except LookupError:
-            return None
+        """Return the current power limit in watts from the domain state."""
+        return self.coordinator.domain_view.get_power_limit()
 
     async def async_set_native_value(self, value: float) -> None:
-        """Write the new power limit to the backend API."""
+        """Write the new power limit through the backend, then store it."""
         power_limit = int(value)
         runtime = require_runtime(self.hass, self._entry_id)
-        await runtime.client.set_power_limit(self._dev_id, power_limit=power_limit)
-        runtime.power_limit = power_limit
-        self.async_write_ha_state()
+        await async_backend_write(
+            "Power limit write",
+            runtime.backend.set_power_limit(self._dev_id, power_limit=power_limit),
+        )
+        # Show the value now; a WebSocket push or the next poll confirms it.
+        self.coordinator.apply_power_limit(power_limit)

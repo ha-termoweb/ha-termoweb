@@ -183,46 +183,6 @@ def test_heater_client_handles_missing_hass_data() -> None:
     assert heater._client() is None
 
 
-def test_boost_runtime_storage_roundtrip(heater_hass_data) -> None:
-    """Ensure boost runtime helpers normalise addresses and defaults."""
-
-    hass = HomeAssistant()
-    entry_id = "entry-store"
-    heater_hass_data(
-        hass,
-        entry_id,
-        "dev-store",
-        SimpleNamespace(),
-        boost_runtime={},
-    )
-
-    assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
-
-    heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", 120)
-    assert heater_module.get_boost_runtime_minutes(hass, entry_id, "ACM", " 01 ") == 120
-    assert (
-        heater_module.resolve_boost_runtime_minutes(
-            hass,
-            entry_id,
-            "ACM",
-            "01",
-        )
-        == 120
-    )
-
-    heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", None)
-    assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
-    assert (
-        heater_module.resolve_boost_runtime_minutes(
-            hass,
-            entry_id,
-            "acm",
-            "01",
-        )
-        == heater_module.DEFAULT_BOOST_DURATION
-    )
-
-
 def test_derive_boost_state_uses_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify boost metadata derivation favours the coordinator resolver."""
 
@@ -625,22 +585,6 @@ def test_coerce_boost_minutes_non_positive_values() -> None:
     assert coerce(45) == 45
 
 
-def test_boost_runtime_store_handles_non_mapping() -> None:
-    """Verify boost runtime store creation tolerates unexpected inputs."""
-
-    assert heater_module._boost_runtime_store(None, create=False) == {}
-    hass = HomeAssistant()
-    runtime = build_entry_runtime(
-        hass=hass,
-        entry_id="entry",
-        dev_id="dev",
-    )
-    assert heater_module._boost_runtime_store(runtime, create=False) == {}
-    created = heater_module._boost_runtime_store(runtime, create=True)
-    assert created == {}
-    assert runtime.boost_runtime is created
-
-
 def test_iter_nodes_metadata_uses_inventory() -> None:
     """Inventory helper should yield metadata with resolved names."""
 
@@ -716,42 +660,6 @@ def test_iter_nodes_metadata_uses_inventory_method(
     assert boost_module.supports_boost(results[0].node) is True
 
 
-def test_boost_runtime_helpers_guard_invalid_structures() -> None:
-    """Ensure get/set helpers short-circuit when data is malformed."""
-
-    hass = HomeAssistant()
-    entry_id = "entry-invalid"
-
-    # Domain data missing prevents persistence.
-    heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", 30)
-    assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
-
-    runtime = build_entry_runtime(
-        hass=hass,
-        entry_id=entry_id,
-        dev_id="dev",
-    )
-
-    # Missing identifiers or invalid minutes are ignored.
-    heater_module.set_boost_runtime_minutes(hass, entry_id, "", "01", 45)
-    heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "", 45)
-    heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", -10)
-    assert runtime.boost_runtime == {}
-
-    # Stored garbage values should not be returned.
-    runtime.boost_runtime = {"acm": {"01": "oops"}}
-    assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
-    assert (
-        heater_module.resolve_boost_runtime_minutes(
-            hass,
-            entry_id,
-            "",
-            "",
-        )
-        == heater_module.DEFAULT_BOOST_DURATION
-    )
-
-
 # ---------------------------------------------------------------------------
 # Coverage expansion: HeaterPlatformDetails properties
 # ---------------------------------------------------------------------------
@@ -786,77 +694,6 @@ def test_heater_platform_details_resolve_name() -> None:
         default_name_simple=lambda addr: f"Heater {addr}",
     )
     assert details.resolve_name("htr", "1") == "Living Room"
-
-
-# ---------------------------------------------------------------------------
-# Coverage expansion: Boost temperature storage
-# ---------------------------------------------------------------------------
-
-
-def test_boost_temperature_store_create_false() -> None:
-    """_boost_temperature_store should return empty when create=False."""
-    hass = HomeAssistant()
-    runtime = build_entry_runtime(hass=hass, entry_id="entry-t", dev_id="dev-t")
-    store = entities_heater_module._boost_temperature_store(runtime, create=False)
-    assert store == {}
-
-
-def test_boost_temperature_store_create_true() -> None:
-    """_boost_temperature_store should return runtime store when create=True."""
-    hass = HomeAssistant()
-    runtime = build_entry_runtime(hass=hass, entry_id="entry-t", dev_id="dev-t")
-    store = entities_heater_module._boost_temperature_store(runtime, create=True)
-    assert store is runtime.boost_temperature
-
-
-def test_get_boost_temperature_roundtrip() -> None:
-    """get/set boost temperature should roundtrip correctly."""
-    hass = HomeAssistant()
-    entry_id = "entry-bt"
-    runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev-bt")
-
-    assert heater_module.get_boost_temperature(hass, entry_id, "acm", "01") is None
-
-    heater_module.set_boost_temperature(hass, entry_id, "acm", "01", 25.5)
-    assert heater_module.get_boost_temperature(hass, entry_id, "ACM", " 01 ") == 25.5
-
-
-def test_get_boost_temperature_missing_runtime() -> None:
-    """get_boost_temperature should return None when runtime is absent."""
-    hass = HomeAssistant()
-    assert heater_module.get_boost_temperature(hass, "missing", "acm", "01") is None
-
-
-def test_set_boost_temperature_missing_runtime() -> None:
-    """set_boost_temperature should silently return when runtime is absent."""
-    hass = HomeAssistant()
-    heater_module.set_boost_temperature(hass, "missing", "acm", "01", 20.0)
-    assert heater_module.get_boost_temperature(hass, "missing", "acm", "01") is None
-
-
-def test_get_boost_temperature_invalid_identifiers() -> None:
-    """get_boost_temperature should return None for empty identifiers."""
-    hass = HomeAssistant()
-    runtime = build_entry_runtime(hass=hass, entry_id="entry-inv", dev_id="dev")
-    assert heater_module.get_boost_temperature(hass, "entry-inv", "", "01") is None
-    assert heater_module.get_boost_temperature(hass, "entry-inv", "acm", "") is None
-
-
-def test_set_boost_temperature_invalid_identifiers() -> None:
-    """set_boost_temperature should silently return for empty identifiers."""
-    hass = HomeAssistant()
-    runtime = build_entry_runtime(hass=hass, entry_id="entry-inv2", dev_id="dev")
-    heater_module.set_boost_temperature(hass, "entry-inv2", "", "01", 20.0)
-    heater_module.set_boost_temperature(hass, "entry-inv2", "acm", "", 20.0)
-    assert runtime.boost_temperature == {}
-
-
-def test_get_boost_temperature_non_mapping_bucket() -> None:
-    """get_boost_temperature should return None when bucket is not a mapping."""
-    hass = HomeAssistant()
-    runtime = build_entry_runtime(hass=hass, entry_id="entry-nm", dev_id="dev")
-    runtime.boost_temperature = {"acm": "not-a-dict"}  # type: ignore[assignment]
-    assert heater_module.get_boost_temperature(hass, "entry-nm", "acm", "01") is None
 
 
 # ---------------------------------------------------------------------------

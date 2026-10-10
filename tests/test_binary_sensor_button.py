@@ -691,7 +691,6 @@ def _boost_button_env(
         entry_id,
         dev_id,
         coordinator,
-        boost_runtime={"acm": {addr: 180}},
         extra={"backend": backend},
         inventory=context.inventory,
     )
@@ -705,14 +704,17 @@ def _boost_button_env(
 @pytest.mark.parametrize(
     ("acm_settings", "expected_stemp"),
     [
-        ({"boost_temp": "23.5", "stemp": "19.0", "units": "C"}, 23.5),
-        ({"stemp": "19.0", "units": "C"}, 19.0),
+        (
+            {"boost_time": 180, "boost_temp": "23.5", "stemp": "19.0", "units": "C"},
+            23.5,
+        ),
+        ({"boost_time": 180, "stemp": "19.0", "units": "C"}, 19.0),
     ],
 )
 def test_accumulator_boost_button_starts_boost_via_backend(
     heater_hass_data, acm_settings: dict[str, Any], expected_stemp: float
 ) -> None:
-    """Start uses stored minutes and device boost_temp, falling back to stemp."""
+    """Start uses device boost_time and boost_temp, falling back to stemp."""
 
     async def _run() -> None:
         backend = types.SimpleNamespace(set_acm_boost_state=AsyncMock())

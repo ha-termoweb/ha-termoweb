@@ -50,7 +50,6 @@ from .domain.state import (
 )
 from .domain.view import DomainStateView
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
-from .runtime import require_runtime
 
 _LOGGER = logging.getLogger(__name__)
 _DataT = TypeVar("_DataT")
@@ -280,6 +279,12 @@ class StateCoordinator(
         self._state_store.set_gateway_connection_state(state)
         self._publish_device_record()
 
+    def apply_power_limit(self, value: Any) -> None:
+        """Store a gateway power limit and notify listeners when it changed."""
+
+        if self._state_store.set_power_limit(value):
+            self._publish_device_record()
+
     def apply_energy_snapshot(self, snapshot: EnergySnapshot) -> None:
         """Store an energy snapshot in the domain state store."""
 
@@ -309,9 +314,6 @@ class StateCoordinator(
             "model": model,
             "connected": self.gateway_connected,
             "backend": backend,
-            "inventory": self._inventory,
-            "domain_view": self._domain_view,
-            "state_store": self._state_store,
         }
 
         return {self._dev_id: record}
@@ -849,12 +851,12 @@ class StateCoordinator(
                     rtc_now,
                 )
 
-            # Poll installation power limit for TermoWeb brands
-            if backend_capabilities(self._brand).power_limit and self._entry_id:
+            # Poll the installation power limit when the backend has one.
+            if backend_capabilities(self._brand).power_limit:
                 try:
-                    power_limit = await self.client.get_power_limit(dev_id)
-                    runtime = require_runtime(self.hass, self._entry_id)
-                    runtime.power_limit = power_limit
+                    self._state_store.set_power_limit(
+                        await self.client.get_power_limit(dev_id)
+                    )
                 except Exception:  # noqa: BLE001
                     _LOGGER.debug(
                         "Failed to poll power limit for %s",

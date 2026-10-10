@@ -367,6 +367,7 @@ class DomainStateStore:
         self._allowed: dict[NodeId, NodeId] = {}
         self._addresses_by_type: dict[NodeType, set[str]] = {}
         self._gateway_connection = GatewayConnectionState()
+        self._power_limit: int | None = None
         self._energy_snapshot: EnergySnapshot | None = None
         for node in nodes:
             if not isinstance(node, NodeId):
@@ -512,6 +513,20 @@ class DomainStateStore:
         """Return a defensive copy of the gateway connection state."""
 
         return clone_gateway_connection_state(self._gateway_connection)
+
+    def set_power_limit(self, value: Any) -> bool:
+        """Store the gateway power limit in watts and return ``True`` when changed."""
+
+        power_limit = as_int(value)
+        if power_limit is None or power_limit == self._power_limit:
+            return False
+        self._power_limit = power_limit
+        return True
+
+    def get_power_limit(self) -> int | None:
+        """Return the gateway power limit in watts when known."""
+
+        return self._power_limit
 
     def replace_state(
         self,
