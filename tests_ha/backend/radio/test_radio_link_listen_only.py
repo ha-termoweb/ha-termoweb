@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 import pytest
-from radio_fakes import NET, Q_LINE_NANOCUL, FakeGateway, FakeTime, rx_line
+from tests_ha.fakes.radio_gateway import NET, Q_LINE_NANOCUL, FakeGateway, FakeTime, rx_line
 
 from custom_components.termoweb.backend.radio import protocol as p
 from custom_components.termoweb.backend.radio.dialect import (

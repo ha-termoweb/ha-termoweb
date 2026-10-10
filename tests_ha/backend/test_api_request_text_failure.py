@@ -9,7 +9,7 @@ import aiohttp
 import pytest
 
 import custom_components.termoweb.backend.rest_client as api
-from tests.test_api import FakeSession, MockResponse
+from tests_ha.fakes.rest import FakeSession, MockResponse
 
 
 def test_request_text_failure_logs_placeholder(

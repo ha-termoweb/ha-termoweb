@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
-from fake_radio_link import POWER_REQUEST, PROGRAM_HOURLY, STATUS_SHORT
+from tests_ha.fakes.radio_link import POWER_REQUEST, PROGRAM_HOURLY, STATUS_SHORT
 
 from custom_components.termoweb.backend.radio import protocol as p
 from custom_components.termoweb.backend.radio.dialect import DIALECT_A, DIALECT_B

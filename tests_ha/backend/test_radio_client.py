@@ -8,7 +8,7 @@ import logging
 from types import SimpleNamespace
 
 import pytest
-from fake_radio_link import (
+from tests_ha.fakes.radio_link import (
     CLOCK_ACCEPTED,
     HEATER,
     NET,
@@ -332,7 +332,7 @@ async def test_status_read_failures_return_none() -> None:
 async def test_reply_from_another_node_is_ignored() -> None:
     """Only a frame from the addressed heater to this station resolves a read."""
 
-    from fake_radio_link import received
+    from tests_ha.fakes.radio_link import received
 
     client, _, _ = make_client()
     link = await client.async_connect()

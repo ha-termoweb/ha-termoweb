@@ -612,7 +612,7 @@ def test_async_setup_entry_monitor_builds_listen_only_client(
 def test_monitor_entry_sets_up_listen_only_and_unloads(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from fake_radio_link import FakeRadioLink
+    from tests_ha.fakes.radio_link import FakeRadioLink
 
     radio_client = importlib.import_module(
         "custom_components.termoweb.backend.radio_client"

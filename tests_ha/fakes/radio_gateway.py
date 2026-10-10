@@ -5,7 +5,7 @@ Construct these inside a running event loop (the StreamReader needs one).
 
 from __future__ import annotations
 
-from fake_radio_link import build_ack
+from tests_ha.fakes.radio_link import build_ack
 
 import asyncio
 from collections import deque

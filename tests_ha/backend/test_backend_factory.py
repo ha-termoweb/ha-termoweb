@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 from typing import Any
 
-from custom_components.termoweb.backend import create_backend
-from custom_components.termoweb.backend import termoweb as termoweb_backend
-from custom_components.termoweb.const import DOMAIN
-from conftest import build_entry_runtime
+from custom_components.termoweb.backend import (
+    create_backend,
+    termoweb as termoweb_backend,
+)
 from custom_components.termoweb.backend.ducaheat import DucaheatBackend
 from custom_components.termoweb.const import BRAND_DUCAHEAT, BRAND_TEVOLVE
+from tests_ha.fakes.runtime import build_entry_runtime
 
 
 class DummyHttpClient:
@@ -94,28 +94,19 @@ def test_create_backend_returns_tevolve_backend() -> None:
     assert backend.client is client
 
 
-def test_termoweb_backend_creates_ws_client() -> None:
+async def test_termoweb_backend_creates_ws_client(hass) -> None:
     client = DummyHttpClient()
     backend = termoweb_backend.TermoWebBackend(brand="termoweb", client=client)
     coordinator = object()
-    loop = asyncio.new_event_loop()
-    try:
-        fake_hass = SimpleNamespace(loop=loop, data={DOMAIN: {}})
-        build_entry_runtime(
-            hass=fake_hass,
-            entry_id="entry123",
-            dev_id="device456",
-        )
-        inventory = object()
-        ws_client = backend.create_ws_client(
-            fake_hass,
-            entry_id="entry123",
-            dev_id="device456",
-            coordinator=coordinator,
-            inventory=inventory,
-        )
-    finally:
-        loop.close()
+    build_entry_runtime(hass=hass, entry_id="entry123", dev_id="device456")
+    inventory = object()
+    ws_client = backend.create_ws_client(
+        hass,
+        entry_id="entry123",
+        dev_id="device456",
+        coordinator=coordinator,
+        inventory=inventory,
+    )
 
     assert isinstance(ws_client, termoweb_backend.TermoWebWSClient)
     assert ws_client.dev_id == "device456"

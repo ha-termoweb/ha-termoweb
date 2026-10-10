@@ -6,7 +6,7 @@ import sys
 import types
 
 import pytest
-from radio.radio_fakes import NET, FakeGateway, FakeTime
+from tests_ha.fakes.radio_gateway import NET, FakeGateway, FakeTime
 
 from custom_components.termoweb.backend import factory
 from custom_components.termoweb.backend.radio import DIALECT_A, DIALECT_B, discovery

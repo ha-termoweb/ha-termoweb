@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from fake_radio_link import build_ack
+from tests_ha.fakes.radio_link import build_ack
 
 import asyncio
 import json
 import random
 
 import pytest
-from radio_fakes import NET, FakeGateway, FakeTime
+from tests_ha.fakes.radio_gateway import NET, FakeGateway, FakeTime
 
 from custom_components.termoweb.backend.radio import link as link_mod, survey as s
 from custom_components.termoweb.backend.radio.dialect import (

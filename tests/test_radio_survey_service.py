@@ -13,7 +13,7 @@ from conftest import _install_stubs, build_entry_runtime
 
 _install_stubs()
 
-from fake_radio_link import FakeRadioLink, gateway_info
+from tests_ha.fakes.radio_link import FakeRadioLink, gateway_info
 
 from custom_components.termoweb import radio_survey
 from custom_components.termoweb.backend.radio.link import RadioLinkError

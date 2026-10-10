@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from conftest import build_entry_runtime, listen_ws_status
-from fake_radio_link import (
+from tests_ha.fakes.radio_link import (
     CLOCK_ACCEPTED,
     HEATER,
     NET,
