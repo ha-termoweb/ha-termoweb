@@ -13,7 +13,7 @@ custom_components/termoweb/__init__.py :: async_setup_entry
 custom_components/termoweb/__init__.py :: async_setup_entry._async_handle_hass_stop
     Stop background activity gracefully when Home Assistant stops.
 custom_components/termoweb/__init__.py :: async_setup_entry._start_ws
-    Ensure a websocket client exists and is running for ``dev_id``.
+    Create and start the websocket client for ``dev_id`` (once per setup).
 custom_components/termoweb/__init__.py :: async_setup_entry._recalc_poll_interval
     Suspend REST polling when websocket trackers are healthy and fresh.
 custom_components/termoweb/__init__.py :: async_setup_entry._on_ws_status
@@ -964,12 +964,8 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._publish_to_
     Update the canonical state store with ``snapshot``.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.async_set_updated_data
     Store ``data`` in the domain state before notifying listeners.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._node_id_for
-    Return a canonical node identifier for energy tracking.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._iter_energy_targets
-    Yield normalised energy node targets from ``inventory``.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._targets_by_type
-    Return energy node addresses grouped by canonical type.
+    Return the inventory's energy sample addresses grouped by node type.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._prefill_energy_buckets
     Seed energy and power buckets from cached coordinator state.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._build_snapshot
@@ -987,7 +983,7 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._async_hourl
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._should_skip_poll
     Return True when websocket pushes keep energy data fresh.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._ws_margin_seconds
-    Return the buffer to wait after the websocket lease expires.
+    Return the buffer to wait after a positive websocket lease expires.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._extract_sample_point
     Extract ``(timestamp, counter)`` from websocket sample payloads.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.handle_ws_samples
@@ -1006,8 +1002,6 @@ custom_components/termoweb/domain/energy.py :: EnergySnapshot.iter_metrics
     Yield stored metrics keyed by node identifier.
 custom_components/termoweb/domain/energy.py :: build_empty_snapshot
     Return an empty snapshot placeholder for ``dev_id``.
-custom_components/termoweb/domain/energy.py :: coerce_snapshot
-    Return ``candidate`` when it behaves like an :class:`EnergySnapshot`.
 custom_components/termoweb/domain/ids.py :: NodeType.coerce
     Return the NodeType for ``value`` (case-insensitive, stripped) or None.
 custom_components/termoweb/domain/ids.py :: NodeId.__post_init__
@@ -1590,8 +1584,6 @@ custom_components/termoweb/inventory.py :: Inventory._ensure_nodes_by_type_cache
     Return cached node groupings keyed by normalised type.
 custom_components/termoweb/inventory.py :: Inventory.nodes_by_type
     Return mapping of node type to node instances.
-custom_components/termoweb/inventory.py :: Inventory.heater_nodes
-    Return tuple of nodes belonging to heater-compatible types.
 custom_components/termoweb/inventory.py :: Inventory.explicit_heater_names
     Return node type/address pairs that have explicit user-defined names.
 custom_components/termoweb/inventory.py :: Inventory.heater_address_map
@@ -1737,7 +1729,7 @@ custom_components/termoweb/runtime.py :: require_runtime
 custom_components/termoweb/runtime.py :: loaded_runtimes
     Return the runtimes of every running TermoWeb entry.
 custom_components/termoweb/services/energy_history.py :: async_register_import_energy_history_service
-    Register the import_energy_history service if it is missing.
+    Register the import_energy_history service (once, from async_setup).
 custom_components/termoweb/services/energy_history.py :: async_register_import_energy_history_service._service_import_energy_history
     Import energy history for every loaded entry whose backend supports it.
 custom_components/termoweb/services/radio_capture.py :: dialects_listened

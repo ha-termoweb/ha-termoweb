@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any
 
 from .ids import NodeId, NodeType
 
@@ -49,20 +48,12 @@ class EnergySnapshot:
         yield from self.metrics.items()
 
 
-def build_empty_snapshot(
-    dev_id: str, *, ws_deadline: float | None = None
-) -> EnergySnapshot:
+def build_empty_snapshot(dev_id: str) -> EnergySnapshot:
     """Return an empty snapshot placeholder for ``dev_id``."""
 
     return EnergySnapshot(
         dev_id=dev_id,
         metrics={},
         updated_at=0.0,
-        ws_deadline=ws_deadline,
+        ws_deadline=None,
     )
-
-
-def coerce_snapshot(candidate: Any) -> EnergySnapshot | None:
-    """Return ``candidate`` when it behaves like an :class:`EnergySnapshot`."""
-
-    return candidate if isinstance(candidate, EnergySnapshot) else None

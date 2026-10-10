@@ -114,28 +114,6 @@ def test_inventory_nodes_by_type_caches_results(heater_inventory: Inventory) -> 
 def test_inventory_heater_metadata_properties(heater_inventory: Inventory) -> None:
     """Heater-specific properties should expose canonical metadata."""
 
-    nodes = heater_inventory.nodes
-    expected_nodes = tuple(
-        node
-        for node in nodes
-        if getattr(node, "type", "").strip().lower() in {"htr", "acm", "thm"}
-    )
-    actual_pairs = {
-        (
-            getattr(node, "type", "").strip().lower(),
-            str(getattr(node, "addr", "")).strip(),
-        )
-        for node in heater_inventory.heater_nodes
-    }
-    expected_pairs = {
-        (
-            getattr(node, "type", "").strip().lower(),
-            str(getattr(node, "addr", "")).strip(),
-        )
-        for node in expected_nodes
-    }
-    assert actual_pairs == expected_pairs
-
     assert heater_inventory.explicit_heater_names == {
         ("htr", "1"),
         ("acm", "2"),

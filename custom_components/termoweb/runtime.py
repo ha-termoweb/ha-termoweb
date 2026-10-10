@@ -43,7 +43,6 @@ class EntryRuntime:
     energy_import_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_radio_survey: dict[str, Any] | None = None
     last_radio_capture: dict[str, Any] | None = None
-    recalc_poll: Callable[[], None] | None = None
     unsub_ws_status: Callable[[], None] | None = None
     _shutdown_complete: bool = False
 
