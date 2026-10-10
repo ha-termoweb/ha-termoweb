@@ -8,7 +8,7 @@ from datetime import timedelta
 from aiohttp import ClientError
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -188,16 +188,24 @@ async def test_failed_first_refresh_cleans_up(
 
 @pytest.mark.xfail(
     strict=True,
-    reason="The gateway device names a 'site' via_device that is never "
-    "registered; HA warns this stops working in 2025.12 (new finding)",
+    reason="The gateway device names a 'site' via_device that is not registered "
+    "when the gateway is, so the link is dropped (HA logs it; still not an "
+    "error in 2026.10)",
 )
 async def test_setup_registers_no_dangling_via_device(
-    hass: HomeAssistant,
-    cloud: FakeCloud,
-    config_entry: MockConfigEntry,
-    caplog: pytest.LogCaptureFixture,
+    hass: HomeAssistant, cloud: FakeCloud, config_entry: MockConfigEntry
 ) -> None:
-    """Every device's via_device exists in the device registry."""
+    """The gateway device is linked to the site device it names as via_device."""
     assert await _setup(hass, config_entry)
 
-    assert "non existing `via_device`" not in caplog.text
+    # HA reports a dangling via_device only once per call site, and since
+    # 2026.10 the via_device deprecation notice takes that slot, so check the
+    # registry link itself rather than the log.
+    dev_reg = dr.async_get(hass)
+    dev_id = hass.data[DOMAIN][config_entry.entry_id].dev_id
+    entry_id = config_entry.entry_id
+    gateway = dev_reg.async_get_device_by_identifier((DOMAIN, dev_id), entry_id)
+    site = dev_reg.async_get_device_by_identifier((DOMAIN, dev_id, "site"), entry_id)
+    assert gateway is not None
+    assert site is not None
+    assert gateway.via_device_id == site.id

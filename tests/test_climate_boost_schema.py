@@ -1,21 +1,21 @@
-"""Boost-minutes schemas evaluated with the real voluptuous package.
+"""Boost-minutes schemas evaluated with Home Assistant's real validation engine.
 
 ``conftest._install_stubs`` replaces ``voluptuous`` with a minimal stub, so the
 schema objects that ``climate.async_setup_entry`` registers are stub instances.
-These tests import the real voluptuous from site-packages (temporarily swapping
-it into ``sys.modules``), rebuild the registered schema tree with the real
-validators and validate against it, so real ``Range``/``In``/``Coerce``
-semantics decide what is accepted.
+Home Assistant aliases ``voluptuous`` to probatio's shim; these tests load that
+shim (temporarily swapping it into ``sys.modules``), rebuild the registered
+schema tree with the real validators and validate against it, so real
+``Range``/``In``/``Coerce`` semantics decide what is accepted.
 """
 
 from __future__ import annotations
 
-import importlib
 import sys
 import types
 from typing import Any
 from unittest.mock import AsyncMock
 
+from probatio.compat import install_as_voluptuous
 import pytest
 
 from conftest import (
@@ -36,7 +36,7 @@ from homeassistant.helpers.entity_platform import EntityPlatform
 
 
 def _load_real_voluptuous() -> types.ModuleType:
-    """Import the installed voluptuous package without disturbing the stub."""
+    """Load HA's voluptuous (probatio's shim) without disturbing the stub."""
 
     def _owned(name: str) -> bool:
         return name == "voluptuous" or name.startswith("voluptuous.")
@@ -45,7 +45,8 @@ def _load_real_voluptuous() -> types.ModuleType:
     for name in saved:
         del sys.modules[name]
     try:
-        real = importlib.import_module("voluptuous")
+        install_as_voluptuous()
+        real = sys.modules["voluptuous"]
     finally:
         for name in [name for name in sys.modules if _owned(name)]:
             del sys.modules[name]

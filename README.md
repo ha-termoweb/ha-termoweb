@@ -1,12 +1,12 @@
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
-![Home Assistant >=2025.1.0](https://img.shields.io/badge/Home%20Assistant-%3E%3D2025.1.0-41BDF5.svg)
+![Home Assistant >=2026.10.0](https://img.shields.io/badge/Home%20Assistant-%3E%3D2026.10.0-41BDF5.svg)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/ha-termoweb/ha-termoweb)](https://github.com/ha-termoweb/ha-termoweb/releases)
 
 [![Tests](https://github.com/ha-termoweb/ha-termoweb/actions/workflows/tests.yml/badge.svg)](https://github.com/ha-termoweb/ha-termoweb/actions/workflows/tests.yml)
 ![Coverage](docs/badges/coverage.svg)
-![Python >=3.13.2](https://img.shields.io/badge/Python-%3E%3D3.13.2-blue.svg)
+![Python >=3.14.2](https://img.shields.io/badge/Python-%3E%3D3.14.2-blue.svg)
 [![Package manager: uv](https://img.shields.io/badge/Package%20manager-uv-5F45BA?logo=astral&logoColor=white)](https://docs.astral.sh/uv/)
 [![Code style: Ruff](https://img.shields.io/badge/Code%20style-Ruff-4B32C3.svg)](https://docs.astral.sh/ruff/)
 

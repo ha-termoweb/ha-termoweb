@@ -29,6 +29,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import EnergyConverter
 
 from .backend.rest_client import BackendAuthError, BackendRateLimitError
 from .const import DOMAIN
@@ -215,14 +216,14 @@ async def _async_import_window(
 ) -> None:
     """Import the node's pending window chunk by chunk, then fix later sums."""
     window = node["window"]
-    # Matches the sensor platform's own metadata. ``unit_class`` joins this once
-    # the pinned HA is >= 2025.10; HA 2025.9's StatisticsMeta rejects the key.
+    # Matches the sensor platform's own metadata.
     metadata = {
         "has_sum": True,
         "mean_type": StatisticMeanType.NONE,
         "name": None,
         "source": "recorder",
         "statistic_id": summary.entity_id,
+        "unit_class": EnergyConverter.UNIT_CLASS,
         "unit_of_measurement": _UNIT,
     }
     recorder = get_instance(hass)

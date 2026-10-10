@@ -23,8 +23,10 @@ jobs:
         with:
           enable-cache: true
 
+      # Latest 3.14 patch: early 3.14 releases break mock autospec on functions
+      # with deferred annotations, which the real recorder test fixture uses.
       - name: Install Python requirement
-        run: uv python install 3.13.2
+        run: uv python install 3.14
 
       - name: Install locked project dependencies
         run: uv sync --locked --extra test
