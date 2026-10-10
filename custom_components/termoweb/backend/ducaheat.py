@@ -480,8 +480,6 @@ class DucaheatRESTClient(RESTClient):
                 settings_map = section_map["settings"]
                 status_map = section_map["status"]
                 for addr, status_payload in status_map.items():
-                    if not isinstance(status_payload, Mapping):
-                        continue
                     target_settings = settings_map.get(addr)
                     if not isinstance(target_settings, dict):
                         continue
@@ -496,12 +494,9 @@ class DucaheatRESTClient(RESTClient):
     def _merge_accumulator_charge_metadata(
         self,
         target: dict[str, Any],
-        source: Mapping[str, typing.Any] | None,
+        source: Mapping[str, typing.Any],
     ) -> None:
         """Copy accumulator charge metadata from ``source`` into ``target``."""
-
-        if not isinstance(source, Mapping):
-            return
 
         charging_value = as_bool(source.get("charging"))
         if charging_value is not None:
@@ -534,13 +529,10 @@ class DucaheatRESTClient(RESTClient):
             )
         except ClientResponseError as err:
             if 400 <= err.status < 500:
-                message = getattr(err, "message", None)
-                if not message and err.args:
-                    message = str(err.args[0])
                 raise DucaheatRequestError(
                     status=err.status,
                     path=path,
-                    body=str(message or ""),
+                    body=err.message,
                 ) from err
             raise
 
@@ -568,13 +560,10 @@ class DucaheatRESTClient(RESTClient):
             )
         except ClientResponseError as err:
             if 400 <= err.status < 500:
-                message = getattr(err, "message", None)
-                if not message and err.args:
-                    message = str(err.args[0])
                 raise DucaheatRequestError(
                     status=err.status,
                     path=path,
-                    body=str(message or ""),
+                    body=err.message,
                 ) from err
             raise
 

@@ -259,13 +259,9 @@ class DucaheatStatusSegment(DucaheatReadModel):
         if value is None:
             return None
         try:
-            minutes = int(value)
-        except (TypeError, ValueError):
-            return None
-        try:
-            return validate_boost_minutes(minutes)
+            return validate_boost_minutes(value)
         except ValueError:
-            return minutes
+            return value
 
     @field_validator(
         "boost_remaining",
@@ -333,13 +329,9 @@ class DucaheatExtraOptions(DucaheatReadModel):
         if value is None:
             return None
         try:
-            minutes = int(value)
-        except (TypeError, ValueError):
-            return None
-        try:
-            return validate_boost_minutes(minutes)
+            return validate_boost_minutes(value)
         except ValueError:
-            return minutes
+            return value
 
     @field_validator("boost_temp", mode="before")
     @classmethod
@@ -403,13 +395,9 @@ class DucaheatSetupSegment(DucaheatReadModel):
         if value is None:
             return None
         try:
-            minutes = int(value)
-        except (TypeError, ValueError):
-            return None
-        try:
-            return validate_boost_minutes(minutes)
+            return validate_boost_minutes(value)
         except ValueError:
-            return minutes
+            return value
 
     @field_validator("boost_temp", mode="before")
     @classmethod
@@ -659,17 +647,14 @@ def _merge_boost_metadata(
         value: Any,
         *,
         prefer: bool | None = None,
-        allow_none: bool = False,
     ) -> None:
         """Assign a metadata value while respecting preference rules."""
 
-        if value is None and not allow_none:
+        if value is None:
             return
 
         prefer_flag = prefer_existing if prefer is None else prefer
         if prefer_flag and key in target and target[key] is not None:
-            return
-        if prefer_flag and key in target and target[key] is None and value is None:
             return
 
         target[key] = value

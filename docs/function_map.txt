@@ -580,8 +580,6 @@ custom_components/termoweb/codecs/ducaheat_codec.py :: extract_prog_days
     Return the ``"0"``..``"6"`` day slot lists from a GET ``prog`` section.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_program_command
     Encode a 168-slot program, echoing the slot resolution of ``current`` days.
-custom_components/termoweb/codecs/ducaheat_codec.py :: encode_extra_options_command
-    Encode an extra options command for the setup endpoint.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_boost_command
     Encode accumulator boost commands for the boost endpoint.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_lock_command
@@ -591,11 +589,11 @@ custom_components/termoweb/codecs/ducaheat_models.py :: _validate_prog_slots
 custom_components/termoweb/codecs/ducaheat_models.py :: _normalise_prog
     Normalise weekly programs to a mapping keyed by day index.
 custom_components/termoweb/codecs/ducaheat_models.py :: StatusWritePayload._normalise_mode
-    Lowercase mode strings when provided.
+    Lowercase mode strings.
 custom_components/termoweb/codecs/ducaheat_models.py :: StatusWritePayload._format_temps
     Validate and format temperature strings.
 custom_components/termoweb/codecs/ducaheat_models.py :: StatusWritePayload._clean_units
-    Ensure units are uppercase when provided.
+    Ensure units are uppercase.
 custom_components/termoweb/codecs/ducaheat_models.py :: StatusWritePayload._validate_boost_time
     Clamp boost_time to supported options.
 custom_components/termoweb/codecs/ducaheat_models.py :: ModeWritePayload._normalise_mode
@@ -604,12 +602,6 @@ custom_components/termoweb/codecs/ducaheat_models.py :: ModeWritePayload._valida
     Validate boost duration values.
 custom_components/termoweb/codecs/ducaheat_models.py :: ProgramWritePayload._clean_prog
     Normalise incoming program shapes.
-custom_components/termoweb/codecs/ducaheat_models.py :: ExtraOptionsPayload._validate_boost_time
-    Validate boost duration values.
-custom_components/termoweb/codecs/ducaheat_models.py :: ExtraOptionsPayload._format_boost_temp
-    Format boost temperature strings.
-custom_components/termoweb/codecs/ducaheat_models.py :: SetupPayload._require_options
-    Ensure at least one setup field is provided.
 custom_components/termoweb/codecs/ducaheat_models.py :: BoostPayload._validate_boost_time
     Validate boost duration values.
 custom_components/termoweb/codecs/ducaheat_models.py :: BoostPayload._format_boost_temp
@@ -713,7 +705,7 @@ custom_components/termoweb/codecs/termoweb_codec.py :: decode_node_settings
 custom_components/termoweb/codecs/termoweb_codec.py :: decode_samples
     Normalise samples payloads into {"t", "counter"} lists with second timestamps.
 custom_components/termoweb/codecs/termoweb_models.py :: NodeSummary._stringify_numeric
-    Convert numeric addresses to strings for consistency.
+    Convert the integer wire addresses to strings for consistency.
 custom_components/termoweb/codecs/termoweb_models.py :: normalise_prog
     Coerce program values to integers when possible without raising.
 custom_components/termoweb/codecs/termoweb_models.py :: normalise_ptemp
@@ -736,12 +728,6 @@ custom_components/termoweb/codecs/termoweb_models.py :: ThermostatSettingsPayloa
     Coerce program values to integers when possible without raising.
 custom_components/termoweb/codecs/termoweb_models.py :: ThermostatSettingsPayload._normalise_ptemp
     Format preset temperatures without altering the original length.
-custom_components/termoweb/codecs/termoweb_models.py :: NodeSettingsWritePayload._normalise_mode
-    Lower-case mode strings when provided.
-custom_components/termoweb/codecs/termoweb_models.py :: NodeSettingsWritePayload._normalise_units
-    Upper-case temperature unit identifiers.
-custom_components/termoweb/codecs/termoweb_models.py :: AcmBoostWritePayload._normalise_units
-    Upper-case temperature units for boost writes.
 custom_components/termoweb/config_flow.py :: _get_version
     Read integration version from manifest (DRY).
 custom_components/termoweb/config_flow.py :: _login_schema

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from custom_components.termoweb.boost import validate_boost_minutes
 from custom_components.termoweb.codecs.common import format_temperature, validate_units
@@ -30,29 +30,23 @@ class StatusWritePayload(DucaheatModel):
 
     @field_validator("mode")
     @classmethod
-    def _normalise_mode(cls, value: str | None) -> str | None:
-        """Lowercase mode strings when provided."""
+    def _normalise_mode(cls, value: str) -> str:
+        """Lowercase mode strings."""
 
-        if value is None:
-            return None
-        return str(value).lower()
+        return value.lower()
 
     @field_validator("stemp", "ice_temp", "eco_temp", "comf_temp", mode="before")
     @classmethod
-    def _format_temps(cls, value: Any) -> str | None:
+    def _format_temps(cls, value: Any) -> str:
         """Validate and format temperature strings."""
 
-        if value is None:
-            return None
         return format_temperature(value)
 
     @field_validator("units")
     @classmethod
-    def _clean_units(cls, value: str | None) -> str | None:
-        """Ensure units are uppercase when provided."""
+    def _clean_units(cls, value: str) -> str:
+        """Ensure units are uppercase."""
 
-        if value is None:
-            return None
         return validate_units(value, trim=True)
 
     @field_validator("boost_time")
@@ -82,50 +76,6 @@ class ModeWritePayload(DucaheatModel):
         """Validate boost duration values."""
 
         return validate_boost_minutes(value)
-
-
-class ExtraOptionsPayload(DucaheatModel):
-    """Setup payload used for extra options such as default boost settings."""
-
-    boost_time: int | None = None
-    boost_temp: str | None = None
-
-    @field_validator("boost_time")
-    @classmethod
-    def _validate_boost_time(cls, value: int | None) -> int | None:
-        """Validate boost duration values."""
-
-        return validate_boost_minutes(value)
-
-    @field_validator("boost_temp", mode="before")
-    @classmethod
-    def _format_boost_temp(cls, value: Any) -> str | None:
-        """Format boost temperature strings."""
-
-        if value is None:
-            return None
-        return format_temperature(value)
-
-
-class SetupPayload(DucaheatModel):
-    """Wrapper payload for setup writes."""
-
-    extra_options: ExtraOptionsPayload | None = None
-
-    @model_validator(mode="after")
-    def _require_options(self) -> SetupPayload:
-        """Ensure at least one setup field is provided."""
-
-        if self.extra_options is None:
-            msg = "extra_options must be provided for setup writes"
-            raise ValueError(msg)
-        if (
-            self.extra_options.boost_time is None
-            and self.extra_options.boost_temp is None
-        ):
-            msg = "extra_options must include boost_time or boost_temp"
-            raise ValueError(msg)
-        return self
 
 
 class BoostPayload(DucaheatModel):
@@ -176,10 +126,8 @@ class PriorityWritePayload(DucaheatModel):
 
 __all__ = [
     "BoostPayload",
-    "ExtraOptionsPayload",
     "LockWritePayload",
     "ModeWritePayload",
     "PriorityWritePayload",
-    "SetupPayload",
     "StatusWritePayload",
 ]
