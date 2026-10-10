@@ -748,10 +748,7 @@ class _WSCommon(_WSStatusMixin):
     async def _throttle_connection_attempt(self) -> None:
         """Apply a defensive rate limit before dialing the backend."""
 
-        limiter = getattr(self, "_connect_limiter", None)
-        wait = getattr(limiter, "wait_for_slot", None)
-        if callable(wait):
-            await wait()
+        await self._connect_limiter.wait_for_slot()
 
     def _ensure_type_bucket(
         self,
