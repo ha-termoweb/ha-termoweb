@@ -136,14 +136,18 @@ async def test_boost_duration_writes_boost_time(
     assert hass.states.get(ACM).attributes["preferred_boost_minutes"] == 180
 
 
+@pytest.mark.parametrize("value", [1.01, float("nan")], ids=["off-step", "nan"])
 async def test_boost_duration_rejects_unsupported_value(
-    hass: HomeAssistant, extra_options: AsyncMock, config_entry: MockConfigEntry
+    hass: HomeAssistant,
+    extra_options: AsyncMock,
+    config_entry: MockConfigEntry,
+    value: float,
 ) -> None:
     """A slider value that is no allowed boost duration is refused unwritten."""
     await _setup(hass, config_entry)
 
     with pytest.raises(ServiceValidationError, match="Invalid boost duration"):
-        await _set(hass, BOOST_DURATION, 1.01)
+        await _set(hass, BOOST_DURATION, value)
 
     extra_options.assert_not_awaited()
 
@@ -204,6 +208,20 @@ async def test_boost_preset_restores_last_state_without_device_value(
     await _setup(hass, config_entry)
 
     assert float(hass.states.get(entity_id).state) == expected
+
+
+async def test_boost_duration_ignores_an_unavailable_last_state(
+    hass: HomeAssistant, cloud: FakeCloud, config_entry: MockConfigEntry
+) -> None:
+    """A restored "unavailable" is no duration: the default is shown instead."""
+    settings = {k: v for k, v in ACM_SETTINGS.items() if k != "boost_time"}
+    _serve_accumulator(cloud, settings)
+    mock_restore_cache(hass, [State(BOOST_DURATION, STATE_UNAVAILABLE)])
+
+    await _setup(hass, config_entry)
+
+    assert float(hass.states.get(BOOST_DURATION).state) == 1.0
+    assert hass.states.get(BOOST_DURATION).attributes["preferred_minutes"] == 60
 
 
 async def test_boost_temperature_uses_fahrenheit_device_units(

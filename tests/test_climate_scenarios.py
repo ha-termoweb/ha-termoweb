@@ -7,7 +7,7 @@ from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from homeassistant.components.climate import HVACMode
+from homeassistant.components.climate import ATTR_PRESET_MODE, HVACMode
 from homeassistant.const import ATTR_ENTITY_ID, ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant
 import pytest
@@ -18,6 +18,7 @@ from custom_components.termoweb import (
     entity as entity_module,
 )
 from custom_components.termoweb.backend.rest_client import RESTClient
+from custom_components.termoweb.const import DOMAIN
 
 from tests.fakes.cloud import FakeCloud
 
@@ -142,3 +143,92 @@ async def test_auto_right_after_new_setpoint_selects_auto(
     home.settings_writes.assert_awaited_once()
     assert home.last_settings_write()["mode"] == "auto"
     assert hass.states.get(HTR).state == HVACMode.AUTO
+
+
+async def test_new_setpoint_then_heat_is_one_manual_write(
+    hass: HomeAssistant, home: FakeHome, config_entry: MockConfigEntry
+) -> None:
+    """A setpoint and Heat chosen together reach the device as one manual write."""
+    home.settings[("htr", "1")]["mode"] = "auto"
+    await _setup(hass, config_entry)
+
+    await _service(hass, "climate", "set_temperature", HTR, **{ATTR_TEMPERATURE: 23})
+    await _service(hass, "climate", "set_hvac_mode", HTR, hvac_mode=HVACMode.HEAT)
+    await _settle(hass)
+
+    home.settings_writes.assert_awaited_once()
+    assert home.last_settings_write()["mode"] == "manual"
+    assert home.last_settings_write()["stemp"] == 23.0
+    state = hass.states.get(HTR)
+    assert state.state == HVACMode.HEAT
+    assert state.attributes[ATTR_TEMPERATURE] == 23.0
+
+
+async def test_heat_without_a_known_setpoint_sends_only_the_mode(
+    hass: HomeAssistant, home: FakeHome, config_entry: MockConfigEntry
+) -> None:
+    """Heat on a heater that never reported a setpoint does not invent one."""
+    heater = home.settings[("htr", "1")]
+    heater["mode"] = "off"
+    del heater["stemp"]
+    await _setup(hass, config_entry)
+
+    await _service(hass, "climate", "set_hvac_mode", HTR, hvac_mode=HVACMode.HEAT)
+    await _settle(hass)
+
+    home.settings_writes.assert_awaited_once()
+    assert home.last_settings_write()["mode"] == "manual"
+    assert home.last_settings_write()["stemp"] is None
+    assert hass.states.get(HTR).state == HVACMode.HEAT
+
+
+async def test_turning_off_twice_still_resumes_the_previous_mode(
+    hass: HomeAssistant, home: FakeHome, config_entry: MockConfigEntry
+) -> None:
+    """A second turn_off does not make turn_on forget the mode to go back to."""
+    await _setup(hass, config_entry)
+
+    for _ in range(2):
+        await _service(hass, "climate", "turn_off", HTR)
+        await _settle(hass)
+    assert hass.states.get(HTR).state == HVACMode.OFF
+
+    await _service(hass, "climate", "turn_on", HTR)
+    await _settle(hass)
+
+    assert home.last_settings_write()["mode"] == "manual"
+    assert hass.states.get(HTR).state == HVACMode.HEAT
+
+
+async def test_accumulator_preset_temperature_only_keeps_the_duration(
+    hass: HomeAssistant, home: FakeHome, config_entry: MockConfigEntry
+) -> None:
+    """set_acm_preset with just a temperature leaves the boost duration alone."""
+    await _setup(hass, config_entry)
+
+    await _service(hass, DOMAIN, "set_acm_preset", ACM, temperature=25)
+    await _settle(hass)
+
+    home.preset_writes.assert_awaited_once()
+    assert home.preset_writes.await_args.kwargs == {
+        "boost_time": None,
+        "boost_temp": 25.0,
+    }
+    assert hass.states.get(ACM).attributes["preferred_boost_minutes"] == 120
+
+
+async def test_cancel_boost_on_an_idle_accumulator_keeps_its_mode(
+    hass: HomeAssistant, home: FakeHome, config_entry: MockConfigEntry
+) -> None:
+    """Cancelling when no boost runs still tells the device and leaves Auto on."""
+    await _setup(hass, config_entry)
+
+    await _service(hass, DOMAIN, "cancel_boost", ACM)
+    await _settle(hass)
+
+    home.boost_writes.assert_awaited_once()
+    assert home.boost_writes.await_args.kwargs["boost"] is False
+    state = hass.states.get(ACM)
+    assert state.state == HVACMode.AUTO
+    assert state.attributes[ATTR_PRESET_MODE] == "none"
+    assert state.attributes["boost_active"] is False
