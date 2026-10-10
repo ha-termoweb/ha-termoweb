@@ -51,7 +51,7 @@ class RadioMonitor(RadioListener):
         dev_id: str,
         client: RadioClient,
         coordinator: Any,
-        inventory: Inventory | None,
+        inventory: Inventory,
         window_s: float = MONITOR_WINDOW_S,
         **kwargs: Any,
     ) -> None:
@@ -119,7 +119,7 @@ class RadioMonitorBackend(Backend):
         dev_id: str,
         coordinator: Any,
         *,
-        inventory: Inventory | None = None,
+        inventory: Inventory,
     ) -> WsClientProto:
         """Return the frame-counting monitor in the websocket client's role."""
 

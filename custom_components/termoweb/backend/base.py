@@ -298,7 +298,7 @@ class Backend(ABC):
         dev_id: str,
         coordinator: Any,
         *,
-        inventory: Inventory | None = None,
+        inventory: Inventory,
     ) -> WsClientProto:
         """Create a websocket client for the given device."""
 

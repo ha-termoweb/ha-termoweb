@@ -43,7 +43,6 @@ from custom_components.termoweb.inventory import (
 )
 from custom_components.termoweb.runtime import require_runtime
 
-from .sanitize import mask_identifier
 from .ws_health import WsHealthTracker
 
 _LOGGER = logging.getLogger(__name__)
@@ -643,10 +642,10 @@ class _WSCommon(_WSStatusMixin):
     _runner: Callable[[], Awaitable[None]]
     _brand: str = BRAND_TERMOWEB
 
-    def __init__(self, *, inventory: Inventory | None = None) -> None:
+    def __init__(self, *, inventory: Inventory) -> None:
         """Initialise shared websocket state."""
 
-        self._inventory: Inventory | None = inventory
+        self._inventory: Inventory = inventory
         self._connect_limiter = ConnectionRateLimiter()
         self._payload_idle_window: float = 240.0
         self._subscription_refresh_lock = asyncio.Lock()
@@ -755,16 +754,8 @@ class _WSCommon(_WSStatusMixin):
         if not isinstance(nodes, Iterable):
             return None
 
-        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
-        if inventory is None:
-            _LOGGER.error(
-                "WS: missing inventory for nodes list translation on %s",
-                mask_identifier(self.dev_id),
-            )
-            return None
-
         snapshot: dict[str, Any] = {}
-        for node_type, addr, entry in inventory.iter_known_entries(nodes):
+        for node_type, addr, entry in self._inventory.iter_known_entries(nodes):
             type_bucket = snapshot.setdefault(node_type, {})
             for key in _NODE_TYPE_LEVEL_KEYS:
                 if key in entry and key not in type_bucket:
@@ -795,20 +786,9 @@ class _WSCommon(_WSStatusMixin):
         return translate_path_update(payload)
 
     def _nodes_to_deltas(
-        self,
-        nodes: Mapping[str, typing.Any],
-        *,
-        inventory: Inventory | None,
+        self, nodes: Mapping[str, typing.Any]
     ) -> list[NodeSettingsDelta]:
         """Convert websocket node payloads into domain delta objects."""
-
-        resolved_inventory = inventory if isinstance(inventory, Inventory) else None
-        if resolved_inventory is None:
-            _LOGGER.error(
-                "WS: missing inventory for node delta translation on %s",
-                mask_identifier(self.dev_id),
-            )
-            return []
 
         deltas: list[NodeSettingsDelta] = []
         for raw_type, sections in nodes.items():
@@ -843,9 +823,7 @@ class _WSCommon(_WSStatusMixin):
 
             for addr, payload in per_addr.items():
                 node_id = DomainNodeId(node_type, addr)
-                if not resolved_inventory.has_node(
-                    node_id.node_type.value, node_id.addr
-                ):
+                if not self._inventory.has_node(node_id.node_type.value, node_id.addr):
                     # Inventory is immutable, so a node unknown once stays unknown:
                     # log it a single time instead of on every frame.
                     key = (node_type.value, addr)
