@@ -13,7 +13,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import STATE_UNKNOWN, UnitOfTemperature, UnitOfTime
+from homeassistant.const import STATE_UNKNOWN, UnitOfTime
 from homeassistant.core import callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
@@ -320,7 +320,6 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_translation_key = "heater_temperature"
 
     def __init__(
@@ -347,6 +346,11 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
             node_type=node_type,
             inventory=inventory,
         )
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """Return the unit the device reports temperatures in."""
+        return self._temperature_unit()
 
     @property
     def native_value(self) -> float | None:

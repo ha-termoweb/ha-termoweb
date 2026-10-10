@@ -36,6 +36,7 @@ from .heater import (
     resolve_climate_entity_id,
     set_boost_runtime_minutes,
     set_boost_temperature,
+    to_device_temperature,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -315,9 +316,6 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
     _attr_has_entity_name = True
     _attr_icon = "mdi:thermometer"
     _attr_mode = NumberMode.SLIDER
-    _attr_native_min_value = 5.0
-    _attr_native_max_value = 30.0
-    _attr_native_step = 0.5
     _attr_translation_key = "accumulator_boost_temperature"
 
     def __init__(
@@ -346,7 +344,7 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
             node_type=node_type,
             inventory=inventory,
         )
-        self._temperature = DEFAULT_BOOST_TEMPERATURE
+        self._temperature = self._default_temperature()
         self._climate_entity_id: str | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -383,6 +381,29 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
         if units == "F":
             return UnitOfTemperature.FAHRENHEIT
         return UnitOfTemperature.CELSIUS
+
+    @property
+    def native_min_value(self) -> float:
+        """Return the lowest boost temperature in the device's units."""
+
+        return self._setpoint_range()[0]
+
+    @property
+    def native_max_value(self) -> float:
+        """Return the highest boost temperature in the device's units."""
+
+        return self._setpoint_range()[1]
+
+    @property
+    def native_step(self) -> float:
+        """Return the slider step: 0.5 degrees Celsius or 1 degree Fahrenheit."""
+
+        return 1.0 if self._units() == "F" else 0.5
+
+    def _default_temperature(self) -> float:
+        """Return the default boost temperature in the device's units."""
+
+        return to_device_temperature(DEFAULT_BOOST_TEMPERATURE, self._units())
 
     @property
     def native_value(self) -> float:
@@ -464,15 +485,15 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
                 getattr(state, "stemp", None) if state is not None else None
             )
         if candidate is None:
-            return DEFAULT_BOOST_TEMPERATURE
-        return self._validate_temperature(candidate) or DEFAULT_BOOST_TEMPERATURE
+            return self._default_temperature()
+        return self._validate_temperature(candidate) or self._default_temperature()
 
     def _apply_temperature(self, value: float | None, *, persist: bool) -> None:
         """Update the cached temperature and persist when requested."""
 
         temperature = self._validate_temperature(value)
         if temperature is None:
-            temperature = DEFAULT_BOOST_TEMPERATURE
+            temperature = self._default_temperature()
         self._temperature = temperature
         if persist and self.hass is not None:
             set_boost_temperature(
@@ -491,9 +512,7 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
             return None
         if not math.isfinite(candidate):
             return None
-        if candidate < float(self._attr_native_min_value) or candidate > float(
-            self._attr_native_max_value
-        ):
+        if candidate < self.native_min_value or candidate > self.native_max_value:
             return None
         return math.floor(candidate * 10 + 0.5) / 10.0
 
