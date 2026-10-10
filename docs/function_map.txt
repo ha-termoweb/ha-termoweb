@@ -36,8 +36,10 @@ custom_components/termoweb/__init__.py :: async_unload_entry
     Unload a config entry for TermoWeb.
 custom_components/termoweb/__init__.py :: async_remove_entry
     Delete the entry's stored energy import progress.
+custom_components/termoweb/__init__.py :: _migrate_to_1_2
+    Case-fold the cloud account unique ID and drop the legacy poll interval.
 custom_components/termoweb/__init__.py :: async_migrate_entry
-    Migrate a config entry; no migrations are needed yet.
+    Migrate a config entry to the current version.
 custom_components/termoweb/backend/base.py :: HttpClientProto.list_devices
     Return the list of devices associated with the account.
 custom_components/termoweb/backend/base.py :: HttpClientProto.get_nodes
@@ -738,6 +740,14 @@ custom_components/termoweb/config_flow.py :: _login_schema
     Build the login form schema with provided defaults.
 custom_components/termoweb/config_flow.py :: _validate_login
     Ensure the provided credentials authenticate successfully.
+custom_components/termoweb/config_flow.py :: _login_error
+    Return the flow error key for a failed login, or None when it succeeds.
+custom_components/termoweb/config_flow.py :: _radio_key
+    Return what identifies the radio connection: the serial port or host:port.
+custom_components/termoweb/config_flow.py :: _radio_in_use
+    Return True when another enabled entry already talks to this gateway or stick.
+custom_components/termoweb/config_flow.py :: _is_mac_id
+    Return True when ``dev_id`` came from a radio MAC (so it names the hardware).
 custom_components/termoweb/config_flow.py :: RadioSetupError.__init__
     Store the error key.
 custom_components/termoweb/config_flow.py :: _by_id_path
@@ -829,7 +839,11 @@ custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._reconfigure_ent
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reconfigure_radio
     Change the gateway address; optionally scan for heaters again.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reconfigure
-    Reconfigure username/password (no use_push).
+    Change the password (or radio address) of the same account or device.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reauth
+    Start reauthentication after the cloud rejected the stored password.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reauth_confirm
+    Ask for the account's new password, then reload the entry with it.
 custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.__init__
     Store the entry being configured.
 custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_init
@@ -1624,6 +1638,8 @@ custom_components/termoweb/identifiers.py :: build_power_monitor_power_unique_id
     Return the canonical unique ID for a power monitor power sensor.
 custom_components/termoweb/identifiers.py :: thermostat_fallback_name
     Return the fallback friendly name for a thermostat node.
+custom_components/termoweb/identifiers.py :: build_cloud_unique_id
+    Return a cloud entry's unique ID: the case-folded account, brand-prefixed.
 custom_components/termoweb/inventory.py :: _default_heater_name
     Return the default fallback name for a heater address.
 custom_components/termoweb/inventory.py :: InventorySnapshot.filtered_count

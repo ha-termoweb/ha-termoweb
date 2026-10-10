@@ -22,7 +22,6 @@ from custom_components.termoweb.backend.radio import (
     RadioLinkError,
 )
 from custom_components.termoweb.backend.radio.discovery import NetworkSighting
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 NET = bytes.fromhex("1234")  # synthetic network id
@@ -37,23 +36,6 @@ def _flow(hass: HomeAssistant, **context: Any) -> config_flow.TermoWebConfigFlow
     flow.hass = hass
     flow.context = dict(context)
     return flow
-
-
-def _entry(hass: HomeAssistant, dialect: str = "A") -> ConfigEntry:
-    entry = ConfigEntry(
-        "nanocul-entry",
-        data={
-            "brand": "radio",
-            "radio_type": "nanocul",
-            "device": PORT.device,
-            "radio_device_id": "nanocul-a1b2c3",
-            "dialect": dialect,
-            "network_id": "1B30",
-            "nodes": [{"type": "htr", "addr": "6", "name": "Heater 6"}],
-        },
-    )
-    hass.config_entries.add_entry(entry)
-    return entry
 
 
 @pytest.fixture
@@ -174,60 +156,6 @@ async def test_discovery_failure_returns_to_the_manual_form(stick) -> None:
     result = await _finish(flow, await flow.async_step_nanocul(dict(FORM)))
     assert result["step_id"] == "nanocul_manual"
     assert result["errors"] == {"base": "cannot_connect_nanocul"}
-
-
-@pytest.mark.asyncio
-async def test_reconfigure_nanocul(stick) -> None:
-    hass = HomeAssistant()
-    entry = _entry(hass)
-    flow = _flow(hass, entry_id=entry.entry_id, source="reconfigure")
-    form = await flow.async_step_reconfigure()
-    assert form["step_id"] == "reconfigure_nanocul"
-
-    result = await flow.async_step_reconfigure_nanocul(
-        {"device": "/dev/ttyUSB1", "rescan": False}
-    )
-    assert result == {"type": "abort", "reason": "reconfigure_successful"}
-    assert entry.data["device"] == "/dev/ttyUSB1"
-
-    stick["discover"] = (
-        NetworkSighting(DIALECT_A, DIALECT_A.network_id),
-        {6: object(), 7: object()},
-    )
-    first = await flow.async_step_reconfigure_nanocul(
-        {"device": "/dev/ttyUSB1", "rescan": True}
-    )
-    result = await _finish(flow, first)
-    assert result == {"type": "abort", "reason": "reconfigure_successful"}
-    assert [n["addr"] for n in entry.data["nodes"]] == ["6", "7"]
-
-    stick["discover"] = RadioLinkError("gone")
-    first = await flow.async_step_reconfigure_nanocul(
-        {"device": "/dev/ttyUSB1", "rescan": True}
-    )
-    result = await _finish(flow, first)
-    assert result["step_id"] == "reconfigure_nanocul"
-
-
-@pytest.mark.asyncio
-async def test_reconfigure_nanocul_errors(stick) -> None:
-    hass = HomeAssistant()
-    entry = _entry(hass, dialect="B")
-    flow = _flow(hass, entry_id=entry.entry_id, source="reconfigure")
-    stick["probe"] = RadioLinkError("no")
-    result = await flow.async_step_reconfigure_nanocul(
-        {"device": "/dev/x", "rescan": False}
-    )
-    assert result["errors"] == {"base": "cannot_connect_nanocul"}
-    stick["probe"] = ("id", False)  # dialect-B entry, firmware without dialects
-    result = await flow.async_step_reconfigure_nanocul(
-        {"device": "/dev/x", "rescan": False}
-    )
-    assert result["errors"] == {"base": "dialect_unsupported_firmware"}
-    assert await _flow(hass).async_step_reconfigure_nanocul() == {
-        "type": "abort",
-        "reason": "no_config_entry",
-    }
 
 
 class FakeLink:

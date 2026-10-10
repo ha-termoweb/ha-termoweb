@@ -12,7 +12,7 @@ from typing import Any
 
 from aiohttp import ClientError
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import SOURCE_RECONFIGURE, ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 import voluptuous as vol
@@ -46,7 +46,6 @@ from .const import (
     BRAND_LABELS,
     BRAND_RADIO,
     BRAND_RADIO_MONITOR,
-    BRAND_TERMOWEB,
     BRAND_TEVOLVE,
     CONF_BRAND,
     CONF_DEVICE,
@@ -65,6 +64,7 @@ from .const import (
     RADIO_TYPE_NANOCUL,
     get_brand_label,
 )
+from .identifiers import build_cloud_unique_id
 from .radio_pairing import add_nodes, async_site_network_id, radio_node
 from .radio_rehome import RehomeError, async_rehome, rehome_summary
 from .radio_survey import ISSUE_URL, async_analyse, async_save_report, report_payload
@@ -104,6 +104,58 @@ async def _validate_login(
     """Ensure the provided credentials authenticate successfully."""
     client = create_rest_client(hass, username, password, brand)
     await async_list_devices(client)
+
+
+async def _login_error(
+    hass: HomeAssistant, username: str, password: str, brand: str
+) -> str | None:
+    """Return the flow error key for a failed login, or None when it succeeds."""
+    try:
+        await _validate_login(hass, username, password, brand)
+    except BackendAuthError:
+        return "invalid_auth"
+    except BackendRateLimitError:
+        return "rate_limited"
+    except ClientError, TimeoutError:
+        return "cannot_connect"
+    except Exception:
+        _LOGGER.exception("Unexpected error while logging in")
+        return "unknown"
+    return None
+
+
+def _radio_key(data: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Return what identifies the radio connection: the serial port or host:port."""
+    if data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
+        return (RADIO_TYPE_NANOCUL, str(data.get(CONF_DEVICE, "")).strip())
+    return (
+        RADIO_TYPE_ESP32,
+        str(data.get(CONF_HOST, "")).strip().casefold(),
+        int(data.get(CONF_PORT, 0)),
+    )
+
+
+def _radio_in_use(
+    hass: HomeAssistant, radio: Mapping[str, Any], exclude_entry_id: str | None = None
+) -> bool:
+    """Return True when another enabled entry already talks to this gateway or stick.
+
+    The ESP32 bridge drops its current client when a new one connects, and a
+    serial port has one reader, so probing such a radio breaks the running entry.
+    """
+    wanted = _radio_key(radio)
+    return any(
+        entry.entry_id != exclude_entry_id
+        and entry.disabled_by is None
+        and entry.data.get(CONF_BRAND) in (BRAND_RADIO, BRAND_RADIO_MONITOR)
+        and _radio_key(entry.data) == wanted
+        for entry in hass.config_entries.async_entries(DOMAIN)
+    )
+
+
+def _is_mac_id(dev_id: str | None) -> bool:
+    """Return True when ``dev_id`` came from a radio MAC (so it names the hardware)."""
+    return dev_id is not None and dev_id_from_mac(dev_id) == dev_id
 
 
 DIALECT_AUTO = "auto"
@@ -473,6 +525,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Initial setup and (optional) reconfigure without use_push."""
 
     VERSION = 1
+    MINOR_VERSION = 2
 
     @staticmethod
     @callback
@@ -530,17 +583,8 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         brand = brand_in if brand_in in BRAND_LABELS else DEFAULT_BRAND
 
         errors: dict[str, str] = {}
-        try:
-            await _validate_login(self.hass, username, password, brand)
-        except BackendAuthError:
-            errors["base"] = "invalid_auth"
-        except BackendRateLimitError:
-            errors["base"] = "rate_limited"
-        except ClientError:
-            errors["base"] = "cannot_connect"
-        except Exception:
-            _LOGGER.exception("Unexpected error during %s step", step_id)
-            errors["base"] = "unknown"
+        if error := await _login_error(self.hass, username, password, brand):
+            errors["base"] = error
 
         if errors:
             schema = _login_schema(
@@ -596,8 +640,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         username = data["username"]
         brand = data[CONF_BRAND]
 
-        unique_id = username if brand == BRAND_TERMOWEB else f"{brand}:{username}"
-        await self.async_set_unique_id(unique_id)
+        await self.async_set_unique_id(build_cloud_unique_id(brand, username))
         self._abort_if_unique_id_configured()
 
         title = f"{get_brand_label(brand)} ({username})"
@@ -612,6 +655,8 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 step_id="radio", data_schema=_radio_schema(self._radio)
             )
         self._radio = {**user_input, CONF_RADIO_TYPE: RADIO_TYPE_ESP32}
+        if _radio_in_use(self.hass, self._radio):
+            return self.async_abort(reason="already_in_use")
         errors: dict[str, str] = {}
         try:
             network_id = parse_network_id(user_input.get(CONF_NETWORK_ID))
@@ -783,8 +828,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         data = self._radio_result
         entry = self._reconfigure_entry()
         if entry is not None:
-            self.hass.config_entries.async_update_entry(entry, data=data)
-            return self.async_abort(reason="reconfigure_successful")
+            return self.async_update_reload_and_abort(entry, data=data)
         if data[CONF_RADIO_TYPE] == RADIO_TYPE_NANOCUL:
             title = f"{NANOCUL_LABEL} ({data[CONF_DEVICE]})"
         else:
@@ -860,6 +904,8 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_DEVICE: device,
             CONF_RADIO_TYPE: RADIO_TYPE_NANOCUL,
         }
+        if _radio_in_use(self.hass, self._radio):
+            return self.async_abort(reason="already_in_use")
         errors: dict[str, str] = {}
         network_id = None
         try:
@@ -898,9 +944,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Change the nanoCUL's port; optionally scan for heaters again."""
-        entry = self._reconfigure_entry()
-        if entry is None:
-            return self.async_abort(reason="no_config_entry")
+        entry = self._get_reconfigure_entry()
         if user_input is None:
             return self.async_show_form(
                 step_id="reconfigure_nanocul",
@@ -908,8 +952,10 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
         device = str(user_input[CONF_DEVICE]).strip()
         self._radio = {**entry.data, CONF_DEVICE: device}
+        if _radio_in_use(self.hass, self._radio, entry.entry_id):
+            return self.async_abort(reason="already_in_use")
         try:
-            _dev_id, capable = await probe_nanocul(device)
+            dev_id, capable = await probe_nanocul(device)
         except RadioLinkError:
             return self.async_show_form(
                 step_id="reconfigure_nanocul",
@@ -922,29 +968,30 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=_reconfigure_nanocul_schema(self._radio),
                 errors={"base": "dialect_unsupported_firmware"},
             )
+        # A stick without a MAC is known only by its port, so only two MAC ids
+        # can prove that the user plugged in a different stick.
+        if _is_mac_id(dev_id) and _is_mac_id(entry.data.get(CONF_RADIO_DEVICE_ID)):
+            await self.async_set_unique_id(f"{BRAND_RADIO}:{dev_id}")
+            self._abort_if_unique_id_mismatch()
         if user_input.get(CONF_RESCAN):
             self._radio["network_bytes"] = bytes.fromhex(entry.data[CONF_NETWORK_ID])
             self._radio[_CAPABLE] = capable
             return await self.async_step_radio_discover()
-        self.hass.config_entries.async_update_entry(
-            entry, data={**entry.data, CONF_DEVICE: device}
+        return self.async_update_reload_and_abort(
+            entry, data_updates={CONF_DEVICE: device}
         )
-        return self.async_abort(reason="reconfigure_successful")
 
     def _reconfigure_entry(self) -> ConfigEntry | None:
         """Return the entry being reconfigured, or None during initial setup."""
-        entry_id = self.context.get("entry_id")
-        if self.context.get("source") != "reconfigure" or not entry_id:
+        if self.source != SOURCE_RECONFIGURE:
             return None
-        return self.hass.config_entries.async_get_entry(entry_id)
+        return self._get_reconfigure_entry()
 
     async def async_step_reconfigure_radio(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Change the gateway address; optionally scan for heaters again."""
-        entry = self._reconfigure_entry()
-        if entry is None:
-            return self.async_abort(reason="no_config_entry")
+        entry = self._get_reconfigure_entry()
         if user_input is None:
             return self.async_show_form(
                 step_id="reconfigure_radio",
@@ -952,8 +999,10 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
         host, port = user_input[CONF_HOST], user_input[CONF_PORT]
         self._radio = {**entry.data, CONF_HOST: host, CONF_PORT: port}
+        if _radio_in_use(self.hass, self._radio, entry.entry_id):
+            return self.async_abort(reason="already_in_use")
         try:
-            await probe_gateway(host, port)
+            dev_id = await probe_gateway(host, port)
         except (RadioLinkError, RadioSetupError) as err:
             reason = (
                 err.reason
@@ -965,24 +1014,20 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=_reconfigure_radio_schema(self._radio),
                 errors={"base": reason},
             )
+        await self.async_set_unique_id(f"{BRAND_RADIO}:{dev_id}")
+        self._abort_if_unique_id_mismatch()
         if user_input.get(CONF_RESCAN):
             self._radio["network_bytes"] = bytes.fromhex(entry.data[CONF_NETWORK_ID])
             return await self.async_step_radio_discover()
-        self.hass.config_entries.async_update_entry(
-            entry, data={**entry.data, CONF_HOST: host, CONF_PORT: port}
+        return self.async_update_reload_and_abort(
+            entry, data_updates={CONF_HOST: host, CONF_PORT: port}
         )
-        return self.async_abort(reason="reconfigure_successful")
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Reconfigure username/password (no use_push)."""
-        entry_id = self.context.get("entry_id")
-        entry: ConfigEntry | None = (
-            self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
-        )
-        if entry is None:
-            return self.async_abort(reason="no_config_entry")
+        """Change the password (or radio address) of the same account or device."""
+        entry = self._get_reconfigure_entry()
         if entry.data.get(CONF_BRAND) == BRAND_RADIO_MONITOR:
             return self.async_abort(reason="monitor_reconfigure")
         if entry.data.get(CONF_BRAND) == BRAND_RADIO:
@@ -990,44 +1035,57 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_reconfigure_nanocul()
             return await self.async_step_reconfigure_radio()
 
-        ver = await _get_version(self.hass)
-
-        current_user = entry.data.get("username") or entry.data.get("email") or ""
-        current_brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
+        if user_input is not None:
+            await self.async_set_unique_id(
+                build_cloud_unique_id(
+                    user_input.get(CONF_BRAND, DEFAULT_BRAND),
+                    user_input.get("username") or "",
+                )
+            )
+            self._abort_if_unique_id_mismatch()
 
         result, data = await self._handle_login_workflow(
             step_id="reconfigure",
             user_input=user_input,
             defaults={
-                "username": current_user,
-                CONF_BRAND: current_brand,
+                "username": entry.data.get("username") or "",
+                CONF_BRAND: entry.data.get(CONF_BRAND, DEFAULT_BRAND),
             },
-            version=ver,
+            version=await _get_version(self.hass),
         )
-
         if result is not None:
             return result
+        return self.async_update_reload_and_abort(entry, data_updates=data)
 
-        username = data["username"]
-        password = data["password"]
-        brand = data[CONF_BRAND]
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> FlowResult:
+        """Start reauthentication after the cloud rejected the stored password."""
+        return await self.async_step_reauth_confirm()
 
-        new_data = dict(entry.data)
-        new_data.update(
-            {
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask for the account's new password, then reload the entry with it."""
+        entry = self._get_reauth_entry()
+        username = entry.data["username"]
+        brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            password = user_input["password"]
+            if error := await _login_error(self.hass, username, password, brand):
+                errors["base"] = error
+            else:
+                return self.async_update_reload_and_abort(
+                    entry, data_updates={"password": password}
+                )
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Required("password"): str}),
+            errors=errors or None,
+            description_placeholders={
                 "username": username,
-                "password": password,
-                CONF_BRAND: brand,
-            }
+                "brand": get_brand_label(brand),
+            },
         )
-        new_data.pop("poll_interval", None)
-        new_options = dict(entry.options)
-        new_options.pop("poll_interval", None)
-
-        self.hass.config_entries.async_update_entry(
-            entry, data=new_data, options=new_options
-        )
-        return self.async_abort(reason="reconfigure_successful")
 
 
 class TermoWebOptionsFlow(config_entries.OptionsFlow):

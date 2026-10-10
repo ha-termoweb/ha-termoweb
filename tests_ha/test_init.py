@@ -127,12 +127,6 @@ async def test_setup_retries_when_no_devices(
     assert config_entry.state is ConfigEntryState.SETUP_RETRY
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="B5: setup raises ConfigEntryAuthFailed but the config flow has no "
-    "reauth step, so HA's reauth flow dies with UnknownStep "
-    "(PLAN Phase 3, setup_energy.md B5)",
-)
 async def test_setup_auth_failure_starts_reauth(
     hass: HomeAssistant, cloud: FakeCloud, config_entry: MockConfigEntry
 ) -> None:
