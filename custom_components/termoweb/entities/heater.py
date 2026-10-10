@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import (
     Awaitable,
     Callable,
@@ -60,6 +61,8 @@ DEFAULT_BOOST_TEMPERATURE: Final = 20.0  # degrees Celsius
 SETPOINT_MIN_C: Final = 5.0
 SETPOINT_MAX_C: Final = 30.0
 _HASS_UNSET: Final[HomeAssistant | None] = cast(HomeAssistant | None, object())
+# Seconds to wait for the WebSocket echo of a write before reading the node by REST.
+WS_ECHO_FALLBACK_REFRESH: Final = 4.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +325,57 @@ def resolve_boost_runtime_minutes(
     if stored is not None:
         return stored
     return default
+
+
+def ws_echo_expected(coordinator: Any) -> bool:
+    """Return True when a healthy WebSocket is expected to echo a write."""
+
+    connection = coordinator.domain_view.get_gateway_connection_state()
+    return (
+        str(connection.status or "").lower() in {"connected", "healthy"}
+        and not connection.payload_stale
+        and not connection.idle_restart_pending
+    )
+
+
+class NodeRefreshFallback:
+    """Refresh one node by REST when the WebSocket echo of a write may not arrive."""
+
+    def __init__(self, entity: Any, node_type: str, addr: str) -> None:
+        """Bind the fallback to ``entity`` and its node."""
+
+        self._entity = entity
+        self._node = (node_type, addr)
+        self._task: asyncio.Task[None] | None = None
+
+    def schedule(self) -> None:
+        """Schedule a single-node refresh unless the WebSocket will echo the write."""
+
+        self.cancel()
+        coordinator = self._entity.coordinator
+        if ws_echo_expected(coordinator):
+            _LOGGER.debug("Skipping refresh fallback node=%s: ws healthy", self._node)
+            return
+        self._task = self._entity.hass.async_create_background_task(
+            self._run(coordinator),
+            f"termoweb-refresh-fallback-{self._node[0]}-{self._node[1]}",
+        )
+
+    def cancel(self) -> None:
+        """Cancel a pending fallback refresh."""
+
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        self._task = None
+
+    async def _run(self, coordinator: Any) -> None:
+        """Refresh the node after the WebSocket echo delay."""
+
+        await asyncio.sleep(WS_ECHO_FALLBACK_REFRESH)
+        try:
+            await coordinator.async_refresh_heater(self._node)
+        except Exception as err:  # noqa: BLE001 - a failed refresh must not crash
+            _LOGGER.error("Refresh fallback failed node=%s: %s", self._node, err)
 
 
 async def async_backend_write(description: str, write: Awaitable[Any]) -> Any:

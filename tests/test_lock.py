@@ -1,7 +1,7 @@
 """Unit tests for child lock entities in the lock domain."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -133,7 +133,7 @@ async def test_child_lock_entity_lock_unlock_writes_backend(
     """Lock commands should call backend lock API for both states."""
 
     backend = SimpleNamespace(set_node_lock=AsyncMock())
-    coordinator = SimpleNamespace(async_request_refresh=AsyncMock())
+    coordinator = SimpleNamespace(apply_entity_patch=MagicMock(return_value=True))
     lock_entity = ChildLockEntity(
         coordinator,
         "entry",
@@ -155,6 +155,7 @@ async def test_child_lock_entity_lock_unlock_writes_backend(
         backend=backend,
     )
     lock_entity.hass = hass
+    lock_entity._refresh_fallback = MagicMock()
 
     await lock_entity.async_lock()
     await lock_entity.async_unlock()
@@ -163,7 +164,13 @@ async def test_child_lock_entity_lock_unlock_writes_backend(
         (("dev", ("htr", "1")), {"lock": True}),
         (("dev", ("htr", "1")), {"lock": False}),
     ]
-    assert coordinator.async_request_refresh.await_count == 2
+    states = []
+    for call in coordinator.apply_entity_patch.call_args_list:
+        state = HeaterState()
+        call.args[2](state)
+        states.append(state.lock)
+    assert states == [True, False]
+    assert lock_entity._refresh_fallback.schedule.call_count == 2
 
 
 def test_child_lock_entity_reports_unlocked(lock_inventory: Inventory) -> None:

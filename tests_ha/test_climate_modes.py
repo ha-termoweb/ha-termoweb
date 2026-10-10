@@ -23,6 +23,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.entities import climate as climate_module
+from custom_components.termoweb.entities import heater as heater_module
 
 from .conftest import FakeCloud
 
@@ -81,7 +82,7 @@ def devices(cloud: FakeCloud) -> Generator[FakeDevices]:
     with (
         patch.object(RESTClient, "set_node_settings", fake.writes),
         patch.object(climate_module, "_WRITE_DEBOUNCE", 0),
-        patch.object(climate_module, "_WS_ECHO_FALLBACK_REFRESH", 0),
+        patch.object(heater_module, "WS_ECHO_FALLBACK_REFRESH", 0),
     ):
         yield fake
 

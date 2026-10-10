@@ -12,7 +12,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import StateCoordinator
+from custom_components.termoweb.domain.state import DomainState
 from custom_components.termoweb.entities.heater import (
+    NodeRefreshFallback,
     SettingsResolver,
     async_backend_write,
     build_settings_resolver,
@@ -118,6 +120,15 @@ class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
         self._inventory = inventory
         self._settings_resolver = settings_resolver
         self._device_name = device_name if device_name else ""
+        self._refresh_fallback = NodeRefreshFallback(
+            self, canonical_type, canonical_addr
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Cancel a pending fallback refresh when the entity is removed."""
+
+        await super().async_added_to_hass()
+        self.async_on_remove(self._refresh_fallback.cancel)
 
     @property
     def is_locked(self) -> bool | None:
@@ -179,7 +190,7 @@ class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
                 lock=True,
             ),
         )
-        await self.coordinator.async_request_refresh()
+        self._apply_lock(True)
 
     async def async_unlock(self, **kwargs: Any) -> None:
         """Disable the child lock."""
@@ -199,7 +210,16 @@ class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
                 lock=False,
             ),
         )
-        await self.coordinator.async_request_refresh()
+        self._apply_lock(False)
+
+    def _apply_lock(self, locked: bool) -> None:
+        """Show the written lock state now; the WebSocket echo confirms it."""
+
+        def _mutate(state: DomainState) -> None:
+            state.lock = locked
+
+        self.coordinator.apply_entity_patch(self._node_type, self._addr, _mutate)
+        self._refresh_fallback.schedule()
 
 
 def _iter_lockable_inventory_nodes(

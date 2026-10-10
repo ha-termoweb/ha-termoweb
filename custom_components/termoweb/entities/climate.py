@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
-import inspect
 import logging
-import time
 import typing
 from typing import Any, cast
 
@@ -31,7 +29,7 @@ from ..boost import (
     supports_boost,
     validate_boost_minutes,
 )
-from ..domain import DomainState, DomainStateView, GatewayConnectionState, HeaterState
+from ..domain import DomainState, HeaterState
 from ..identifiers import build_heater_unique_id, thermostat_fallback_name
 from ..inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
 from ..runtime import require_runtime
@@ -40,6 +38,7 @@ from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
     HeaterPlatformDetails,
+    NodeRefreshFallback,
     async_backend_write,
     async_cancel_acm_boost,
     async_start_acm_boost,
@@ -71,8 +70,6 @@ def _is_cancelled_error(err: BaseException) -> bool:
 
 # Small debounce so multiple UI events coalesce
 _WRITE_DEBOUNCE = 0.2
-# If WS echo doesn't arrive quickly after a successful write, force a refresh
-_WS_ECHO_FALLBACK_REFRESH = 4.0
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -345,7 +342,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             inventory=inventory,
         )
 
-        self._refresh_fallback: asyncio.Task | None = None
+        self._refresh_fallback = NodeRefreshFallback(self, self._node_type, self._addr)
 
         # pending write aggregation
         self._pending_mode: HVACMode | str | None = None
@@ -372,9 +369,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         if self._write_task:
             self._write_task.cancel()
             self._write_task = None
-        if self._refresh_fallback:
-            self._refresh_fallback.cancel()
-            self._refresh_fallback = None
+        self._refresh_fallback.cancel()
         hass = self.hass
         if hass is not None:
             clear_climate_entity_id(
@@ -418,34 +413,16 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         return None
 
     def _optimistic_update(self, mutator: Callable[[DomainState], None]) -> bool:
-        """Apply ``mutator`` to cached state and refresh state if changed."""
+        """Apply ``mutator`` to cached state and write the entity state."""
 
         try:
             coordinator = getattr(self, "coordinator", None)
             apply_patch = getattr(coordinator, "apply_entity_patch", None)
             updated = False
-            refresh_needed = False
             if callable(apply_patch):
-                applied = bool(apply_patch(self._node_type, self._addr, mutator))
-                if applied:
-                    updated = True
-                    refresh_needed = True
+                updated = bool(apply_patch(self._node_type, self._addr, mutator))
             if updated:
                 self.async_write_ha_state()
-                hass = self.hass
-                refresh = getattr(self.coordinator, "async_request_refresh", None)
-                if refresh_needed and hass is not None and callable(refresh):
-                    refresh_task = refresh()
-                    if inspect.isawaitable(refresh_task):
-                        try:
-                            hass.async_create_task(refresh_task)
-                        except Exception:
-                            try:
-                                loop = asyncio.get_running_loop()
-                                self._last_refresh_task = loop.create_task(refresh_task)
-                            except Exception:
-                                if hasattr(refresh_task, "close"):
-                                    refresh_task.close()
             data_obj = getattr(self.coordinator, "data", None)
             if not isinstance(data_obj, dict):
                 _LOGGER.debug(
@@ -681,7 +658,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         )
 
         self._optimistic_update(apply_fn)
-        self._schedule_refresh_fallback()
+        self._refresh_fallback.schedule()
 
     async def async_set_schedule(self, prog: list[int]) -> None:
         """Write the 7x24 tri-state program to the device."""
@@ -962,79 +939,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         )
 
         # Expect WS echo; schedule refresh if it doesn't arrive soon.
-        self._schedule_refresh_fallback()
-
-    def _schedule_refresh_fallback(self) -> None:
-        """Schedule a refresh if the websocket echo does not arrive."""
-        if self._refresh_fallback:
-            if not self._refresh_fallback.done():
-                self._refresh_fallback.cancel()
-            self._refresh_fallback = None
-
-        connection_state = self._gateway_connection_state()
-        status = str(connection_state.status or "").lower()
-        if status in {"connected", "healthy"}:
-            last_payload_at = connection_state.last_payload_at
-            idle_restart_pending = connection_state.idle_restart_pending
-            recent_payload = False
-            if isinstance(last_payload_at, (int, float)):
-                recent_payload = (time.time() - last_payload_at) <= (
-                    _WS_ECHO_FALLBACK_REFRESH
-                )
-            if idle_restart_pending or recent_payload:
-                _LOGGER.debug(
-                    "Skipping refresh fallback addr=%s ws_status=%s",
-                    self._addr,
-                    status,
-                )
-                return
-
-        async def _fallback() -> None:
-            """Force a heater refresh after the fallback delay."""
-            task = asyncio.current_task()
-            await asyncio.sleep(_WS_ECHO_FALLBACK_REFRESH)
-            try:
-                hass = self.hass
-                is_stopping = getattr(hass, "is_stopping", False)
-                is_running = getattr(hass, "is_running", True)
-                if is_stopping or not is_running:
-                    reason = "stopping" if is_stopping else "not running"
-                    _LOGGER.debug(
-                        "Skipping refresh fallback addr=%s: hass %s",
-                        self._addr,
-                        reason,
-                    )
-                    return
-
-                await self.coordinator.async_refresh_heater(
-                    (self._node_type, self._addr)
-                )
-                if task and self._refresh_fallback is task:
-                    self._refresh_fallback = None
-                    return
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                _LOGGER.error(
-                    "Refresh fallback failed addr=%s: %s",
-                    self._addr,
-                    str(e),
-                )
-            finally:
-                if task and self._refresh_fallback is task:
-                    self._refresh_fallback = None
-
-        self._refresh_fallback = asyncio.create_task(
-            _fallback(), name=f"termoweb-fallback-{self._dev_id}-{self._addr}"
-        )
-
-    def _gateway_connection_state(self) -> GatewayConnectionState:
-        """Return the current gateway connection state."""
-
-        domain_view = getattr(self.coordinator, "domain_view", None)
-        if isinstance(domain_view, DomainStateView):
-            return domain_view.get_gateway_connection_state()
-        return GatewayConnectionState()
+        self._refresh_fallback.schedule()
 
 
 class AccumulatorClimateEntity(HeaterClimateEntity):
@@ -1270,7 +1175,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             self._addr,
             suffix,
         )
-        self._schedule_refresh_fallback()
+        self._refresh_fallback.schedule()
 
     async def async_start_boost(self, *, minutes: int | None = None) -> None:
         """Start an accumulator boost session."""
@@ -1312,7 +1217,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             self._addr,
             validated_minutes,
         )
-        self._schedule_refresh_fallback()
+        self._refresh_fallback.schedule()
 
     async def async_cancel_boost(self) -> None:
         """Cancel the active accumulator boost session."""
@@ -1340,7 +1245,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             self._node_type,
             self._addr,
         )
-        self._schedule_refresh_fallback()
+        self._refresh_fallback.schedule()
 
     async def _async_submit_settings(  # type: ignore[override]
         self,
