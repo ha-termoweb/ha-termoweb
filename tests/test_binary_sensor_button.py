@@ -237,64 +237,6 @@ def test_refresh_button_device_info_and_press(heater_hass_data) -> None:
         coordinator.async_request_refresh.assert_awaited_once()
 
 
-def test_accumulator_boost_button_triggers_service(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def _run() -> None:
-        hass = HomeAssistant()
-        entry_id = "entry-trigger"
-        dev_id = "device-trigger"
-        coordinator = types.SimpleNamespace(hass=hass, data={})
-        hass.services = types.SimpleNamespace(async_call=AsyncMock())
-
-        monkeypatch.setattr(
-            button_module,
-            "resolve_boost_runtime_minutes",
-            lambda *_: 180,
-        )
-        monkeypatch.setattr(
-            entities_button_module,
-            "resolve_boost_runtime_minutes",
-            lambda *_: 180,
-        )
-        monkeypatch.setattr(
-            button_module,
-            "resolve_boost_temperature",
-            lambda *_args, **_kwargs: 22.5,
-        )
-        monkeypatch.setattr(
-            entities_button_module,
-            "resolve_boost_temperature",
-            lambda *_args, **_kwargs: 22.5,
-        )
-
-        context = _make_boost_context(entry_id, dev_id, addr="2", name="Living Room")
-        button = AccumulatorBoostButton(
-            coordinator,
-            context,
-            _metadata_for("start"),
-        )
-        button.hass = hass
-
-        await button.async_press()
-
-        hass.services.async_call.assert_awaited_once_with(
-            DOMAIN,
-            button_module._SERVICE_REQUEST_ACCUMULATOR_BOOST,
-            {
-                "entry_id": entry_id,
-                "dev_id": dev_id,
-                "node_type": "acm",
-                "addr": "2",
-                "minutes": 180,
-                "temperature": 22.5,
-            },
-            blocking=True,
-        )
-
-    asyncio.run(_run())
-
-
 def test_accumulator_boost_cancel_button_tracks_availability() -> None:
     async def _run() -> None:
         hass = HomeAssistant()
@@ -333,122 +275,6 @@ def test_accumulator_boost_cancel_button_tracks_availability() -> None:
 
         assert button.available is False
         button.async_write_ha_state.assert_called()
-
-    asyncio.run(_run())
-
-
-def test_accumulator_boost_button_ignores_press_without_hass() -> None:
-    async def _run() -> None:
-        class AsyncCallStub:
-            def __init__(self) -> None:
-                self.called = False
-
-            async def __call__(self, *_args, **_kwargs) -> None:
-                self.called = True
-                raise AssertionError("async_call should not be awaited without hass")
-
-        async_call = AsyncCallStub()
-        coordinator = types.SimpleNamespace(
-            hass=types.SimpleNamespace(
-                services=types.SimpleNamespace(async_call=async_call)
-            ),
-            data={},
-        )
-
-        context = _make_boost_context(
-            "entry-guard",
-            "device-guard",
-            addr="8",
-            name="Hallway",
-        )
-        button = AccumulatorBoostButton(
-            coordinator,
-            context,
-            _metadata_for("start"),
-        )
-
-        button.hass = None
-
-        await button.async_press()
-
-        assert async_call.called is False
-
-    asyncio.run(_run())
-
-
-def test_accumulator_boost_button_handles_missing_hass() -> None:
-    async def _run() -> None:
-        hass = HomeAssistant()
-        coordinator = types.SimpleNamespace(hass=hass, data={})
-        hass.services = types.SimpleNamespace(async_call=AsyncMock())
-
-        context = _make_boost_context(
-            "entry-no-hass",
-            "device-no-hass",
-            addr="8",
-            name="Kitchen",
-        )
-        button = AccumulatorBoostButton(
-            coordinator,
-            context,
-            _metadata_for("start"),
-        )
-        button.hass = None
-
-        await button.async_press()
-
-        hass.services.async_call.assert_not_called()
-
-    asyncio.run(_run())
-
-
-def test_accumulator_boost_button_logs_service_errors(
-    caplog: pytest.LogCaptureFixture,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def _run() -> None:
-        caplog.set_level(logging.ERROR)
-        hass = HomeAssistant()
-        entry_id = "entry-errors"
-        dev_id = "device-errors"
-        coordinator = types.SimpleNamespace(hass=hass, data={})
-        hass.services = types.SimpleNamespace(async_call=AsyncMock())
-
-        monkeypatch.setattr(
-            "homeassistant.helpers.translation.async_get_exception_message",
-            lambda *args, **kwargs: "service_not_found",
-            raising=False,
-        )
-
-        monkeypatch.setattr(
-            button_module,
-            "resolve_boost_runtime_minutes",
-            lambda *_: 120,
-        )
-        monkeypatch.setattr(
-            button_module,
-            "resolve_boost_temperature",
-            lambda *_args, **_kwargs: 25.0,
-        )
-
-        context = _make_boost_context(entry_id, dev_id, addr="10", name="Office")
-        button = AccumulatorBoostButton(
-            coordinator,
-            context,
-            _metadata_for("start"),
-        )
-        button.hass = hass
-
-        hass.services.async_call.side_effect = button_module.ServiceNotFound(
-            "termoweb", "boost"
-        )
-        await button.async_press()
-        assert "Boost helper service unavailable" in caplog.text
-
-        hass.services.async_call.reset_mock()
-        hass.services.async_call.side_effect = button_module.HomeAssistantError("boom")
-        await button.async_press()
-        assert "Boost helper service failed" in caplog.text
 
     asyncio.run(_run())
 
@@ -646,128 +472,6 @@ def _metadata_for(action: str) -> heater_module.BoostButtonMetadata:
 # ---------------------------------------------------------------------------
 
 
-def test_accumulator_boost_button_aborts_when_no_stored_minutes(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """AccumulatorBoostButton.async_press should abort when minutes is None."""
-
-    async def _run() -> None:
-        caplog.set_level(logging.ERROR)
-        hass = HomeAssistant()
-        entry_id = "entry-no-min"
-        dev_id = "device-no-min"
-        coordinator = types.SimpleNamespace(hass=hass, data={})
-        hass.services = types.SimpleNamespace(async_call=AsyncMock())
-
-        monkeypatch.setattr(
-            button_module, "resolve_boost_runtime_minutes", lambda *_: None,
-        )
-        monkeypatch.setattr(
-            entities_button_module, "resolve_boost_runtime_minutes", lambda *_: None,
-        )
-
-        context = _make_boost_context(entry_id, dev_id, addr="3", name="Hallway")
-        button = AccumulatorBoostButton(
-            coordinator, context, _metadata_for("start"),
-        )
-        button.hass = hass
-
-        caplog.clear()
-        await button.async_press()
-        assert "Boost start requires a stored duration" in caplog.text
-        hass.services.async_call.assert_not_called()
-
-    asyncio.run(_run())
-
-
-def test_accumulator_boost_button_aborts_when_no_stored_temperature(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """AccumulatorBoostButton.async_press should abort when temperature is None."""
-
-    async def _run() -> None:
-        caplog.set_level(logging.ERROR)
-        hass = HomeAssistant()
-        entry_id = "entry-no-temp"
-        dev_id = "device-no-temp"
-        coordinator = types.SimpleNamespace(hass=hass, data={})
-        hass.services = types.SimpleNamespace(async_call=AsyncMock())
-
-        monkeypatch.setattr(
-            button_module, "resolve_boost_runtime_minutes", lambda *_: 120,
-        )
-        monkeypatch.setattr(
-            entities_button_module, "resolve_boost_runtime_minutes", lambda *_: 120,
-        )
-        monkeypatch.setattr(
-            button_module, "resolve_boost_temperature",
-            lambda *_args, **_kwargs: None,
-        )
-        monkeypatch.setattr(
-            entities_button_module, "resolve_boost_temperature",
-            lambda *_args, **_kwargs: None,
-        )
-
-        context = _make_boost_context(entry_id, dev_id, addr="4", name="Kitchen")
-        button = AccumulatorBoostButton(
-            coordinator, context, _metadata_for("start"),
-        )
-        button.hass = hass
-
-        caplog.clear()
-        await button.async_press()
-        assert "Boost start requires a stored temperature" in caplog.text
-        hass.services.async_call.assert_not_called()
-
-    asyncio.run(_run())
-
-
-def test_accumulator_boost_cancel_button_calls_cancel_service() -> None:
-    """AccumulatorBoostCancelButton.async_press should call the cancel service."""
-
-    async def _run() -> None:
-        hass = HomeAssistant()
-        entry_id = "entry-cancel-press"
-        dev_id = "device-cancel-press"
-        addr = "6"
-        hass.services = types.SimpleNamespace(async_call=AsyncMock())
-
-        context = _make_boost_context(entry_id, dev_id, addr=addr, name="Office")
-        coordinator = FakeCoordinator(
-            hass,
-            dev_id=dev_id,
-            data={
-                dev_id: {
-                    "settings": {"acm": {addr: {"boost_active": True}}},
-                }
-            },
-            inventory=context.inventory,
-        )
-        button = AccumulatorBoostCancelButton(
-            coordinator, context, _metadata_for("cancel"),
-        )
-        button.hass = hass
-        button.async_write_ha_state = MagicMock()
-
-        await button.async_press()
-
-        hass.services.async_call.assert_awaited_once_with(
-            DOMAIN,
-            entities_button_module._SERVICE_CANCEL_ACCUMULATOR_BOOST,
-            {
-                "entry_id": entry_id,
-                "dev_id": dev_id,
-                "node_type": "acm",
-                "addr": addr,
-            },
-            blocking=True,
-        )
-
-    asyncio.run(_run())
-
-
 def test_accumulator_boost_cancel_button_handles_missing_hass() -> None:
     """Cancel button should silently return when hass is None."""
 
@@ -783,39 +487,6 @@ def test_accumulator_boost_cancel_button_handles_missing_hass() -> None:
 
         # Should not raise
         await button.async_press()
-
-    asyncio.run(_run())
-
-
-def test_accumulator_boost_cancel_button_logs_service_not_found(
-    caplog: pytest.LogCaptureFixture,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Cancel button should log ServiceNotFound errors."""
-
-    async def _run() -> None:
-        caplog.set_level(logging.ERROR)
-        hass = HomeAssistant()
-        coordinator = types.SimpleNamespace(hass=hass, data={})
-        hass.services = types.SimpleNamespace(async_call=AsyncMock(
-            side_effect=button_module.ServiceNotFound("termoweb", "cancel_boost"),
-        ))
-
-        monkeypatch.setattr(
-            "homeassistant.helpers.translation.async_get_exception_message",
-            lambda *args, **kwargs: "service_not_found",
-            raising=False,
-        )
-
-        context = _make_boost_context("entry-err", "device-err", addr="8", name="Room")
-        button = AccumulatorBoostCancelButton(
-            coordinator, context, _metadata_for("cancel"),
-        )
-        button.hass = hass
-
-        caplog.clear()
-        await button.async_press()
-        assert "Boost cancel service unavailable" in caplog.text
 
     asyncio.run(_run())
 
@@ -992,15 +663,144 @@ def test_accumulator_boost_base_coordinator_state() -> None:
     assert button._coordinator_boost_active() is False
 
 
-def test_accumulator_boost_base_service_minutes_default_is_none() -> None:
-    """AccumulatorBoostButtonBase._service_minutes should default to None."""
+def _boost_button_env(
+    heater_hass_data,
+    acm_settings: dict[str, Any],
+    backend: Any,
+    *,
+    addr: str = "4",
+) -> tuple[Any, AccumulatorBoostButton, AccumulatorBoostCancelButton]:
+    """Return hass plus start/cancel buttons wired to ``backend``."""
 
-    coordinator = types.SimpleNamespace(hass=None, data={})
-    context = _make_boost_context("entry-min", "dev-min", addr="1", name="Acc")
-
-    # Using the base class indirectly via AccumulatorBoostCancelButton
-    # which does not override _service_minutes
-    button = AccumulatorBoostCancelButton(
-        coordinator, context, _metadata_for("cancel"),
+    hass = HomeAssistant()
+    entry_id = "entry-boost-backend"
+    dev_id = "dev-boost-backend"
+    context = _make_boost_context(entry_id, dev_id, addr=addr, name="Store")
+    coordinator = FakeCoordinator(
+        hass,
+        dev_id=dev_id,
+        data={dev_id: {"settings": {"acm": {addr: acm_settings}}}},
+        inventory=context.inventory,
     )
-    assert button._service_minutes is None
+    heater_hass_data(
+        hass,
+        entry_id,
+        dev_id,
+        coordinator,
+        boost_runtime={"acm": {addr: 180}},
+        extra={"backend": backend},
+        inventory=context.inventory,
+    )
+    start = AccumulatorBoostButton(coordinator, context, _metadata_for("start"))
+    cancel = AccumulatorBoostCancelButton(coordinator, context, _metadata_for("cancel"))
+    start.hass = hass
+    cancel.hass = hass
+    return hass, start, cancel
+
+
+@pytest.mark.parametrize(
+    ("acm_settings", "expected_stemp"),
+    [
+        ({"boost_temp": "23.5", "stemp": "19.0", "units": "C"}, 23.5),
+        ({"stemp": "19.0", "units": "C"}, 19.0),
+    ],
+)
+def test_accumulator_boost_button_starts_boost_via_backend(
+    heater_hass_data, acm_settings: dict[str, Any], expected_stemp: float
+) -> None:
+    """Start uses stored minutes and device boost_temp, falling back to stemp."""
+
+    async def _run() -> None:
+        backend = types.SimpleNamespace(set_acm_boost_state=AsyncMock())
+        _hass, start, _cancel = _boost_button_env(
+            heater_hass_data, acm_settings, backend
+        )
+
+        await start.async_press()
+
+        backend.set_acm_boost_state.assert_awaited_once_with(
+            "dev-boost-backend",
+            "4",
+            boost=True,
+            boost_time=180,
+            stemp=expected_stemp,
+            units="C",
+        )
+
+    asyncio.run(_run())
+
+
+def test_accumulator_boost_button_without_setpoint_raises(heater_hass_data) -> None:
+    """Start raises when the device reports neither boost_temp nor stemp."""
+
+    async def _run() -> None:
+        from homeassistant.exceptions import HomeAssistantError
+
+        backend = types.SimpleNamespace(set_acm_boost_state=AsyncMock())
+        _hass, start, _cancel = _boost_button_env(
+            heater_hass_data, {"units": "C"}, backend
+        )
+
+        with pytest.raises(HomeAssistantError):
+            await start.async_press()
+        backend.set_acm_boost_state.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
+def test_accumulator_boost_cancel_button_cancels_via_backend(heater_hass_data) -> None:
+    """Cancel calls the backend boost endpoint with boost=False."""
+
+    async def _run() -> None:
+        backend = types.SimpleNamespace(set_acm_boost_state=AsyncMock())
+        _hass, _start, cancel = _boost_button_env(
+            heater_hass_data, {"boost_active": True}, backend
+        )
+
+        await cancel.async_press()
+
+        backend.set_acm_boost_state.assert_awaited_once_with(
+            "dev-boost-backend", "4", boost=False
+        )
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize("action", ["start", "cancel"])
+def test_accumulator_boost_buttons_raise_on_backend_error(
+    heater_hass_data, caplog: pytest.LogCaptureFixture, action: str
+) -> None:
+    """Backend failures surface as HomeAssistantError and are logged."""
+
+    async def _run() -> None:
+        from homeassistant.exceptions import HomeAssistantError
+
+        backend = types.SimpleNamespace(
+            set_acm_boost_state=AsyncMock(side_effect=RuntimeError("network"))
+        )
+        _hass, start, cancel = _boost_button_env(
+            heater_hass_data, {"boost_temp": "22.0", "boost_active": True}, backend
+        )
+        button = start if action == "start" else cancel
+
+        caplog.set_level(logging.ERROR)
+        with pytest.raises(HomeAssistantError):
+            await button.async_press()
+        backend.set_acm_boost_state.assert_awaited_once()
+        assert "failed" in caplog.text
+
+    asyncio.run(_run())
+
+
+def test_accumulator_boost_button_ignores_press_without_hass() -> None:
+    """Start press is a no-op before the entity is attached to hass."""
+
+    async def _run() -> None:
+        coordinator = types.SimpleNamespace(hass=None, data={})
+        context = _make_boost_context("entry-guard", "dev-guard", addr="8")
+        button = AccumulatorBoostButton(coordinator, context, _metadata_for("start"))
+        button.hass = None
+
+        await button.async_press()
+
+    asyncio.run(_run())

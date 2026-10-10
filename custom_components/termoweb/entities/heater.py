@@ -310,20 +310,50 @@ def resolve_boost_runtime_minutes(
     return default
 
 
-def resolve_boost_temperature(
-    hass: HomeAssistant,
-    entry_id: str,
-    node_type: str,
-    addr: str,
-    *,
-    default: float | None = None,
-) -> float | None:
-    """Return the preferred boost temperature for ``node`` or ``default``."""
+def resolve_state_units(state: DomainState | None) -> str:
+    """Return the temperature units (``C``/``F``) reported by ``state``."""
 
-    stored = get_boost_temperature(hass, entry_id, node_type, addr)
-    if stored is not None:
-        return stored
-    return default
+    units_value = getattr(state, "units", None) if state is not None else None
+    units = (units_value or "C").upper()
+    return "C" if units not in {"C", "F"} else units
+
+
+def resolve_acm_boost_setpoint(state: DomainState | None) -> float | None:
+    """Return the device boost temperature, falling back to the setpoint."""
+
+    boost_temp = float_or_none(getattr(state, "boost_temp", None))
+    if boost_temp is None:
+        boost_temp = float_or_none(getattr(state, "stemp", None))
+    return boost_temp
+
+
+async def async_start_acm_boost(
+    backend: Any,
+    dev_id: str,
+    addr: str,
+    state: DomainState | None,
+    *,
+    minutes: int,
+) -> None:
+    """Start an accumulator boost for ``minutes`` at the device boost setpoint."""
+
+    setpoint = resolve_acm_boost_setpoint(state)
+    if setpoint is None:
+        raise ValueError(f"no boost temperature or setpoint known for acm {addr}")
+    await backend.set_acm_boost_state(
+        dev_id,
+        addr,
+        boost=True,
+        boost_time=minutes,
+        stemp=setpoint,
+        units=resolve_state_units(state),
+    )
+
+
+async def async_cancel_acm_boost(backend: Any, dev_id: str, addr: str) -> None:
+    """Cancel an active accumulator boost."""
+
+    await backend.set_acm_boost_state(dev_id, addr, boost=False)
 
 
 def _climate_entity_store(
@@ -946,10 +976,7 @@ class HeaterNodeBase(CoordinatorEntity):
 
     def _units(self) -> str:
         """Return the configured temperature units for this heater."""
-        state = self.heater_state()
-        units_value = getattr(state, "units", None) if state is not None else None
-        units = (units_value or "C").upper()
-        return "C" if units not in {"C", "F"} else units
+        return resolve_state_units(self.heater_state())
 
     @property
     def device_info(self) -> DeviceInfo:
