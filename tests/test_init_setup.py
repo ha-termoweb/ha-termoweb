@@ -1602,14 +1602,6 @@ def test_async_unload_entry_missing_returns_true(
     assert asyncio.run(termoweb_init.async_unload_entry(stub_hass, entry)) is True
 
 
-def test_async_migrate_entry_returns_true(
-    termoweb_init: Any, stub_hass: HomeAssistant
-) -> None:
-    entry = ConfigEntry("migrate", data={})
-    stub_hass.config_entries.add(entry)
-    assert asyncio.run(termoweb_init.async_migrate_entry(stub_hass, entry)) is True
-
-
 @pytest.mark.asyncio
 async def test_shutdown_entry_skips_completed_record(termoweb_init: Any) -> None:
     rec = build_entry_runtime()

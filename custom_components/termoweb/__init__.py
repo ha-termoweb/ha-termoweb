@@ -63,6 +63,7 @@ from .coordinator import (
     build_device_metadata,
 )
 from .energy import energy_import_store
+from .identifiers import build_cloud_unique_id
 from .inventory import (
     Inventory,
     build_node_inventory,
@@ -210,14 +211,6 @@ def _create_client(hass: HomeAssistant, entry: ConfigEntry, brand: str) -> Any:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  # noqa: C901
     """Set up the TermoWeb integration for a config entry."""
     base_interval = int(DEFAULT_POLL_INTERVAL)
-    if "poll_interval" in entry.data or "poll_interval" in entry.options:
-        new_data = dict(entry.data)
-        new_options = dict(entry.options)
-        new_data.pop("poll_interval", None)
-        new_options.pop("poll_interval", None)
-        hass.config_entries.async_update_entry(
-            entry, data=new_data, options=new_options
-        )
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
 
     supports_diagnostics_value = (
@@ -680,6 +673,33 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await energy_import_store(hass, entry.entry_id).async_remove()
 
 
+def _migrate_to_1_2(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Case-fold the cloud account unique ID and drop the legacy poll interval."""
+
+    data = {k: v for k, v in entry.data.items() if k != "poll_interval"}
+    options = {k: v for k, v in entry.options.items() if k != "poll_interval"}
+    unique_id = entry.unique_id
+    username = data.get("username")
+    if isinstance(username, str) and data.get(CONF_BRAND) not in RADIO_BRANDS:
+        folded = build_cloud_unique_id(data.get(CONF_BRAND, DEFAULT_BRAND), username)
+        duplicate = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, folded)
+        if duplicate is None or duplicate.entry_id == entry.entry_id:
+            unique_id = folded
+        else:
+            _LOGGER.warning(
+                "Entry '%s' is the same account as entry '%s'; delete one of them",
+                entry.title,
+                duplicate.title,
+            )
+    hass.config_entries.async_update_entry(
+        entry, data=data, options=options, unique_id=unique_id, minor_version=2
+    )
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate a config entry; no migrations are needed yet."""
+    """Migrate a config entry to the current version."""
+    if entry.version > 1:
+        return False  # downgrade from a newer release
+    if entry.minor_version < 2:
+        _migrate_to_1_2(hass, entry)
     return True

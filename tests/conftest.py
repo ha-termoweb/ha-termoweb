@@ -1206,6 +1206,7 @@ def _install_stubs() -> None:
             self.options = dict(options or {})
             self.unique_id: str | None = None
             self.title: str = ""
+            self.disabled_by: str | None = None
             self._on_unload: list[Callable[[], None]] = []
 
         def async_on_unload(self, func: Callable[[], None]) -> Callable[[], None]:
@@ -1241,6 +1242,9 @@ def _install_stubs() -> None:
 
         def async_get_entry(self, entry_id: str) -> ConfigEntry | None:
             return self._entries.get(entry_id)
+
+        def async_entries(self, domain: str | None = None) -> list[ConfigEntry]:
+            return list(self._entries.values())
 
         def async_update_entry(
             self,
@@ -1417,6 +1421,10 @@ def _install_stubs() -> None:
             self.context: dict[str, Any] = {}
             self._unique_id: str | None = None
 
+        @property
+        def source(self) -> str | None:
+            return self.context.get("source")
+
         async def async_set_unique_id(self, unique_id: str) -> None:
             self._unique_id = unique_id
 
@@ -1515,6 +1523,7 @@ def _install_stubs() -> None:
         YES = "yes"
 
     config_entries_mod.ConfigEntry = ConfigEntry
+    config_entries_mod.SOURCE_RECONFIGURE = "reconfigure"
     config_entries_mod.ConfigFlow = ConfigFlow
     config_entries_mod.OptionsFlow = OptionsFlow
     config_entries_mod.SupportsDiagnostics = SupportsDiagnostics

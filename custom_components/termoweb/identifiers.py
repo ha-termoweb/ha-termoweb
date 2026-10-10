@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .const import DOMAIN
+from .const import BRAND_TERMOWEB, DOMAIN
 from .inventory import normalize_node_addr, normalize_node_type
 
 
@@ -85,3 +85,10 @@ def thermostat_fallback_name(addr: Any) -> str:
     if not address:
         return "Thermostat"
     return f"Thermostat {address}"
+
+
+def build_cloud_unique_id(brand: str, username: str) -> str:
+    """Return a cloud entry's unique ID: the case-folded account, brand-prefixed."""
+
+    account = username.strip().casefold()
+    return account if brand == BRAND_TERMOWEB else f"{brand}:{account}"

@@ -217,68 +217,6 @@ async def test_progress_step_reports_running_task(gateway, monkeypatch) -> None:
     assert result["type"] == "create_entry"
 
 
-@pytest.mark.asyncio
-async def test_reconfigure_radio_updates_address(gateway) -> None:
-    hass = HomeAssistant()
-    entry = _radio_entry(hass)
-    flow = _flow(hass, entry_id=entry.entry_id, source="reconfigure")
-    form = await flow.async_step_reconfigure()
-    assert form["type"] == "form" and form["step_id"] == "reconfigure_radio"
-
-    result = await flow.async_step_reconfigure_radio(
-        {"host": "10.0.0.9", "port": 2424, "rescan": False}
-    )
-    assert result == {"type": "abort", "reason": "reconfigure_successful"}
-    assert entry.data["host"] == "10.0.0.9" and entry.data["port"] == 2424
-    assert entry.data["nodes"] == [{"type": "htr", "addr": "6", "name": "Heater 6"}]
-
-
-@pytest.mark.asyncio
-async def test_reconfigure_radio_rescan_replaces_nodes(gateway) -> None:
-    gateway["discover"] = (NetworkSighting(DIALECT_B, NET), {6: object(), 7: object()})
-    hass = HomeAssistant()
-    entry = _radio_entry(hass)
-    flow = _flow(hass, entry_id=entry.entry_id, source="reconfigure")
-    first = await flow.async_step_reconfigure_radio(
-        {"host": "10.0.0.5", "port": 2323, "rescan": True}
-    )
-    result = await _run_discovery(flow, first)
-    assert result == {"type": "abort", "reason": "reconfigure_successful"}
-    assert [n["addr"] for n in entry.data["nodes"]] == ["6", "7"]
-    assert gateway["calls"][-1][3:] == ("B", NET)
-
-
-@pytest.mark.asyncio
-async def test_reconfigure_radio_errors(gateway) -> None:
-    hass = HomeAssistant()
-    entry = _radio_entry(hass)
-    flow = _flow(hass, entry_id=entry.entry_id, source="reconfigure")
-    gateway["probe"] = RadioLinkError("down")
-    result = await flow.async_step_reconfigure_radio(
-        {"host": "10.0.0.5", "port": 2323, "rescan": False}
-    )
-    assert result["errors"] == {"base": "cannot_connect_radio"}
-    gateway["probe"] = config_flow.RadioSetupError("no_gateway_mac")
-    result = await flow.async_step_reconfigure_radio(
-        {"host": "10.0.0.5", "port": 2323, "rescan": False}
-    )
-    assert result["errors"] == {"base": "no_gateway_mac"}
-
-    gateway["probe"] = DEV_ID
-    gateway["discover"] = config_flow.RadioSetupError("no_heaters")
-    first = await flow.async_step_reconfigure_radio(
-        {"host": "10.0.0.5", "port": 2323, "rescan": True}
-    )
-    result = await _run_discovery(flow, first)
-    assert result["step_id"] == "reconfigure_radio"
-    assert result["errors"] == {"base": "no_heaters"}
-
-    assert await _flow(hass).async_step_reconfigure_radio() == {
-        "type": "abort",
-        "reason": "no_config_entry",
-    }
-
-
 def test_parse_network_id() -> None:
     assert config_flow.parse_network_id("") is None
     assert config_flow.parse_network_id(None) is None

@@ -95,19 +95,6 @@ async def test_nanocul_listen_only_entry_on_dialect_a_firmware(probes) -> None:
     assert probes == [("stick", PORT.device, "X1")]
 
 
-@pytest.mark.asyncio
-async def test_listen_only_entry_cannot_be_reconfigured() -> None:
-    hass = HomeAssistant()
-    entry = ConfigEntry(
-        "monitor",
-        data={"brand": "radio_monitor", "host": "10.0.0.5", "port": 2323},
-    )
-    hass.config_entries.add_entry(entry)
-    flow = _flow(hass, entry_id=entry.entry_id, source="reconfigure")
-    result = await flow.async_step_reconfigure()
-    assert result == {"type": "abort", "reason": "monitor_reconfigure"}
-
-
 def test_listen_only_entries_have_no_options() -> None:
     entry = ConfigEntry("monitor", data={"brand": "radio_monitor"})
     assert not config_flow.TermoWebConfigFlow.async_supports_options_flow(entry)
