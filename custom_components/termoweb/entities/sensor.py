@@ -53,6 +53,8 @@ from custom_components.termoweb.utils import (
 )
 
 _WH_TO_KWH = 1 / 1000.0
+# Node types summed by the installation total (thermostats meter no energy).
+_TOTAL_ENERGY_NODE_TYPES = frozenset({"htr", "acm"})
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -561,16 +563,6 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
             domain_view if isinstance(domain_view, DomainStateView) else None
         )
 
-    def _device_available(self) -> bool:
-        """Return True when inventory and coordinator expose this heater node."""
-
-        if not super()._device_available():
-            return False
-
-        coordinator = getattr(self, "coordinator", None)
-        coordinator_available = getattr(coordinator, "last_update_success", True)
-        return bool(coordinator_available)
-
     def _metric_entry(self) -> Any:
         """Return the energy metrics for this heater from the domain view."""
 
@@ -1026,8 +1018,10 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return True when the coordinator tracks this power monitor."""
+        """Return True when the last update succeeded and the monitor is tracked."""
 
+        if not super().available:
+            return False
         metrics = self._metric_entry()
         if metrics is not None:
             return True
@@ -1128,33 +1122,33 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the domain view contains energy totals."""
+        """Return True if the last update succeeded and energy totals exist."""
         view = self._domain_view
-        if view is None:
+        if view is None or not super().available:
             return False
         return view.get_energy_snapshot() is not None
 
     @property
     def native_value(self) -> float | None:
-        """Return the summed energy usage across all heaters."""
+        """Return the summed heater energy, or None unless every heater reports."""
         view = self._domain_view
         if view is None:
             return None
         total = 0.0
         found = False
         for node_type, addrs in self._details.addrs_by_type.items():
-            metrics_by_addr = view.get_energy_metrics_for_type(node_type)
-            if not metrics_by_addr:
+            if node_type not in _TOTAL_ENERGY_NODE_TYPES:
                 continue
+            metrics_by_addr = view.get_energy_metrics_for_type(node_type)
             for addr in addrs:
                 metric = metrics_by_addr.get(addr)
-                if metric is None:
-                    continue
-                normalised = _normalise_energy_value(
-                    self.coordinator, metric.energy_kwh
+                normalised = (
+                    None
+                    if metric is None
+                    else _normalise_energy_value(self.coordinator, metric.energy_kwh)
                 )
                 if normalised is None:
-                    continue
+                    return None
                 total += normalised
                 found = True
         if not found:

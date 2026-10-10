@@ -1115,7 +1115,7 @@ custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinaryS
 custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinarySensor.extra_state_attributes
     Return boost metadata exposed alongside the binary state.
 custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinarySensor.available
-    Return whether the heater node exists in the inventory.
+    Return True when the last update succeeded and the node is in inventory.
 custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinarySensor.device_info
     Expose Home Assistant device metadata for the heater.
 custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinarySensor.boost_state
@@ -1153,7 +1153,7 @@ custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.__in
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.boost_context
     Return the inventory-derived context for this entity.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.available
-    Return True when the inventory exposes this accumulator.
+    Return True when the last update succeeded and the node is in inventory.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.async_added_to_hass
     Register coordinator listener hooks once the entity is added.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase._handle_coordinator_update
@@ -1179,7 +1179,7 @@ custom_components/termoweb/entities/button.py :: AccumulatorBoostCancelButton.as
 custom_components/termoweb/entities/button.py :: DisplayFlashButton.__init__
     Initialise the display flash button entity.
 custom_components/termoweb/entities/button.py :: DisplayFlashButton.available
-    Return True when the target node is still in immutable inventory.
+    Return True when the last update succeeded and the node is in inventory.
 custom_components/termoweb/entities/button.py :: DisplayFlashButton.device_info
     Expose Home Assistant device metadata for the flash target.
 custom_components/termoweb/entities/button.py :: DisplayFlashButton.async_press
@@ -1379,7 +1379,7 @@ custom_components/termoweb/entities/heater.py :: HeaterNodeBase.async_will_remov
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase.should_poll
     Home Assistant should not poll heater entities.
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase.available
-    Return whether the backing device exposes heater data.
+    Return True when the last update succeeded and the node is in inventory.
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase._device_available
     Return True when the immutable inventory exposes this node.
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase._domain_state_view
@@ -1506,8 +1506,6 @@ custom_components/termoweb/entities/sensor.py :: AccumulatorChargePercentageSens
     Return the accumulator charge percentage as an integer.
 custom_components/termoweb/entities/sensor.py :: HeaterEnergyBase.__init__
     Initialise a heater energy-derived sensor entity.
-custom_components/termoweb/entities/sensor.py :: HeaterEnergyBase._device_available
-    Return True when inventory and coordinator expose this heater node.
 custom_components/termoweb/entities/sensor.py :: HeaterEnergyBase._metric_entry
     Return the energy metrics for this heater from the domain view.
 custom_components/termoweb/entities/sensor.py :: HeaterEnergyBase._raw_native_value
@@ -1549,7 +1547,7 @@ custom_components/termoweb/entities/sensor.py :: PowerMonitorSensorBase._coerce_
 custom_components/termoweb/entities/sensor.py :: PowerMonitorSensorBase.should_poll
     Coordinator updates push new data for power monitors.
 custom_components/termoweb/entities/sensor.py :: PowerMonitorSensorBase.available
-    Return True when the coordinator tracks this power monitor.
+    Return True when the last update succeeded and the monitor is tracked.
 custom_components/termoweb/entities/sensor.py :: PowerMonitorSensorBase.native_value
     Return the processed metric value for Home Assistant.
 custom_components/termoweb/entities/sensor.py :: PowerMonitorSensorBase.extra_state_attributes
@@ -1563,9 +1561,9 @@ custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor._
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.device_info
     Return the Home Assistant device metadata for the gateway.
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.available
-    Return True if the domain view contains energy totals.
+    Return True if the last update succeeded and energy totals exist.
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.native_value
-    Return the summed energy usage across all heaters.
+    Return the summed heater energy, or None unless every heater reports.
 custom_components/termoweb/entities/sensor.py :: RadioFramesSensor.__init__
     Start at zero frames; the radio monitor pushes every new count.
 custom_components/termoweb/entities/sensor.py :: RadioFramesSensor.device_info
@@ -1870,7 +1868,7 @@ custom_components/termoweb/entities/lock.py :: ChildLockEntity.is_locked
 custom_components/termoweb/entities/lock.py :: ChildLockEntity.icon
     Return a lock icon matching the current child lock state.
 custom_components/termoweb/entities/lock.py :: ChildLockEntity.available
-    Return True when the node exists in the immutable inventory.
+    Return True when the last update succeeded and the node is in inventory.
 custom_components/termoweb/entities/lock.py :: ChildLockEntity.device_info
     Expose Home Assistant device metadata for the node.
 custom_components/termoweb/entities/lock.py :: ChildLockEntity.async_lock

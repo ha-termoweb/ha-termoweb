@@ -138,8 +138,10 @@ class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
 
     @property
     def available(self) -> bool:
-        """Return True when the node exists in the immutable inventory."""
+        """Return True when the last update succeeded and the node is in inventory."""
 
+        if not super().available:
+            return False
         forward_map, _ = self._inventory.heater_address_map
         addresses = forward_map.get(self._node_type, [])
         return self._addr in addresses

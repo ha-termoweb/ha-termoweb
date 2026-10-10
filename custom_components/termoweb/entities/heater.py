@@ -818,8 +818,8 @@ class HeaterNodeBase(CoordinatorEntity):
 
     @property
     def available(self) -> bool:
-        """Return whether the backing device exposes heater data."""
-        return self._device_available()
+        """Return True when the last update succeeded and the node is in inventory."""
+        return super().available and self._device_available()
 
     def _device_available(self) -> bool:
         """Return True when the immutable inventory exposes this node."""

@@ -163,6 +163,11 @@ See `radio_protocol.md` section 10.
 - Inventory-driven assumptions (node list, addresses, and types) are immutable
   for the life of the entry; if hardware changes, the user must reload the
   integration.
+- Node entities are available only while their coordinator's last update
+  succeeded (`last_update_success`) **and** the node is in the inventory. The
+  installation total energy is unknown unless every heater/accumulator reports
+  a value, so a missing node never shows up as a drop in a `TOTAL_INCREASING`
+  meter.
 
 ## Temperature units
 
