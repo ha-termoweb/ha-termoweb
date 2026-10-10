@@ -39,7 +39,6 @@ from custom_components.termoweb.identifiers import (
     build_installation_entity_unique_id,
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
-    thermostat_fallback_name,
 )
 from custom_components.termoweb.inventory import (
     Inventory,
@@ -132,10 +131,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
             addr_str,
             use_default_when_falsey=True,
         )
-        if canonical_type == "thm":
-            heater_fallback = default_name(addr)
-            if base_name == heater_fallback:
-                base_name = thermostat_fallback_name(addr)
 
         new_entities.extend(
             _create_heater_sensors(

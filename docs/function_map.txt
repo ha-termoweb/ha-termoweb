@@ -1612,8 +1612,6 @@ custom_components/termoweb/identifiers.py :: is_canonical_unique_id
     Return True when ``unique_id`` has the shape of the one scheme above.
 custom_components/termoweb/identifiers.py :: migrate_unique_id
     Return the canonical ID for an older ``domain`` entity ID, else None.
-custom_components/termoweb/identifiers.py :: thermostat_fallback_name
-    Return the fallback friendly name for a thermostat node.
 custom_components/termoweb/identifiers.py :: build_cloud_unique_id
     Return a cloud entry's unique ID: the case-folded account, backend-scoped.
 custom_components/termoweb/inventory.py :: _default_heater_name

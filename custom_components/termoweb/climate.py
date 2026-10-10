@@ -44,7 +44,7 @@ from .entity import (
     resolve_acm_boost_setpoint,
     resolve_boost_runtime_minutes,
 )
-from .identifiers import build_heater_unique_id, thermostat_fallback_name
+from .identifiers import build_heater_unique_id
 from .inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
 from .runtime import require_runtime
 
@@ -97,10 +97,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
             default=fallback_addr,
             use_default_when_falsey=True,
         )
-        if canonical_type == "thm":
-            heater_fallback = default_name_simple(addr)
-            if base_name == heater_fallback:
-                base_name = thermostat_fallback_name(addr)
         unique_id = build_heater_unique_id(
             dev_id,
             canonical_type,
