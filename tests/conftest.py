@@ -1536,16 +1536,10 @@ def _install_stubs() -> None:
         def async_create_entry(self, *, title: str, data: dict[str, Any]) -> FlowResult:
             return FlowResult({"type": "create_entry", "title": title, "data": data})
 
-    class SupportsDiagnostics(enum.Enum):
-        """Minimal SupportsDiagnostics stub for integration tests."""
-
-        YES = "yes"
-
     config_entries_mod.ConfigEntry = ConfigEntry
     config_entries_mod.SOURCE_RECONFIGURE = "reconfigure"
     config_entries_mod.ConfigFlow = ConfigFlow
     config_entries_mod.OptionsFlow = OptionsFlow
-    config_entries_mod.SupportsDiagnostics = SupportsDiagnostics
     core_mod.HomeAssistant = HomeAssistant
     core_mod.callback = lambda func: func
 

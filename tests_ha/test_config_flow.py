@@ -177,14 +177,9 @@ async def test_cloud_entry_unique_id_is_case_folded(
     )
 
     assert result["result"].unique_id == "ducaheat:user@example.com"
-    assert result["result"].minor_version == 2
+    assert result["result"].minor_version == 3
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F2: the flow writes a fictional 'supports_diagnostics' key into "
-    "entry.data (PLAN Phase 2.4/3, setup_energy.md F2)",
-)
 async def test_cloud_step_stores_only_credentials(
     hass: HomeAssistant, cloud: FakeCloud
 ) -> None:
@@ -436,7 +431,7 @@ async def test_migration_case_folds_unique_id_and_drops_poll_interval(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert (entry.version, entry.minor_version) == (1, 2)
+    assert (entry.version, entry.minor_version) == (1, 3)
     assert entry.unique_id == "user@example.com"
     assert entry.data["username"] == "User@Example.com"
     assert "poll_interval" not in entry.data
@@ -464,7 +459,7 @@ async def test_migration_keeps_unique_id_on_collision(
     await hass.async_block_till_done()
 
     assert [entry.unique_id for entry in entries] == [USERNAME, USERNAME.upper()]
-    assert [entry.minor_version for entry in entries] == [2, 2]
+    assert [entry.minor_version for entry in entries] == [3, 3]
     assert "is the same account as entry" in caplog.text
 
 
@@ -483,19 +478,38 @@ async def test_migration_leaves_radio_unique_id(
     assert await async_migrate_entry(hass, entry)
 
     assert entry.unique_id == f"{brand}:0A0B0C0D0E0F"
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
 
 
 async def test_migration_of_current_entry_is_a_no_op(hass: HomeAssistant) -> None:
     """An entry already at the current version is left alone."""
     entry = MockConfigEntry(
-        domain=DOMAIN, minor_version=2, unique_id="Mixed", data={"username": "Mixed"}
+        domain=DOMAIN, minor_version=3, unique_id="Mixed", data={"username": "Mixed"}
     )
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry)
 
     assert entry.unique_id == "Mixed"
+
+
+@pytest.mark.parametrize("minor_version", [1, 2])
+async def test_migration_drops_supports_diagnostics(
+    hass: HomeAssistant, minor_version: int
+) -> None:
+    """F2: the fictional supports_diagnostics flag is removed from entry data."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        minor_version=minor_version,
+        unique_id=f"radio:{'0a' * 6}",
+        data={CONF_BRAND: BRAND_RADIO, "host": "h", "supports_diagnostics": True},
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert dict(entry.data) == {CONF_BRAND: BRAND_RADIO, "host": "h"}
+    assert entry.minor_version == 3
 
 
 async def test_migration_refuses_newer_version(hass: HomeAssistant) -> None:

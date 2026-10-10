@@ -7,14 +7,12 @@ from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import functools
-import inspect
 import logging
 import time
 import typing
 from typing import Any
 
 from aiohttp import ClientError
-from homeassistant import config_entries as config_entries_module
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
@@ -82,8 +80,6 @@ from .throttle import reset_samples_rate_limit_state
 from .utils import async_get_integration_version as _async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
-
-SupportsDiagnostics = getattr(config_entries_module, "SupportsDiagnostics", None)
 
 PLATFORMS = ["button", "binary_sensor", "climate", "number", "sensor"]
 LOCK_PLATFORMS = ["lock"]
@@ -236,19 +232,6 @@ async def async_setup_entry(  # noqa: C901
     """Set up the TermoWeb integration for a config entry."""
     base_interval = int(DEFAULT_POLL_INTERVAL)
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
-
-    supports_diagnostics_value = (
-        SupportsDiagnostics.YES if SupportsDiagnostics is not None else True
-    )
-    entry.supports_diagnostics = supports_diagnostics_value
-    update_payload = entry.data | {"supports_diagnostics": True}
-    update_method = getattr(entry, "async_update", None)
-    if callable(update_method):
-        update_result = update_method(update_payload)
-        if inspect.isawaitable(update_result):
-            await update_result
-    else:
-        hass.config_entries.async_update_entry(entry, data=update_payload)
 
     version = await _async_get_integration_version(hass)
 
@@ -721,10 +704,19 @@ def _migrate_to_1_2(hass: HomeAssistant, entry: ConfigEntry) -> None:
     )
 
 
+def _migrate_to_1_3(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop the ``supports_diagnostics`` key that old releases stored."""
+
+    data = {k: v for k, v in entry.data.items() if k != "supports_diagnostics"}
+    hass.config_entries.async_update_entry(entry, data=data, minor_version=3)
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate a config entry to the current version."""
     if entry.version > 1:
         return False  # downgrade from a newer release
     if entry.minor_version < 2:
         _migrate_to_1_2(hass, entry)
+    if entry.minor_version < 3:
+        _migrate_to_1_3(hass, entry)
     return True

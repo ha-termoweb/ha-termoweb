@@ -68,7 +68,6 @@ async def test_esp32_listen_only_entry(probes) -> None:
         "radio_type": "esp32",
         "host": "10.0.0.5",
         "port": 2323,
-        "supports_diagnostics": True,
     }
     assert probes == [("gateway", "10.0.0.5", 2323)]
 
@@ -90,7 +89,6 @@ async def test_nanocul_listen_only_entry_on_dialect_a_firmware(probes) -> None:
         "radio_type": "nanocul",
         "device": PORT.device,
         "radio_device_id": "nanocul-x1",
-        "supports_diagnostics": True,
     }
     assert probes == [("stick", PORT.device, "X1")]
 

@@ -28,11 +28,12 @@ import sys
 _diagnostics_stub = types.ModuleType("diagnostics")
 
 
-async def _async_passthrough(data: Any, _keys: set[str]) -> Any:
+def _passthrough(data: Any, _keys: set[str]) -> Any:
+    """Stand in for the (synchronous) real async_redact_data."""
     return data
 
 
-_diagnostics_stub.async_redact_data = _async_passthrough
+_diagnostics_stub.async_redact_data = _passthrough
 _components_pkg = sys.modules.setdefault(
     "homeassistant.components", types.ModuleType("homeassistant.components")
 )

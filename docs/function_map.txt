@@ -40,6 +40,8 @@ custom_components/termoweb/__init__.py :: async_remove_entry
     Delete the entry's stored energy import progress.
 custom_components/termoweb/__init__.py :: _migrate_to_1_2
     Case-fold the cloud account unique ID and drop the legacy poll interval.
+custom_components/termoweb/__init__.py :: _migrate_to_1_3
+    Drop the ``supports_diagnostics`` key that old releases stored.
 custom_components/termoweb/__init__.py :: async_migrate_entry
     Migrate a config entry to the current version.
 custom_components/termoweb/backend/base.py :: HttpClientProto.list_devices

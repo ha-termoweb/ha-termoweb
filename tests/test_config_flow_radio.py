@@ -138,7 +138,6 @@ async def test_radio_form_then_discovery_creates_entry(gateway) -> None:
             {"type": "htr", "addr": "3", "name": "Heater 3"},
             {"type": "htr", "addr": "6", "name": "Heater 6"},
         ],
-        "supports_diagnostics": True,
     }
     assert gateway["calls"][1] == ("discover", "10.0.0.5", 2323, "auto", None)
 
