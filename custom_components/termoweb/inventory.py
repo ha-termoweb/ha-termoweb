@@ -441,7 +441,7 @@ class Inventory:
             if not isinstance(value, str) or not value:
                 return None
             if (
-                node_type_norm == "acm"
+                node_type_norm in ("acm", "thm")
                 and value == default_simple
                 and (node_type_norm, addr_norm) not in explicit_names
             ):
@@ -455,6 +455,8 @@ class Inventory:
 
         if node_type_norm == "acm":
             return f"Accumulator {addr_norm}"
+        if node_type_norm == "thm":
+            return f"Thermostat {addr_norm}"
         return factory(addr_norm)
 
     def _ensure_sample_addresses(

@@ -228,8 +228,9 @@ Setup your environment:
 uv sync --locked --extra test
 ```
 
-All tests run against the real Home Assistant (folder `tests_ha/`). One command
-runs them and checks the 90% coverage gate:
+All tests run against the real Home Assistant (folder `tests/`). One command
+runs them and checks the 95% coverage gate. Tests run in random order and any
+warning fails the run:
 
 ```bash
 timeout 120s uv run pytest --cov

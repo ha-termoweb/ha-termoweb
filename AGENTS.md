@@ -33,8 +33,10 @@ End users are non-technical Home Assistant operators. Documentation must be task
 * Format and lint all changes with `ruff` before committing.
 
 ## Testing Requirements
-* Install with `uv sync --locked --extra test`, then run the suite on real Home Assistant (pytest-homeassistant-custom-component): `timeout 120s uv run pytest --cov`. The 90% coverage gate applies.
-* Write tests in `tests_ha/` against the real `hass` fixture and `MockConfigEntry`. Fake only the backend boundary (the `cloud` fixture in `tests_ha/conftest.py` and the doubles in `tests_ha/fakes/`); never patch Home Assistant internals.
+* Install with `uv sync --locked --extra test`, then run the suite on real Home Assistant (pytest-homeassistant-custom-component): `timeout 120s uv run pytest --cov`. The 95% coverage gate applies.
+* `tests/` mirrors `custom_components/termoweb/` (`tests/backend/`, `tests/backend/radio/`, `tests/codecs/`, `tests/domain/`, `tests/planner/`, `tests/services/`, one `tests/test_<module>.py` per top-level module). Add tests to the file of the module under test; do not create a new file per bug.
+* Write tests against the real `hass` fixture and `MockConfigEntry`. Fake only the backend boundary: the `cloud` fixture in `tests/conftest.py` and the doubles in `tests/fakes/`. Never patch Home Assistant internals, and never import one test module from another.
+* Warnings are errors (`filterwarnings = ["error"]`) and test order is random (pytest-randomly; re-run a failure with the printed `-p randomly --randomly-seed=N`). Close what a test opens and patch real sleeps.
 * Capture partial logs whenever the timed run aborts; treat timeouts as failures requiring investigation. 
 * During debugging, run targeted, no-coverage subsets.
 * If tests approach the 60-second limit, suspect an asynchronous wait issue and stop the run rather than letting it hang.
