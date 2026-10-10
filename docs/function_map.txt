@@ -1240,10 +1240,12 @@ custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.current_te
     Return the measured ambient temperature.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.target_temperature
     Return the target temperature set on the heater.
+custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.temperature_unit
+    Return the unit the device reports temperatures in.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.min_temp
-    Return the minimum supported setpoint.
+    Return the minimum supported setpoint in the device's units.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.max_temp
-    Return the maximum supported setpoint.
+    Return the maximum supported setpoint in the device's units.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.icon
     Return an icon reflecting the heater state.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.extra_state_attributes
@@ -1336,6 +1338,8 @@ custom_components/termoweb/entities/heater.py :: resolve_boost_runtime_minutes
     Return the preferred boost runtime or ``default`` when unset.
 custom_components/termoweb/entities/heater.py :: resolve_state_units
     Return the temperature units (``C``/``F``) reported by ``state``.
+custom_components/termoweb/entities/heater.py :: to_device_temperature
+    Return a Celsius temperature expressed in device units ``C``/``F``.
 custom_components/termoweb/entities/heater.py :: resolve_acm_boost_setpoint
     Return the device boost temperature, falling back to the setpoint.
 custom_components/termoweb/entities/heater.py :: async_start_acm_boost
@@ -1406,6 +1410,10 @@ custom_components/termoweb/entities/heater.py :: HeaterNodeBase._client
     Return the backend used for write operations.
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase._units
     Return the configured temperature units for this heater.
+custom_components/termoweb/entities/heater.py :: HeaterNodeBase._temperature_unit
+    Return the HA temperature unit matching the device's units.
+custom_components/termoweb/entities/heater.py :: HeaterNodeBase._setpoint_range
+    Return the (min, max) setpoint in the device's units.
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase.device_info
     Expose Home Assistant device metadata for the heater.
 custom_components/termoweb/entities/number.py :: _restore_boost_value
@@ -1438,6 +1446,14 @@ custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumb
     Restore the preferred temperature once the entity is added.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumber.native_unit_of_measurement
     Return the configured temperature units for the heater.
+custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumber.native_min_value
+    Return the lowest boost temperature in the device's units.
+custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumber.native_max_value
+    Return the highest boost temperature in the device's units.
+custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumber.native_step
+    Return the slider step: 0.5 degrees Celsius or 1 degree Fahrenheit.
+custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumber._default_temperature
+    Return the default boost temperature in the device's units.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumber.native_value
     Return the preferred boost temperature.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostTemperatureNumber.async_set_native_value
@@ -1462,6 +1478,8 @@ custom_components/termoweb/entities/sensor.py :: async_setup_entry.default_name
     Return a placeholder name for heater nodes.
 custom_components/termoweb/entities/sensor.py :: HeaterTemperatureSensor.__init__
     Initialise the heater temperature sensor entity.
+custom_components/termoweb/entities/sensor.py :: HeaterTemperatureSensor.native_unit_of_measurement
+    Return the unit the device reports temperatures in.
 custom_components/termoweb/entities/sensor.py :: HeaterTemperatureSensor.native_value
     Return the latest temperature reported by the heater.
 custom_components/termoweb/entities/sensor.py :: HeaterTemperatureSensor.extra_state_attributes

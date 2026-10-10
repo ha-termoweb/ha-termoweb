@@ -9,6 +9,7 @@ import logging
 import typing
 from typing import Any, Final, cast
 
+from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -46,7 +47,10 @@ SettingsResolver = Callable[[], DomainState | None]
 
 
 DEFAULT_BOOST_DURATION: Final = 60
-DEFAULT_BOOST_TEMPERATURE: Final = 20.0
+DEFAULT_BOOST_TEMPERATURE: Final = 20.0  # degrees Celsius
+# Setpoint range the devices accept, in degrees Celsius.
+SETPOINT_MIN_C: Final = 5.0
+SETPOINT_MAX_C: Final = 30.0
 _HASS_UNSET: Final[HomeAssistant | None] = cast(HomeAssistant | None, object())
 
 
@@ -318,6 +322,12 @@ def resolve_state_units(state: DomainState | None) -> str:
     units_value = getattr(state, "units", None) if state is not None else None
     units = (units_value or "C").upper()
     return "C" if units not in {"C", "F"} else units
+
+
+def to_device_temperature(celsius: float, units: str) -> float:
+    """Return a Celsius temperature expressed in device units ``C``/``F``."""
+
+    return celsius * 9 / 5 + 32 if units == "F" else celsius
 
 
 def resolve_acm_boost_setpoint(state: DomainState | None) -> float | None:
@@ -962,6 +972,20 @@ class HeaterNodeBase(CoordinatorEntity):
     def _units(self) -> str:
         """Return the configured temperature units for this heater."""
         return resolve_state_units(self.heater_state())
+
+    def _temperature_unit(self) -> UnitOfTemperature:
+        """Return the HA temperature unit matching the device's units."""
+        if self._units() == "F":
+            return UnitOfTemperature.FAHRENHEIT
+        return UnitOfTemperature.CELSIUS
+
+    def _setpoint_range(self) -> tuple[float, float]:
+        """Return the (min, max) setpoint in the device's units."""
+        units = self._units()
+        return (
+            to_device_temperature(SETPOINT_MIN_C, units),
+            to_device_temperature(SETPOINT_MAX_C, units),
+        )
 
     @property
     def device_info(self) -> DeviceInfo:

@@ -16,7 +16,7 @@ from homeassistant.components.climate import (
     HVACAction,
     HVACMode,
 )
-from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
+from homeassistant.const import ATTR_TEMPERATURE
 from homeassistant.core import ServiceCall
 from homeassistant.helpers import entity_platform
 from homeassistant.util import dt as dt_util
@@ -296,7 +296,6 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     _attr_preset_modes = ["none"]
     # Modes that turn_on may restore after a turn_off.
     _resume_modes: tuple[HVACMode, ...] = (HVACMode.HEAT, HVACMode.AUTO)
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
 
     def __init__(
         self,
@@ -620,14 +619,19 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         return float_or_none(getattr(state, "stemp", None))
 
     @property
+    def temperature_unit(self) -> str:
+        """Return the unit the device reports temperatures in."""
+        return self._temperature_unit()
+
+    @property
     def min_temp(self) -> float:
-        """Return the minimum supported setpoint."""
-        return 5.0
+        """Return the minimum supported setpoint in the device's units."""
+        return self._setpoint_range()[0]
 
     @property
     def max_temp(self) -> float:
-        """Return the maximum supported setpoint."""
-        return 30.0
+        """Return the maximum supported setpoint in the device's units."""
+        return self._setpoint_range()[1]
 
     @property
     def icon(self) -> str | None:
@@ -794,7 +798,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             _LOGGER.error("Invalid temperature payload: %r", raw)
             return
 
-        t = max(5.0, min(30.0, t))
+        low, high = self._setpoint_range()
+        t = max(low, min(high, t))
         self._pending_stemp = t
         default_mode = self._default_mode_for_setpoint()
         if default_mode is not None:

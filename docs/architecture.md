@@ -164,6 +164,13 @@ See `radio_protocol.md` section 10.
   for the life of the entry; if hardware changes, the user must reload the
   integration.
 
+## Temperature units
+
+Each node reports its units (`C` or `F`). Climate, temperature sensor and boost
+temperature number entities use that unit as their native unit, and their
+setpoint limits (5–30 °C, i.e. 41–86 °F) and clamps are in that unit. Home
+Assistant converts to the user's unit system; writes carry the device's unit.
+
 ## Heater mode mapping (HA ↔ backend)
 
 Implementation note for heater writes:
