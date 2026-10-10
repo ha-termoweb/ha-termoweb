@@ -92,6 +92,12 @@ This map defines responsibilities for each module family in the final design.
   resolvers, backend write helpers).
   - Child-lock entities now use the `lock` platform; existing entity IDs may migrate
     from `switch.*_child_lock` to `lock.*_child_lock` based on registry behavior.
+- `config_flow.py` — `TermoWebConfigFlow` (the class HA registers): the
+  setup menu, cloud login, reconfigure dispatch and reauth.
+  `config_flow_radio.py` holds the radio setup helpers (serial ports, probes,
+  discovery, pairing, entry data) and `RadioConfigFlow`, the unregistered base
+  class with the ESP32 gateway and nanoCUL steps. `options_flow.py` holds
+  `TermoWebOptionsFlow` (radio heater power, pairing, rehoming).
 - `services/` — Home Assistant services and rate-limited import flows that rely
   on the runtime and domain store.
 
