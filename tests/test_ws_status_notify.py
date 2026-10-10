@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
 
+from conftest import listen_ws_status
 import pytest
 
 from custom_components.termoweb.backend.ws_client import _WSStatusMixin
 from custom_components.termoweb.backend.ws_health import WsHealthTracker
-from custom_components.termoweb.const import signal_ws_status
 
 
 class StubStatusClient(_WSStatusMixin):
@@ -19,13 +18,6 @@ class StubStatusClient(_WSStatusMixin):
         self.hass = SimpleNamespace()
         self.entry_id = "entry"
         self.dev_id = "device"
-        self.dispatch_calls: list[tuple[Any, str, dict[str, Any]]] = []
-        self._dispatcher_mock = self._record_dispatch
-
-    def _record_dispatch(self, hass: Any, signal: str, payload: dict[str, Any]) -> None:
-        """Capture dispatcher calls for later assertions."""
-
-        self.dispatch_calls.append((hass, signal, payload))
 
 
 @pytest.mark.parametrize(
@@ -38,11 +30,15 @@ class StubStatusClient(_WSStatusMixin):
     ],
 )
 def test_notify_ws_status_includes_expected_payload_keys(
-    health_changed: bool, payload_changed: bool, expected_flags: set[str]
+    monkeypatch: pytest.MonkeyPatch,
+    health_changed: bool,
+    payload_changed: bool,
+    expected_flags: set[str],
 ) -> None:
     """Verify the dispatcher payload includes required metadata and optional flags."""
 
     client = StubStatusClient()
+    listener = listen_ws_status(monkeypatch, client)
     tracker = WsHealthTracker(client.dev_id)
 
     client._notify_ws_status(
@@ -52,10 +48,8 @@ def test_notify_ws_status_includes_expected_payload_keys(
         payload_changed=payload_changed,
     )
 
-    assert len(client.dispatch_calls) == 1
-    hass, signal, payload = client.dispatch_calls[0]
-    assert hass is client.hass
-    assert signal == signal_ws_status(client.entry_id)
+    listener.assert_called_once()
+    payload = listener.call_args.args[0]
 
     base_keys = {"dev_id", "status", "reason", "payload_stale"}
     assert set(payload) == base_keys | expected_flags

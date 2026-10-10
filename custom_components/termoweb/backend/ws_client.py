@@ -251,12 +251,8 @@ def forward_ws_sample_updates(
             normalized_updates,
             lease_seconds=lease_seconds,
         )
-    except Exception:  # pragma: no cover - defensive logging  # noqa: BLE001
-        active_logger.debug(
-            "%s: forwarding heater samples failed",
-            log_prefix,
-            exc_info=True,
-        )
+    except Exception:  # one bad frame must not kill the read loop
+        active_logger.exception("%s: forwarding heater samples failed", log_prefix)
 
 
 def translate_path_update(
@@ -442,17 +438,6 @@ class _WSStatusMixin:
 
         cached = getattr(self, "_ws_tracker", None)
         if isinstance(cached, WsHealthTracker):
-            if (
-                getattr(self, "_pending_default_cadence_hint", False)
-                and hasattr(self, "_apply_payload_window_hint")
-                and not getattr(self, "_suppress_default_cadence_hint", False)
-            ):
-                self._pending_default_cadence_hint = False
-                self._apply_payload_window_hint(
-                    source="cadence",
-                    lease_seconds=120,
-                    candidates=[30, 75, "90"],
-                )
             return cached
 
         try:
@@ -467,51 +452,11 @@ class _WSStatusMixin:
             runtime.ws_trackers = {}
             trackers = runtime.ws_trackers
         tracker = trackers.get(self.dev_id)
-        created = False
         if not isinstance(tracker, WsHealthTracker):
             tracker = WsHealthTracker(self.dev_id)
             trackers[self.dev_id] = tracker
-            created = True
-        legacy_status = getattr(self, "_status", None)
-        if (
-            isinstance(legacy_status, str)
-            and legacy_status
-            and tracker.status == "stopped"
-        ):
-            tracker.status = legacy_status
-        legacy_since = getattr(self, "_healthy_since", None)
-        if tracker.healthy_since is None and isinstance(legacy_since, (int, float)):
-            tracker.healthy_since = float(legacy_since)
-        legacy_payload = getattr(self, "_last_payload_at", None)
-        if tracker.last_payload_at is None and isinstance(legacy_payload, (int, float)):
-            tracker.last_payload_at = float(legacy_payload)
-        legacy_heartbeat = getattr(self, "_last_heartbeat_at", None)
-        if tracker.last_heartbeat_at is None and isinstance(
-            legacy_heartbeat, (int, float)
-        ):
-            tracker.last_heartbeat_at = float(legacy_heartbeat)
         setattr(self, "_ws_tracker", tracker)
         self._ws_bucket_sizes()
-        should_apply_hint = created and hasattr(self, "_apply_payload_window_hint")
-        if should_apply_hint and getattr(self, "_suppress_default_cadence_hint", False):
-            should_apply_hint = False
-        if should_apply_hint:
-            self._apply_payload_window_hint(
-                source="cadence",
-                lease_seconds=120,
-                candidates=[30, 75, "90"],
-            )
-        elif (
-            getattr(self, "_pending_default_cadence_hint", False)
-            and hasattr(self, "_apply_payload_window_hint")
-            and not getattr(self, "_suppress_default_cadence_hint", False)
-        ):
-            self._pending_default_cadence_hint = False
-            self._apply_payload_window_hint(
-                source="cadence",
-                lease_seconds=120,
-                candidates=[30, 75, "90"],
-            )
         return tracker
 
     def _cleanup_ws_state(self) -> None:
@@ -543,10 +488,6 @@ class _WSStatusMixin:
     ) -> None:
         """Dispatch websocket status updates with tracker metadata."""
 
-        dispatcher = getattr(self, "_dispatcher_mock", None)
-        if dispatcher is None:
-            dispatcher = async_dispatcher_send
-
         payload: dict[str, Any] = {
             "dev_id": self.dev_id,
             "status": tracker.status,
@@ -558,7 +499,7 @@ class _WSStatusMixin:
             payload["payload_changed"] = True
         payload["payload_stale"] = tracker.payload_stale
 
-        dispatcher(self.hass, signal_ws_status(self.entry_id), payload)
+        async_dispatcher_send(self.hass, signal_ws_status(self.entry_id), payload)
 
     def _sync_gateway_connection_state(self, *, now: float | None = None) -> None:
         """Update gateway connection state in the domain store when available."""
@@ -700,18 +641,14 @@ class _WSStatusMixin:
         state["last_heartbeat_at"] = tracker.last_heartbeat_at
         state["payload_stale"] = tracker.payload_stale
 
-        if (
-            status_changed
-            or health_changed
-            or payload_changed
-            or status in {"healthy", "connected"}
-        ):
-            self._notify_ws_status(
-                tracker,
-                reason="status",
-                health_changed=health_changed,
-                payload_changed=payload_changed,
-            )
+        if not (status_changed or health_changed or payload_changed):
+            return
+        self._notify_ws_status(
+            tracker,
+            reason="status",
+            health_changed=health_changed,
+            payload_changed=payload_changed,
+        )
         self._sync_gateway_connection_state(now=now)
 
 

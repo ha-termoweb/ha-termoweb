@@ -76,7 +76,6 @@ async def test_handshake_retries_use_limiter_and_backoff(
         coordinator=SimpleNamespace(),
         session=session,
     )
-    client._dispatcher_mock = MagicMock()  # type: ignore[attr-defined]
 
     limiter = client._connect_limiter
     assert isinstance(limiter, ConnectionRateLimiter)

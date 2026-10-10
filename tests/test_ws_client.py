@@ -15,7 +15,12 @@ import pytest
 import logging
 import sys
 
-from conftest import CoordinatorStub, DummyREST, build_entry_runtime
+from conftest import (
+    CoordinatorStub,
+    DummyREST,
+    build_entry_runtime,
+    listen_ws_status,
+)
 from custom_components.termoweb.backend import ducaheat_ws
 from custom_components.termoweb.backend import termoweb_ws as module
 from custom_components.termoweb.backend import ws_client as base_ws
@@ -151,7 +156,6 @@ def _make_termoweb_client(
         dev_id="device",
     )
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
-    dispatcher = MagicMock()
     client = module.TermoWebWSClient(
         hass,
         entry_id="entry",
@@ -160,7 +164,6 @@ def _make_termoweb_client(
         coordinator=coordinator,
         session=SimpleNamespace(),
     )
-    client._dispatcher_mock = dispatcher  # type: ignore[attr-defined]
     return client
 
 
@@ -183,7 +186,6 @@ def _make_ducaheat_client(
         dev_id="device",
     )
     rest_client = DummyREST(is_ducaheat=True)
-    dispatcher = MagicMock()
     client = ducaheat_ws.DucaheatWSClient(
         hass,
         entry_id="entry",
@@ -192,7 +194,6 @@ def _make_ducaheat_client(
         coordinator=SimpleNamespace(update_nodes=MagicMock()),
         session=SimpleNamespace(),
     )
-    client._dispatcher_mock = dispatcher  # type: ignore[attr-defined]
     return client
 
 
@@ -493,7 +494,7 @@ def test_forward_ws_sample_updates_uses_coordinator_inventory(
     assert handler.call_args.kwargs.get("lease_seconds") == 30
     assert any(
         record.name == logger.name
-        and record.levelno == logging.DEBUG
+        and record.levelno == logging.ERROR
         and record.message == "tester: forwarding heater samples failed"
         for record in caplog.records
     )
@@ -703,65 +704,6 @@ def test_termoweb_translate_path_deltas(monkeypatch: pytest.MonkeyPatch) -> None
     assert nodes["htr"]["settings"]["1"]["mode"] == "auto"
     assert len(deltas) == 1
     assert deltas[0].payload["mode"] == "auto"
-
-
-def test_ws_status_tracker_applies_default_cadence_hint() -> None:
-    """Creating a tracker should immediately apply the cadence hint."""
-
-    class Dummy(base_ws._WSStatusMixin):
-        def __init__(self) -> None:
-            self.hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
-            self.entry_id = "entry"
-            self.dev_id = "dev"
-            self._apply_payload_window_hint = MagicMock()
-            build_entry_runtime(
-                hass=self.hass,
-                entry_id=self.entry_id,
-                dev_id=self.dev_id,
-            )
-
-    dummy = Dummy()
-    tracker = dummy._ws_health_tracker()
-
-    assert isinstance(tracker, base_ws.WsHealthTracker)
-    dummy._apply_payload_window_hint.assert_called_once_with(
-        source="cadence",
-        lease_seconds=120,
-        candidates=[30, 75, "90"],
-    )
-
-
-def test_ws_status_tracker_processes_pending_cadence_hint() -> None:
-    """Deferred cadence hints should wait until suppression is lifted."""
-
-    class Dummy(base_ws._WSStatusMixin):
-        def __init__(self) -> None:
-            self.hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
-            self.entry_id = "entry"
-            self.dev_id = "dev"
-            self._apply_payload_window_hint = MagicMock()
-            self._suppress_default_cadence_hint = True
-            self._pending_default_cadence_hint = True
-            build_entry_runtime(
-                hass=self.hass,
-                entry_id=self.entry_id,
-                dev_id=self.dev_id,
-            )
-
-    dummy = Dummy()
-    dummy._ws_health_tracker()
-
-    dummy._apply_payload_window_hint.assert_not_called()
-    assert dummy._pending_default_cadence_hint is True
-
-    dummy._suppress_default_cadence_hint = False
-    dummy._ws_health_tracker()
-    dummy._apply_payload_window_hint.assert_called_once_with(
-        source="cadence",
-        lease_seconds=120,
-        candidates=[30, 75, "90"],
-    )
-    assert dummy._pending_default_cadence_hint is False
 
 
 def test_ducaheat_brand_headers_include_expected_fields() -> None:
@@ -1014,10 +956,11 @@ def test_termoweb_update_status_records_state(
     """Status updates should populate the hass data bucket and dispatch events."""
 
     client = _make_termoweb_client(monkeypatch)
+    listener = listen_ws_status(monkeypatch, client)
     client._stats.frames_total = 4  # type: ignore[attr-defined]
     client._stats.events_total = 2  # type: ignore[attr-defined]
     client._stats.last_event_ts = 50.0  # type: ignore[attr-defined]
-    client._healthy_since = 40.0
+    client._ws_health_tracker().healthy_since = 40.0
     monkeypatch.setattr(module.time, "time", lambda: 100.0)
 
     client._update_status("connected")
@@ -1027,7 +970,7 @@ def test_termoweb_update_status_records_state(
     assert state["frames_total"] == 4
     assert state["events_total"] == 2
     assert state["healthy_minutes"] == 1
-    client._dispatcher_mock.assert_called()  # type: ignore[attr-defined]
+    listener.assert_called()
 
 
 def test_termoweb_mark_event_without_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1050,6 +993,7 @@ def test_termoweb_update_status_prefers_stats_timestamp(
     """Healthy updates should fall back to stats timestamps when available."""
 
     client = _make_termoweb_client(monkeypatch)
+    listener = listen_ws_status(monkeypatch, client)
     client._stats.frames_total = 1  # type: ignore[attr-defined]
     client._stats.events_total = 1  # type: ignore[attr-defined]
     client._stats.last_event_ts = 75.0  # type: ignore[attr-defined]
@@ -1061,7 +1005,7 @@ def test_termoweb_update_status_prefers_stats_timestamp(
     state = client._ws_state_bucket()
     assert state["last_event_at"] == 75.0
     assert state["healthy_since"] == 75.0
-    client._dispatcher_mock.assert_called()  # type: ignore[attr-defined]
+    listener.assert_called()
 
 
 @pytest.mark.asyncio
