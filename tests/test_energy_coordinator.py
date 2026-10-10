@@ -1130,6 +1130,104 @@ def test_merge_samples_for_window_updates_energy(
     asyncio.run(_run())
 
 
+def _ws_coordinator(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> EnergyStateCoordinator:
+    """Return an energy coordinator advanced by two WS samples (10.0 -> 10.5 kWh)."""
+
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 20_000.0)
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+    coord.handle_ws_samples("dev", {"htr": {"A": {"t": 9_400.0, "counter": 10_000}}})
+    coord.handle_ws_samples("dev", {"htr": {"A": {"t": 10_000.0, "counter": 10_500}}})
+    assert _energy_metric(coord, "htr", "A") == pytest.approx(10.5)
+    assert _power_metric(coord, "htr", "A") == pytest.approx(3_000.0)
+    return coord
+
+
+def test_merge_samples_older_than_ws_do_not_rewind_energy(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """Hourly history older than the latest WS sample must not rewind energy."""
+
+    async def _run() -> None:
+        coord = _ws_coordinator(monkeypatch, inventory_from_map)
+
+        await coord.merge_samples_for_window(
+            "dev",
+            {
+                ("htr", "A"): [
+                    {"timestamp": 3_600.0, "energy_wh": 9_000.0},
+                    {"timestamp": 7_200.0, "energy_wh": 9_800.0},
+                ]
+            },
+        )
+
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(10.5)
+        assert _power_metric(coord, "htr", "A") == pytest.approx(3_000.0)
+
+        # A later WS sample still advances from the WS point, not history.
+        coord.handle_ws_samples(
+            "dev", {"htr": {"A": {"t": 10_600.0, "counter": 10_600}}}
+        )
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(10.6)
+        assert _power_metric(coord, "htr", "A") == pytest.approx(600.0)
+
+    asyncio.run(_run())
+
+
+def test_handle_ws_samples_out_of_order_does_not_rewind_energy(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """A WS sample older than the latest one must be ignored."""
+
+    coord = _ws_coordinator(monkeypatch, inventory_from_map)
+
+    coord.handle_ws_samples("dev", {"htr": {"A": {"t": 9_940.0, "counter": 10_400}}})
+    assert _energy_metric(coord, "htr", "A") == pytest.approx(10.5)
+    assert _power_metric(coord, "htr", "A") == pytest.approx(3_000.0)
+
+    # Same timestamp with a different counter is also stale.
+    coord.handle_ws_samples("dev", {"htr": {"A": {"t": 10_000.0, "counter": 10_450}}})
+    assert _energy_metric(coord, "htr", "A") == pytest.approx(10.5)
+    assert _power_metric(coord, "htr", "A") == pytest.approx(3_000.0)
+
+
+def test_handle_ws_samples_newer_lower_counter_is_reset(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """A newer sample with a lower counter is a genuine meter reset."""
+
+    async def _run() -> None:
+        coord = _ws_coordinator(monkeypatch, inventory_from_map)
+
+        coord.handle_ws_samples("dev", {"htr": {"A": {"t": 10_600.0, "counter": 200}}})
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(0.2)
+        assert _power_metric(coord, "htr", "A") is None
+
+        # History newer than the reset point keeps advancing from it.
+        await coord.merge_samples_for_window(
+            "dev", {("htr", "A"): [{"timestamp": 11_200.0, "energy_wh": 300.0}]}
+        )
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(0.3)
+        assert _power_metric(coord, "htr", "A") == pytest.approx(600.0)
+
+    asyncio.run(_run())
+
+
 def test_energy_samples_missing_fields(
     inventory_from_map: Callable[
         [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
@@ -1936,27 +2034,6 @@ def test_process_energy_sample_counter_reset_prune_power(
         "htr", "A", 200.0, 1000.0, energy_bucket, power_bucket, prune_power=True
     )
     assert result is True
-    assert "A" not in power_bucket
-
-
-def test_process_energy_sample_dt_zero_prune(
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-) -> None:
-    """Equal timestamps with prune_power should remove power."""
-
-    hass = HomeAssistant()
-    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
-    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
-
-    energy_bucket: dict[str, float] = {}
-    power_bucket: dict[str, float] = {"A": 100.0}
-
-    coord._process_energy_sample("htr", "A", 100.0, 5000.0, energy_bucket, power_bucket)
-    coord._process_energy_sample(
-        "htr", "A", 100.0, 6000.0, energy_bucket, power_bucket, prune_power=True
-    )
     assert "A" not in power_bucket
 
 

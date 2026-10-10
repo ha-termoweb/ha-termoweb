@@ -1487,25 +1487,25 @@ class EnergyStateCoordinator(
         if scale <= 0:
             scale = 1000.0
         kwh = counter / scale
-        energy_bucket[addr] = kwh
         key = (node_type, addr)
         prev = self._last.get(key)
+        if prev and when <= prev[0]:
+            # Stale or duplicate sample: never rewind the published counter.
+            return False
+
+        energy_bucket[addr] = kwh
         if prev:
             prev_t, prev_kwh = prev
-            if kwh < prev_kwh or when <= prev_t:
+            if kwh < prev_kwh:
+                # Newer sample with a lower counter: genuine meter reset.
                 self._last[key] = (when, kwh)
                 if prune_power:
                     power_bucket.pop(addr, None)
                     return True
                 return False
 
-            dt_hours = (when - prev_t) / 3600.0
-            if dt_hours > 0:
-                delta_kwh = kwh - prev_kwh
-                power_bucket[addr] = delta_kwh / dt_hours * 1000.0
-            elif prune_power:
-                power_bucket.pop(addr, None)
-
+            delta_kwh = kwh - prev_kwh
+            power_bucket[addr] = delta_kwh / ((when - prev_t) / 3600.0) * 1000.0
             self._last[key] = (when, kwh)
             return prune_power
 
