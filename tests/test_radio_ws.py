@@ -161,7 +161,7 @@ async def test_start_connects_refreshes_and_reports_health() -> None:
     assert listener.start() is task
     await settle()
 
-    assert listener.is_running()
+    assert listener._task is not None and not listener._task.done()
     link = links[0]
     assert link.sent[:3] == [
         (6, bytes.fromhex("521A0A0905103409")),
@@ -194,7 +194,7 @@ async def test_start_connects_refreshes_and_reports_health() -> None:
     assert any(call.args[2].get("health_changed") for call in dispatched.call_args_list)
 
     await listener.stop()
-    assert not listener.is_running()
+    assert not (listener._task is not None and not listener._task.done())
     assert link.closes == 1 and link.listeners == []
     assert tracker.status == "stopped"
     assert coordinator.connections[-1]["connected"] is False
@@ -474,7 +474,7 @@ async def test_stop_without_start() -> None:
     listener, client, links, *_ = build()
     await listener.stop()
     assert links == []
-    assert not listener.is_running()
+    assert not (listener._task is not None and not listener._task.done())
 
 
 def test_node_type_prefers_heater_for_shared_addresses() -> None:
@@ -510,13 +510,13 @@ async def test_unexpected_refresh_error_does_not_stop_the_loop(
     assert "refresh of heater 6 failed unexpectedly" in caplog.text
     assert "power limit check failed unexpectedly" in caplog.text
     assert coordinator.changes_for("7") != []  # the next heater still refreshed
-    assert listener.is_running()
+    assert listener._task is not None and not listener._task.done()
     assert sleeper.calls == [REFRESH]
 
     links[0].sent.clear()
     sleeper.release()  # the next iteration still runs its keepalives
     await settle()
-    assert listener.is_running()
+    assert listener._task is not None and not listener._task.done()
     assert sleeper.calls == [REFRESH, REFRESH]
     assert (6, bytes.fromhex("521A0A0905103409")) in links[0].sent
     await listener.stop()
@@ -544,7 +544,7 @@ async def test_unexpected_grant_error_is_logged_and_the_loop_goes_on(
 
     sleeper.release()
     await settle()
-    assert listener.is_running()
+    assert listener._task is not None and not listener._task.done()
     assert sleeper.calls == [REFRESH, REFRESH]
     await listener.stop()
 
@@ -564,5 +564,5 @@ async def test_cancellation_inside_a_refresh_still_stops_the_loop(
     task = listener.start()
     await settle()
     assert task.cancelled()
-    assert not listener.is_running()
+    assert not (listener._task is not None and not listener._task.done())
     await listener.stop()

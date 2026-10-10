@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from .base import Backend, BackendCapabilities, HttpClientProto, WsClientProto
 from .factory import (
     backend_capabilities,
@@ -15,40 +13,10 @@ from .factory import (
 __all__ = [
     "Backend",
     "BackendCapabilities",
-    "DucaheatBackend",
-    "DucaheatRESTClient",
     "HttpClientProto",
-    "RadioBackend",
-    "TermoWebBackend",
     "WsClientProto",
     "backend_capabilities",
     "create_backend",
     "create_radio_client",
     "create_rest_client",
 ]
-
-
-def __getattr__(name: str) -> Any:
-    """Lazily import backend implementations to avoid circular imports."""
-
-    if name in {"DucaheatBackend", "DucaheatRESTClient"}:
-        from .ducaheat import DucaheatBackend, DucaheatRESTClient  # noqa: PLC0415
-
-        mapping = {
-            "DucaheatBackend": DucaheatBackend,
-            "DucaheatRESTClient": DucaheatRESTClient,
-        }
-        value = mapping[name]
-        globals()[name] = value
-        return value
-    if name == "RadioBackend":
-        from .radio_backend import RadioBackend  # noqa: PLC0415
-
-        globals()[name] = RadioBackend
-        return RadioBackend
-    if name == "TermoWebBackend":
-        from .termoweb import TermoWebBackend  # noqa: PLC0415
-
-        globals()[name] = TermoWebBackend
-        return TermoWebBackend
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

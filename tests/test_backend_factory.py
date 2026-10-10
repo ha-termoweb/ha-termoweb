@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 from types import SimpleNamespace
 from typing import Any
-
-import pytest
 
 from custom_components.termoweb.backend import create_backend
 from custom_components.termoweb.backend import termoweb as termoweb_backend
@@ -124,75 +121,7 @@ def test_termoweb_backend_creates_ws_client() -> None:
     assert ws_client.dev_id == "device456"
     assert ws_client.entry_id == "entry123"
     assert ws_client._coordinator is coordinator
-    assert ws_client._protocol_hint is None
     assert getattr(ws_client, "_inventory", None) is inventory
-
-
-def test_termoweb_backend_sets_protocol_for_websocket_client(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """TermoWebBackend should pass the socket.io protocol hint to WebSocketClient subclasses."""
-
-    client = DummyHttpClient()
-    backend = termoweb_backend.TermoWebBackend(brand="termoweb", client=client)
-
-    class FakeWS(termoweb_backend.WebSocketClient):
-        def __init__(self, hass: Any, **kwargs: Any) -> None:
-            kwargs.setdefault("session", SimpleNamespace(closed=True))
-            super().__init__(hass, **kwargs)
-
-    monkeypatch.setattr(termoweb_backend, "TermoWebWSClient", FakeWS)
-
-    loop = asyncio.new_event_loop()
-    try:
-        hass = SimpleNamespace(loop=loop)
-        ws_client = backend.create_ws_client(
-            hass,
-            entry_id="entry",
-            dev_id="dev",
-            coordinator=object(),
-        )
-    finally:
-        loop.close()
-
-    assert isinstance(ws_client, FakeWS)
-    assert ws_client._protocol_hint == "socketio09"
-
-
-def test_termoweb_backend_resolves_direct_import() -> None:
-    backend = termoweb_backend.TermoWebBackend(
-        brand="termoweb", client=DummyHttpClient()
-    )
-    resolved = backend._resolve_ws_client_cls()
-    assert resolved is termoweb_backend.TermoWebWSClient
-
-
-def test_termoweb_backend_import_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = termoweb_backend
-    ws_module = importlib.import_module(
-        "custom_components.termoweb.backend.termoweb_ws"
-    )
-
-    with monkeypatch.context() as patch:
-        patch.delattr(ws_module, "TermoWebWSClient")
-        importlib.reload(module)
-        backend = module.TermoWebBackend(brand="termoweb", client=DummyHttpClient())
-        resolved = backend._resolve_ws_client_cls()
-        assert resolved is module.WebSocketClient
-
-    importlib.reload(module)
-    backend = module.TermoWebBackend(brand="termoweb", client=DummyHttpClient())
-    resolved = backend._resolve_ws_client_cls()
-    assert resolved is module.TermoWebWSClient
-
-
-def test_termoweb_backend_resolves_non_type(monkeypatch: pytest.MonkeyPatch) -> None:
-    backend = termoweb_backend.TermoWebBackend(
-        brand="termoweb", client=DummyHttpClient()
-    )
-    monkeypatch.setattr(termoweb_backend, "TermoWebWSClient", object())
-    resolved = backend._resolve_ws_client_cls()
-    assert resolved is termoweb_backend.WebSocketClient
 
 
 def test_backend_capabilities_follow_the_backend_class() -> None:

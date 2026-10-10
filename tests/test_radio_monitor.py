@@ -303,7 +303,9 @@ async def test_monitor_alternates_dialects_on_esp32_and_never_answers(
     assert link.sent == []  # no clock sync, no BF 01, no 57 55
 
     await monitor.stop()
-    assert link.closes == 1 and not monitor.is_running()
+    assert link.closes == 1 and not (
+        monitor._task is not None and not monitor._task.done()
+    )
 
 
 @pytest.mark.asyncio
@@ -334,7 +336,7 @@ async def test_monitor_survives_a_failed_dialect_switch(caplog) -> None:
         await settle()
     assert "could not switch dialect" in caplog.text
     assert links[0].dialects == ["A"]
-    assert monitor.is_running()
+    assert monitor._task is not None and not monitor._task.done()
     await monitor.stop()
 
 

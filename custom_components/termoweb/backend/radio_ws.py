@@ -108,11 +108,6 @@ class RadioListener(_WSStatusMixin):
         self._update_status("stopped")
         _LOGGER.info("Radio listener stopped for %s", self.dev_id)
 
-    def is_running(self) -> bool:
-        """Return True while the background task runs."""
-
-        return self._task is not None and not self._task.done()
-
     def _status_should_reset_health(self, status: str) -> bool:
         """Clear healthy tracking whenever the gateway is not connected."""
 

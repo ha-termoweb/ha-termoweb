@@ -283,20 +283,6 @@ async def test_connect_once_aborts_when_stopping(
 
 
 @pytest.mark.asyncio
-async def test_ws_url_returns_target(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ws_url should proxy to _build_engineio_target."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    monkeypatch.setattr(
-        client,
-        "_build_engineio_target",
-        AsyncMock(return_value=("wss://example/ws", "socket.io")),
-    )
-
-    assert await client.ws_url() == "wss://example/ws"
-
-
-@pytest.mark.asyncio
 async def test_debug_probe_handles_logging(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -422,15 +408,6 @@ async def test_handle_connection_lost_updates_state(
 
     assert state["restart_count"] == 1
     assert "RuntimeError" in state["last_disconnect_error"]
-
-
-def test_mark_event_tracks_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_mark_event should record recent event paths and update status."""
-
-    client, _sio, dispatcher = _make_client(monkeypatch)
-    monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
-    client._mark_event(paths=["/a", "/b", "/c", "/d", "/e", "/f"], count_event=False)
-    assert client._stats.last_paths == ["/a", "/b", "/c", "/d", "/e"]
 
 
 @pytest.mark.asyncio
@@ -1146,27 +1123,6 @@ def test_header_sanitizers(monkeypatch: pytest.MonkeyPatch) -> None:
     assert mask_identifier("abcdefgh") == "ab...gh"
     assert mask_identifier("abcdefghijklmnop") == "abcdef...mnop"
 
-    sanitised = client._sanitise_headers(
-        {
-            "Authorization": "Bearer secret-token",
-            "Cookie": "session",
-            "X-Test": b"value",
-        }
-    )
-    assert "..." in sanitised["Authorization"]
-    assert "***" in sanitised["Cookie"]
-    assert sanitised["X-Test"] == "value"
-
-    sanitised = client._sanitise_headers({"Authorization": "token"})
-    assert "***" in sanitised["Authorization"]
-
-    params = client._sanitise_params(
-        {"token": "abc12345", "dev_id": "dev123", "sid": "session", "q": "ok"}
-    )
-    assert params["token"] == "{token}"
-    assert params["dev_id"] == "{dev_id}"
-    assert params["sid"] == "{sid}"
-
     sanitised_url = client._sanitise_url(
         "https://host/socket?token=abc&dev_id=12345&sid=session"
     )
@@ -1191,10 +1147,6 @@ def test_redaction_helpers_handle_whitespace(monkeypatch: pytest.MonkeyPatch) ->
     client, _sio, _ = _make_client(monkeypatch)
     assert redact_token_fragment("   ") == ""
     assert mask_identifier("   ") == ""
-    params = client._sanitise_params({"token": "   ", "dev_id": "   ", "sid": "   "})
-    assert params["token"] == "{token}"
-    assert params["dev_id"] == "{dev_id}"
-    assert params["sid"] == "{sid}"
 
 
 @pytest.mark.asyncio
@@ -1274,11 +1226,11 @@ async def test_start_and_stop_manage_tasks(monkeypatch: pytest.MonkeyPatch) -> N
     client._idle_monitor_task = loop.create_task(asyncio.sleep(0))
 
     task = client.start()
-    assert client.is_running() is True
+    assert (client._task is not None and not client._task.done()) is True
     runner_gate.set()
     await asyncio.sleep(0)
     await client.stop()
-    assert client.is_running() is False
+    assert (client._task is not None and not client._task.done()) is False
     assert task.cancelled() or task.done()
 
 

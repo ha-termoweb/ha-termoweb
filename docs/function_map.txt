@@ -42,8 +42,6 @@ custom_components/termoweb/__init__.py :: async_migrate_entry
     Migrate a config entry; no migrations are needed yet.
 custom_components/termoweb/__init__.py :: async_update_entry_options
     Handle options updates; recompute interval if needed.
-custom_components/termoweb/backend/__init__.py :: __getattr__
-    Lazily import backend implementations to avoid circular imports.
 custom_components/termoweb/backend/base.py :: HttpClientProto.list_devices
     Return the list of devices associated with the account.
 custom_components/termoweb/backend/base.py :: HttpClientProto.get_nodes
@@ -186,12 +184,8 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.start
     Start the websocket runner task.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.stop
     Stop the websocket client and background tasks.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.is_running
-    Return True when the websocket runner task is active.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._build_handshake_url
     Return a handshake URL with the provided query parameters.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.ws_url
-    Return the websocket handshake URL.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._connect_once
     Perform a single websocket handshake and upgrade attempt.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._record_frame
@@ -250,12 +244,6 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._subscribe
     Subscribe to heater status and sample feeds.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._maybe_subscribe
     Attempt subscription installation when prerequisites are met.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.request_resubscribe
-    Flag the subscription set for reinstatement and trigger a prompt attempt.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._schedule_resubscribe_kick
-    Schedule an immediate subscribe attempt when conditions allow.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._run_resubscribe_kick
-    Attempt a single subscription refresh after a resubscribe request.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._replay_subscription_paths
     Replay cached subscription paths after a reconnect.
 custom_components/termoweb/backend/factory.py :: _backend_class
@@ -356,8 +344,6 @@ custom_components/termoweb/backend/sanitize.py :: mask_identifier
     Return a masked identifier suitable for log output.
 custom_components/termoweb/backend/sanitize.py :: build_acm_boost_payload
     Return a validated accumulator boost payload.
-custom_components/termoweb/backend/termoweb.py :: TermoWebBackend._resolve_ws_client_cls
-    Return the websocket client class for TermoWeb.
 custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.create_ws_client
     Instantiate the unified websocket client for TermoWeb.
 custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.fetch_hourly_samples
@@ -368,12 +354,6 @@ custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._reset_hand
     Clear cached handshake metadata to avoid retaining payloads.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._brand_headers
     Return baseline headers aligned with the REST client brand.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._sanitise_headers
-    Redact sensitive header values for logging.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._sanitise_placeholder
-    Return a placeholder for known sensitive values.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._sanitise_params
-    Redact sensitive query parameter values for logging.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._sanitise_url
     Return a redacted representation of the websocket URL.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._wrap_background_task
@@ -382,10 +362,6 @@ custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.start
     Start the websocket client background task.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.stop
     Cancel tasks and close websocket sessions.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.is_running
-    Return True if the websocket client task is active.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.ws_url
-    Return the websocket URL using the API client's token helper.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.debug_probe
     Emit a dev_data probe for debugging purposes.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._runner
@@ -568,20 +544,6 @@ custom_components/termoweb/backend/ws_client.py :: _WSCommon._throttle_connectio
     Apply a defensive rate limit before dialing the backend.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon._session_received_payload
     Return True when a payload arrived since ``started_at``.
-custom_components/termoweb/backend/ws_client.py :: _WSCommon._ensure_type_bucket
-    Return the node bucket for ``node_type`` without cloning metadata.
-custom_components/termoweb/backend/ws_client.py :: WebSocketClient.__init__
-    Initialise a websocket client wrapper for the active backend.
-custom_components/termoweb/backend/ws_client.py :: WebSocketClient.start
-    Start the backend-specific websocket client.
-custom_components/termoweb/backend/ws_client.py :: WebSocketClient.stop
-    Stop the backend-specific websocket client.
-custom_components/termoweb/backend/ws_client.py :: WebSocketClient.is_running
-    Return True when the backend websocket client is running.
-custom_components/termoweb/backend/ws_client.py :: WebSocketClient.ws_url
-    Return the active websocket URL when available.
-custom_components/termoweb/backend/ws_client.py :: __getattr__
-    Lazily expose backend websocket client implementations.
 custom_components/termoweb/backend/ws_health.py :: WsHealthTracker.update_status
     Update the tracked status and return (status_changed, health_changed).
 custom_components/termoweb/backend/ws_health.py :: WsHealthTracker.set_payload_window
@@ -2471,8 +2433,6 @@ custom_components/termoweb/backend/radio_ws.py :: RadioListener.start
     Start the background task (idempotent) and return it.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener.stop
     Cancel the task and pending replies, then close the gateway link.
-custom_components/termoweb/backend/radio_ws.py :: RadioListener.is_running
-    Return True while the background task runs.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._status_should_reset_health
     Clear healthy tracking whenever the gateway is not connected.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._run

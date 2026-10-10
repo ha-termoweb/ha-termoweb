@@ -183,9 +183,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._stats = WSStats()
         self._subscription_paths: set[str] = set()
         self._pending_subscribe = True
-        self._resubscribe_kick_task: asyncio.Task | None = None
         self._last_subscribe_attempt_ts = 0.0
-        self._last_subscribe_log_ts = 0.0
         self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
         self._subscription_refresh_lock = asyncio.Lock()
         self._send_lock = asyncio.Lock()
@@ -200,7 +198,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._pending_dev_data = False
         self._keepalive_task: asyncio.Task | None = None
         self._ping_interval: float | None = None
-        self._ping_timeout: float | None = None
         self._status: str = "stopped"
         self._healthy_since: float | None = None
         self._last_event_at: float | None = None
@@ -358,10 +355,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             self._task = None
         self._cleanup_ws_state()
 
-    def is_running(self) -> bool:
-        """Return True when the websocket runner task is active."""
-        return bool(self._task and not self._task.done())
-
     def _base_host(self) -> str:
         base = get_brand_api_base(self._brand).rstrip("/")
         parsed = urlsplit(base if base else API_BASE)
@@ -378,18 +371,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         parsed = urlsplit(self._base_host())
         query = urlencode(list(params.items()))
         return urlunsplit(parsed._replace(path=self._path(), query=query))
-
-    async def ws_url(self) -> str:
-        """Return the websocket handshake URL."""
-        token = await self._get_token()
-        params = {
-            "token": token,
-            "dev_id": self.dev_id,
-            "EIO": "3",
-            "transport": "polling",
-            "t": _rand_t(),
-        }
-        return self._build_handshake_url(params)
 
     async def _runner(self) -> None:
         self._update_status("starting")
@@ -428,15 +409,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             "t": _rand_t(),
         }
         open_url = self._build_handshake_url(open_params)
-        # _LOGGER.debug("WS (ducaheat): OPEN GET %s", open_url.replace(token, "…"))
         async with asyncio.timeout(15):
             async with self._session.get(open_url, headers=headers) as resp:
                 body = await resp.read()
-                # _LOGGER.debug(
-                #    "WS (ducaheat): OPEN GET -> %s bytes (status=%s)",
-                #    len(body),
-                #    resp.status,
-                # )
                 if resp.status != 200:
                     raise HandshakeError(resp.status, open_url, "open GET")
         packets = _decode_polling_packets(body)
@@ -450,12 +425,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._ping_interval = (
             float(ping_interval) / 1000
             if isinstance(ping_interval, (int, float))
-            else None
-        )
-        ping_timeout = info.get("pingTimeout")
-        self._ping_timeout = (
-            float(ping_timeout) / 1000
-            if isinstance(ping_timeout, (int, float))
             else None
         )
         _LOGGER.info(
@@ -477,7 +446,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         }
         post_url = self._build_handshake_url(post_params)
         payload = _encode_polling_packet(f"40{self._namespace}")
-        # _LOGGER.debug("WS (ducaheat): POST 40/ns %s", post_url.replace(token, "…"))
         async with asyncio.timeout(15):
             async with self._session.post(
                 post_url,
@@ -485,26 +453,15 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 data=payload,
             ) as resp:
                 await resp.read()
-                #                _LOGGER.debug(
-                #                    "WS (ducaheat): POST 40/ns -> status=%s len=%s",
-                #                    resp.status,
-                #                    len(drain),
-                #                )
                 if resp.status != 200:
                     raise HandshakeError(resp.status, post_url, "POST 40/ns")
 
         drain_params = dict(post_params)
         drain_params["t"] = _rand_t()
         drain_url = self._build_handshake_url(drain_params)
-        #        _LOGGER.debug("WS (ducaheat): DRAIN GET %s", drain_url.replace(token, "…"))
         async with asyncio.timeout(15):
             async with self._session.get(drain_url, headers=headers) as resp:
                 body = await resp.read()
-                #                _LOGGER.debug(
-                #                    "WS (ducaheat): DRAIN GET -> status=%s len=%s",
-                #                    resp.status,
-                #                    len(body),
-                #                )
                 if resp.status != 200:
                     raise HandshakeError(resp.status, drain_url, "drain GET")
 
@@ -521,7 +478,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             for k, v in headers.items()
             if k.lower() not in ("connection", "accept-encoding")
         }
-        #        _LOGGER.debug("WS (ducaheat): upgrading WS %s", ws_url.replace(token, "…"))
         self._ws = await self._session.ws_connect(
             ws_url,
             headers=ws_headers,
@@ -529,10 +485,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             autoclose=False,
             timeout=aiohttp.ClientTimeout(total=15),
         )
-        #        _LOGGER.info("WS (ducaheat): upgrade OK")
 
         await self._send_str("2probe", context="probe", ws=self._ws)
-        #        _LOGGER.debug("WS (ducaheat): -> 2probe")
         probe_deadline = time.monotonic() + _PROBE_ACK_TIMEOUT
         probe_ack = False
         while True:
@@ -544,7 +498,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     probe = await self._ws.receive_str()
             except TimeoutError:
                 break
-            #            _LOGGER.debug("WS (ducaheat): <- %r", probe)
             if probe == "3probe":
                 probe_ack = True
                 break
@@ -556,7 +509,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if not probe_ack:
             raise HandshakeError(408, ws_url, "probe ack timeout")
         await self._send_str("5", context="upgrade", ws=self._ws)
-        #        _LOGGER.debug("WS (ducaheat): -> 5 (upgrade)")
 
         upgrade_deadline = time.monotonic() + _UPGRADE_DRAIN_TIMEOUT
         with contextlib.suppress(TimeoutError):
@@ -578,9 +530,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         await self._send_str(
             f"40{self._namespace}", context="namespace-open", ws=self._ws
         )
-        #        _LOGGER.debug("WS (ducaheat): -> 40%s", self._namespace)
         self._pending_dev_data = True
-        #        _LOGGER.debug("WS (ducaheat): dev_data pending until namespace ack")
         self._healthy_since = None
         self._last_event_at = None
         self._stats.frames_total = 0
@@ -1007,7 +957,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             break
                         evt, args = decoded
                         self._stats.events_total += 1
-                        # _LOGGER.debug("WS (ducaheat): <- SIO 42 event=%s args_len=%d", evt, len(args))
 
                         if evt == "message" and args and args[0] == "ping":
                             await self._emit_sio("message", "pong")
@@ -1151,7 +1100,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     continue
                 try:
                     await self._send_str("2", context="keepalive-ping", ws=ws)
-                    # _LOGGER.debug("WS (ducaheat): -> 2 (keepalive ping)")
                 except Exception:  # noqa: BLE001 - defensive logging
                     _LOGGER.debug("WS (ducaheat): keepalive ping failed", exc_info=True)
                     break
@@ -1747,57 +1695,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         )
         return result
 
-    def request_resubscribe(self, reason: str) -> None:
-        """Flag the subscription set for reinstatement and trigger a prompt attempt."""
-
-        self._pending_subscribe = True
-        is_inventory_ready = reason == "inventory_ready"
-        if is_inventory_ready:
-            self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
-            self._last_subscribe_attempt_ts = 0.0
-            self._schedule_resubscribe_kick()
-        else:
-            self._subscribe_backoff_s = max(
-                self._subscribe_backoff_s, _SUBSCRIBE_BACKOFF_INITIAL
-            )
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug(
-                "WS (ducaheat): resubscribe requested (%s) for %s",
-                reason,
-                self.dev_id,
-            )
-
-    def _schedule_resubscribe_kick(self) -> None:
-        """Schedule an immediate subscribe attempt when conditions allow."""
-
-        ws = self._ws
-        if ws is None or ws.closed:
-            return
-        if self._status not in {"connected", "healthy"}:
-            return
-        if self._pending_dev_data:
-            return
-        if self._resubscribe_kick_task and not self._resubscribe_kick_task.done():
-            return
-        self._resubscribe_kick_task = self._loop.create_task(
-            self._run_resubscribe_kick(),
-            name=f"termoweb-ws-{self.dev_id}-resubscribe-kick",
-        )
-
-    async def _run_resubscribe_kick(self) -> None:
-        """Attempt a single subscription refresh after a resubscribe request."""
-
-        try:
-            await self._maybe_subscribe(now=time.time())
-        except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
-            _LOGGER.debug(
-                "WS (ducaheat): resubscribe kick failed for %s",
-                self.dev_id,
-                exc_info=True,
-            )
-        finally:
-            self._resubscribe_kick_task = None
-
     async def _replay_subscription_paths(self) -> None:
         """Replay cached subscription paths after a reconnect."""
 
@@ -1826,14 +1723,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     await task
             finally:
                 self._keepalive_task = None
-        kick_task = self._resubscribe_kick_task
-        if kick_task:
-            kick_task.cancel()
-            try:
-                with contextlib.suppress(asyncio.CancelledError):
-                    await kick_task
-            finally:
-                self._resubscribe_kick_task = None
         if self._ws:
             try:
                 await self._ws.close(
@@ -1846,7 +1735,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._pending_dev_data = False
         self._cleanup_ws_state()
         self._ping_interval = None
-        self._ping_timeout = None
         previous_suppression = getattr(self, "_suppress_default_cadence_hint", False)
         self._suppress_default_cadence_hint = True
         try:

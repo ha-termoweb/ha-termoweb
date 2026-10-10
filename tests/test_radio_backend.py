@@ -34,12 +34,11 @@ def make_backend():
 
 
 def test_brand_constant_and_backend_class() -> None:
-    """The radio brand resolves to RadioBackend, also through the lazy export."""
+    """The radio brand resolves to RadioBackend."""
 
     radio_backend = _mod(".radio_backend").RadioBackend
     assert BRAND_RADIO == "radio"
     assert _mod(".factory")._backend_class("radio") is radio_backend  # noqa: SLF001
-    assert _mod("").RadioBackend is radio_backend
 
 
 def test_capabilities_switch_off_cloud_only_features() -> None:
