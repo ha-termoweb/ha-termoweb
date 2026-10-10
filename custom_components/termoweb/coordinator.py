@@ -324,31 +324,6 @@ class StateCoordinator(
 
         self.async_set_updated_data(self._device_record())
 
-    def _filtered_settings_payload(
-        self, payload: Mapping[str, typing.Any]
-    ) -> dict[str, Any]:
-        """Return a defensive copy of ``payload`` without raw blobs."""
-
-        if not isinstance(payload, Mapping):
-            return {}
-
-        return {key: value for key, value in payload.items() if key != "raw"}
-
-    def _instant_power_key(self, node_type: str, addr: str) -> tuple[str, str] | None:
-        """Return a normalized key for instant power tracking."""
-
-        normalized_type = normalize_node_type(
-            node_type,
-            use_default_when_falsey=True,
-        )
-        normalized_addr = normalize_node_addr(
-            addr,
-            use_default_when_falsey=True,
-        )
-        if not normalized_type or not normalized_addr:
-            return None
-        return normalized_type, normalized_addr
-
     def _instant_power_snapshot(self) -> dict[str, dict[str, dict[str, Any]]]:
         """Return the current instant power cache grouped by node type."""
 
@@ -379,7 +354,7 @@ class StateCoordinator(
     ) -> bool:
         """Store an instant power reading and return ``True`` when changed."""
 
-        key = self._instant_power_key(node_type, addr)
+        key = self._node_key(node_type, addr)
         if key is None:
             return False
 
@@ -453,7 +428,7 @@ class StateCoordinator(
     ) -> InstantPowerEntry | None:
         """Return the cached instant power entry for ``(node_type, addr)``."""
 
-        key = self._instant_power_key(node_type, addr)
+        key = self._node_key(node_type, addr)
         if key is None:
             return None
         return self._instant_power.get(key)
@@ -516,7 +491,7 @@ class StateCoordinator(
                 store.apply_full_snapshot(
                     resolved_type,
                     addr,
-                    self._filtered_settings_payload(payload),
+                    payload,
                 )
                 stored = store.get_state(resolved_type, addr)
                 if stored and hasattr(stored, "max_power"):
@@ -540,8 +515,9 @@ class StateCoordinator(
             candidate = str(value).strip().lower()
         return candidate or None
 
-    def _pending_key(self, node_type: str, addr: str) -> tuple[str, str] | None:
-        """Return the normalised pending settings key for a node."""
+    @staticmethod
+    def _node_key(node_type: str, addr: str) -> tuple[str, str] | None:
+        """Return the normalised ``(node_type, addr)`` key for per-node caches."""
 
         normalized_type = normalize_node_type(
             node_type,
@@ -578,7 +554,7 @@ class StateCoordinator(
     ) -> None:
         """Record expected heater settings awaiting confirmation."""
 
-        key = self._pending_key(node_type, addr)
+        key = self._node_key(node_type, addr)
         if key is None:
             return
 
@@ -725,20 +701,6 @@ class StateCoordinator(
         else:
             payload.pop("boost_minutes_delta", None)
 
-    def _apply_boost_metadata_for_settings(
-        self,
-        bucket: Mapping[str, typing.Any] | None,
-        *,
-        now: datetime | None,
-    ) -> None:
-        """Apply boost metadata derivation to every settings payload."""
-
-        if not isinstance(bucket, Mapping):
-            return
-        for payload in bucket.values():
-            if isinstance(payload, MutableMapping):
-                self._apply_accumulator_boost_metadata(payload, now=now)
-
     def _should_defer_pending_setting(
         self,
         node_type: str,
@@ -747,7 +709,7 @@ class StateCoordinator(
     ) -> bool:
         """Return True when a pending write should defer payload merging."""
 
-        key = self._pending_key(node_type, addr)
+        key = self._node_key(node_type, addr)
         if key is None:
             return False
 
@@ -971,7 +933,7 @@ class StateCoordinator(
             self._state_store.apply_full_snapshot(
                 resolved_type,
                 addr,
-                self._filtered_settings_payload(payload),
+                payload,
             )
             self._publish_device_record()
             success = True
@@ -1228,14 +1190,6 @@ class EnergyStateCoordinator(
             updated_at=updated_at,
             ws_deadline=ws_deadline,
         )
-
-    def metrics_by_type(self, node_type: str) -> dict[str, EnergyNodeMetrics]:
-        """Return metrics mapping keyed by address for ``node_type``."""
-
-        snapshot = coerce_snapshot(self.data)
-        if snapshot is None or snapshot.dev_id != self._dev_id:
-            return {}
-        return snapshot.metrics_for_type(node_type)
 
     async def _poll_recent_samples(
         self,

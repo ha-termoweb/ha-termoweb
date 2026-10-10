@@ -13,7 +13,6 @@ from custom_components.termoweb.domain import (
     HeaterState,
     NodeId,
     NodeSettingsDelta,
-    NodeStatusDelta,
     NodeType,
     state_to_dict,
 )
@@ -95,7 +94,11 @@ def test_domain_state_store_applies_snapshots_and_patches() -> None:
         not isinstance(value, Mapping) for value in settings["acm"]["2"].values()
     )
 
-    store.apply_patch("htr", "1", {"stemp": "19.5"})
+    store.apply_delta(
+        NodeSettingsDelta(
+            node_id=NodeId(NodeType.HEATER, "1"), changes={"stemp": "19.5"}
+        )
+    )
     patched = {
         node_id.node_type.value: {node_id.addr: state_to_dict(state)}
         for node_id, state in store.iter_states()
@@ -114,18 +117,12 @@ def test_domain_state_store_applies_deltas() -> None:
             changes={"mode": "auto", "stemp": "20.0"},
         )
     )
-    store.apply_delta(
-        NodeStatusDelta(
-            node_id=NodeId(NodeType.HEATER, "1"),
-            status={"stemp": "20.5", "online": True},
-        )
-    )
     legacy = {
         node_id.node_type.value: {node_id.addr: state_to_dict(state)}
         for node_id, state in store.iter_states()
     }
     assert legacy["htr"]["1"]["mode"] == "auto"
-    assert legacy["htr"]["1"]["stemp"] == "20.5"
+    assert legacy["htr"]["1"]["stemp"] == "20.0"
     assert "status" not in legacy["htr"]["1"]
 
 

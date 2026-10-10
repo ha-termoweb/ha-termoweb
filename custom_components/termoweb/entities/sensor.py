@@ -33,7 +33,7 @@ from custom_components.termoweb.entities.heater import (
 )
 from custom_components.termoweb.identifiers import (
     build_heater_energy_unique_id,
-    build_heater_entity_unique_id,
+    build_heater_unique_id,
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
     thermostat_fallback_name,
@@ -238,11 +238,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
 
         if canonical_type == "thm":
-            battery_unique_id = build_heater_entity_unique_id(
+            battery_unique_id = build_heater_unique_id(
                 dev_id,
                 canonical_type,
                 addr,
-                ":battery",
+                suffix=":battery",
             )
             new_entities.append(
                 ThermostatBatterySensor(
@@ -794,11 +794,11 @@ def _create_heater_sensors(
         canonical_addr = str(addr)
 
     target_type = canonical_type or "htr"
-    temperature_unique_id = build_heater_entity_unique_id(
+    temperature_unique_id = build_heater_unique_id(
         dev_id,
         target_type,
         canonical_addr,
-        ":temp",
+        suffix=":temp",
     )
 
     sensors: list[SensorEntity] = [
@@ -815,23 +815,23 @@ def _create_heater_sensors(
     ]
 
     if target_type == "acm":
-        charging_unique_id = build_heater_entity_unique_id(
+        charging_unique_id = build_heater_unique_id(
             dev_id,
             target_type,
             canonical_addr,
-            ":charging",
+            suffix=":charging",
         )
-        current_charge_unique_id = build_heater_entity_unique_id(
+        current_charge_unique_id = build_heater_unique_id(
             dev_id,
             target_type,
             canonical_addr,
-            ":current_charge_per",
+            suffix=":current_charge_per",
         )
-        target_charge_unique_id = build_heater_entity_unique_id(
+        target_charge_unique_id = build_heater_unique_id(
             dev_id,
             target_type,
             canonical_addr,
-            ":target_charge_per",
+            suffix=":target_charge_per",
         )
         sensors.extend(
             (

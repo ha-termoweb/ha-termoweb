@@ -195,19 +195,6 @@ class NodeSettingsDelta(NodeDelta):
         return self.changes
 
 
-@dataclass(slots=True)
-class NodeStatusDelta(NodeDelta):
-    """Status delta for a node."""
-
-    status: Mapping[str, typing.Any]
-
-    @property
-    def payload(self) -> Mapping[str, typing.Any]:
-        """Return the status mapping payload."""
-
-        return canonicalize_settings_payload({"status": self.status})
-
-
 def _populate_heater_state(
     state: HeaterState,
     payload: Mapping[str, typing.Any],
@@ -484,23 +471,6 @@ class DomainStateStore:
             return
 
         self._apply_payload(node_id, decoded_settings, replace=True)
-
-    def apply_patch(
-        self,
-        node_type: NodeType | str,
-        addr: Any,
-        delta: Mapping[str, typing.Any] | None,
-    ) -> None:
-        """Merge partial updates for ``(node_type, addr)`` into the store."""
-
-        if not isinstance(delta, Mapping):
-            return
-
-        node_id = self._resolve_node_id(node_type, addr)
-        if node_id is None:
-            return
-
-        self._apply_payload(node_id, delta, replace=False)
 
     def apply_delta(self, delta: NodeDelta | None) -> None:
         """Apply a typed domain delta to the store."""

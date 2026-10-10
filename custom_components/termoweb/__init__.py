@@ -431,7 +431,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         hourly_poller=poller,
         config_entry=entry,
         base_poll_interval=max(base_interval, MIN_POLL_INTERVAL),
-        stretched=False,
         poll_suspended=False,
         poll_resume_unsub=None,
         ws_tasks={},
@@ -478,8 +477,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         tasks[dev_id] = task
         _LOGGER.info("WS: started read-only client for %s", dev_id)
 
-    runtime.start_ws = _start_ws
-
     def _recalc_poll_interval() -> None:
         """Suspend REST polling when websocket trackers are healthy and fresh."""
 
@@ -503,7 +500,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
             if suspended:
                 coordinator.update_interval = timedelta(seconds=base_interval)
                 runtime.poll_suspended = False
-                runtime.stretched = False
                 _cancel_timer()
                 _LOGGER.info(
                     "WS: websocket clients idle; resuming REST polling at %ss",
@@ -561,7 +557,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
             if suspended:
                 coordinator.update_interval = timedelta(seconds=base_interval)
                 runtime.poll_suspended = False
-                runtime.stretched = False
                 _cancel_timer()
                 _LOGGER.info(
                     "WS: websocket trackers stopped; resuming REST polling at %ss",
@@ -573,7 +568,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
             if not suspended:
                 coordinator.update_interval = None
                 runtime.poll_suspended = True
-                runtime.stretched = True
                 _LOGGER.info(
                     "WS: trackers healthy with fresh payloads; suspending REST polling",
                 )
@@ -599,7 +593,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
                 base_interval,
             )
         runtime.poll_suspended = False
-        runtime.stretched = False
         _cancel_timer()
 
     runtime.recalc_poll = _recalc_poll_interval

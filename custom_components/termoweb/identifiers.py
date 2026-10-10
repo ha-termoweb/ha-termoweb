@@ -33,17 +33,6 @@ def build_heater_unique_id(
     return f"{DOMAIN}:{dev}:{node}:{address}{suffix_str}"
 
 
-def build_heater_entity_unique_id(
-    dev_id: Any,
-    node_type: Any,
-    addr: Any,
-    suffix: str | None = None,
-) -> str:
-    """Return the canonical unique ID for a heater entity."""
-
-    return build_heater_unique_id(dev_id, node_type, addr, suffix=suffix)
-
-
 def build_heater_energy_unique_id(dev_id: Any, node_type: Any, addr: Any) -> str:
     """Return the canonical unique ID for a heater energy sensor."""
 

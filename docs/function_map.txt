@@ -942,10 +942,6 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._device_record
     Return a minimal coordinator payload for this device.
 custom_components/termoweb/coordinator.py :: StateCoordinator._publish_device_record
     Push the latest device snapshot to coordinator listeners.
-custom_components/termoweb/coordinator.py :: StateCoordinator._filtered_settings_payload
-    Return a defensive copy of ``payload`` without raw blobs.
-custom_components/termoweb/coordinator.py :: StateCoordinator._instant_power_key
-    Return a normalized key for instant power tracking.
 custom_components/termoweb/coordinator.py :: StateCoordinator._instant_power_snapshot
     Return the current instant power cache grouped by node type.
 custom_components/termoweb/coordinator.py :: StateCoordinator._sync_instant_power_data
@@ -964,8 +960,8 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._async_fetch_setti
     Fetch settings for every address and store them in the domain cache.
 custom_components/termoweb/coordinator.py :: StateCoordinator._normalize_mode_value
     Return a canonical string for backend HVAC modes.
-custom_components/termoweb/coordinator.py :: StateCoordinator._pending_key
-    Return the normalised pending settings key for a node.
+custom_components/termoweb/coordinator.py :: StateCoordinator._node_key
+    Return the normalised ``(node_type, addr)`` key for per-node caches.
 custom_components/termoweb/coordinator.py :: StateCoordinator._prune_pending_settings
     Drop expired pending settings entries.
 custom_components/termoweb/coordinator.py :: StateCoordinator.register_pending_setting
@@ -982,8 +978,6 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._requires_boost_re
     Return True when ``payload`` exposes boost day/min metadata.
 custom_components/termoweb/coordinator.py :: StateCoordinator._apply_accumulator_boost_metadata
     Store derived boost metadata on ``payload``.
-custom_components/termoweb/coordinator.py :: StateCoordinator._apply_boost_metadata_for_settings
-    Apply boost metadata derivation to every settings payload.
 custom_components/termoweb/coordinator.py :: StateCoordinator._should_defer_pending_setting
     Return True when a pending write should defer payload merging.
 custom_components/termoweb/coordinator.py :: StateCoordinator._node_ids_from_inventory
@@ -1012,8 +1006,6 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._prefill_ene
     Seed energy and power buckets from cached coordinator state.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._build_snapshot
     Return an :class:`EnergySnapshot` built from metric buckets.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.metrics_by_type
-    Return metrics mapping keyed by address for ``node_type``.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._poll_recent_samples
     Fetch recent energy samples for every tracked node.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._process_energy_sample
@@ -1062,8 +1054,6 @@ custom_components/termoweb/domain/state.py :: NodeDelta.payload
     Return the payload carried by the delta.
 custom_components/termoweb/domain/state.py :: NodeSettingsDelta.payload
     Return the mapping of changed fields.
-custom_components/termoweb/domain/state.py :: NodeStatusDelta.payload
-    Return the status mapping payload.
 custom_components/termoweb/domain/state.py :: NodeSamplesDelta.payload
     Return the samples mapping payload.
 custom_components/termoweb/domain/state.py :: _populate_heater_state
@@ -1096,8 +1086,6 @@ custom_components/termoweb/domain/state.py :: DomainStateStore._apply_payload
     Apply ``payload`` to ``node_id`` using replace semantics when requested.
 custom_components/termoweb/domain/state.py :: DomainStateStore.apply_full_snapshot
     Store a complete settings snapshot for ``(node_type, addr)``.
-custom_components/termoweb/domain/state.py :: DomainStateStore.apply_patch
-    Merge partial updates for ``(node_type, addr)`` into the store.
 custom_components/termoweb/domain/state.py :: DomainStateStore.apply_delta
     Apply a typed domain delta to the store.
 custom_components/termoweb/domain/state.py :: DomainStateStore.get_state
@@ -1654,8 +1642,6 @@ custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._poll_device
     Fetch samples for ``dev_id`` and merge them into the coordinator.
 custom_components/termoweb/identifiers.py :: build_heater_unique_id
     Return the canonical unique ID for a heater node.
-custom_components/termoweb/identifiers.py :: build_heater_entity_unique_id
-    Return the canonical unique ID for a heater entity.
 custom_components/termoweb/identifiers.py :: build_heater_energy_unique_id
     Return the canonical unique ID for a heater energy sensor.
 custom_components/termoweb/identifiers.py :: build_power_monitor_unique_id

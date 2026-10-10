@@ -17,7 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from ..boost import ALLOWED_BOOST_MINUTES, coerce_boost_minutes
 from ..backend.factory import backend_capabilities
 from ..const import DOMAIN
-from ..identifiers import build_gateway_entity_unique_id, build_heater_entity_unique_id
+from ..identifiers import build_gateway_entity_unique_id, build_heater_unique_id
 from ..inventory import (
     Inventory,
     boostable_accumulator_details_for_entry,
@@ -87,11 +87,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     new_entities: list[NumberEntity] = []
     for node_type, addr_str, base_name in accumulator_nodes:
-        unique_prefix = build_heater_entity_unique_id(
+        unique_prefix = build_heater_unique_id(
             dev_id,
             node_type,
             addr_str,
-            "",
+            suffix="",
         )
         new_entities.extend(
             (
@@ -132,8 +132,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
         canonical_addr = normalize_node_addr(addr_str, use_default_when_falsey=True)
         if not canonical_type or not canonical_addr:
             continue
-        priority_unique_id = build_heater_entity_unique_id(
-            dev_id, canonical_type, canonical_addr, ":priority"
+        priority_unique_id = build_heater_unique_id(
+            dev_id, canonical_type, canonical_addr, suffix=":priority"
         )
         new_entities.append(
             HeaterPriorityNumber(

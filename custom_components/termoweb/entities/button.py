@@ -16,7 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from ..const import DOMAIN
 from ..domain import DomainStateView
 from ..domain.state import DomainState
-from ..identifiers import build_heater_entity_unique_id
+from ..identifiers import build_heater_unique_id
 from ..inventory import (
     AccumulatorNode,
     Inventory,
@@ -55,11 +55,11 @@ class DisplayFlashContext:
     def unique_id(self) -> str:
         """Return the stable unique ID for this flash button."""
 
-        return build_heater_entity_unique_id(
+        return build_heater_unique_id(
             self.dev_id,
             self.node_type,
             self.addr,
-            ":flash_display",
+            suffix=":flash_display",
         )
 
 
@@ -105,11 +105,11 @@ class AccumulatorBoostContext:
         """Build context for ``node`` using the shared inventory."""
 
         base_name = inventory.resolve_heater_name(node.type, node.addr)
-        unique_prefix = build_heater_entity_unique_id(
+        unique_prefix = build_heater_unique_id(
             inventory.dev_id,
             node.type,
             node.addr,
-            ":boost",
+            suffix=":boost",
         )
         return cls(entry_id, inventory, node, base_name, unique_prefix)
 

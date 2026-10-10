@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.termoweb.domain import DomainStateStore, NodeId, NodeType
+from custom_components.termoweb.domain import (
+    DomainStateStore,
+    NodeId,
+    NodeSettingsDelta,
+    NodeType,
+)
 from custom_components.termoweb.domain.state import HeaterState
 from custom_components.termoweb.entities.lock import ChildLockEntity
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
@@ -384,7 +389,9 @@ def test_domain_state_lock_parses_on_off_strings() -> None:
     assert isinstance(state, HeaterState)
     assert state.lock is False
 
-    store.apply_patch("htr", "1", {"lock": "on"})
+    store.apply_delta(
+        NodeSettingsDelta(node_id=NodeId(NodeType.HEATER, "1"), changes={"lock": "on"})
+    )
     patched = store.get_state("htr", "1")
     assert isinstance(patched, HeaterState)
     assert patched.lock is True

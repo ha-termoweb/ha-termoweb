@@ -31,7 +31,7 @@ from ..boost import (
     validate_boost_minutes,
 )
 from ..domain import DomainState, DomainStateView, GatewayConnectionState, HeaterState
-from ..identifiers import build_heater_entity_unique_id, thermostat_fallback_name
+from ..identifiers import build_heater_unique_id, thermostat_fallback_name
 from ..inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
 from ..runtime import require_runtime
 from ..utils import float_or_none
@@ -121,11 +121,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
             heater_fallback = default_name_simple(addr)
             if base_name == heater_fallback:
                 base_name = thermostat_fallback_name(addr)
-        unique_id = build_heater_entity_unique_id(
+        unique_id = build_heater_unique_id(
             dev_id,
             canonical_type,
             addr,
-            ":climate",
+            suffix=":climate",
         )
         entity_cls: type[HeaterClimateEntity]
         if canonical_type == "acm" or supports_boost(node):
