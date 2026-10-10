@@ -379,7 +379,11 @@ async def test_discover_radio_paths(monkeypatch) -> None:
 async def test_radio_options_store_heater_rated_power() -> None:
     hass = HomeAssistant()
     entry = _radio_entry(hass)
-    entry.options = {"radio_power": {"power_limit": 2000, "rated_power": {"6": 1200}}}
+    entry.options = {
+        "radio_power": {"power_limit": 2000, "rated_power": {"6": 1200}},
+        "energy_history_progress": {"htr:6": 1_700_000_000},
+        "energy_history_imported": True,
+    }
     flow = config_flow.TermoWebOptionsFlow(entry)
     flow.hass = hass
 
@@ -396,6 +400,8 @@ async def test_radio_options_store_heater_rated_power() -> None:
     assert result["data"] == {
         "debug": True,
         "radio_power": {"power_limit": 2000, "rated_power": {"6": 1500}},
+        "energy_history_progress": {"htr:6": 1_700_000_000},
+        "energy_history_imported": True,
     }
 
 
