@@ -32,6 +32,8 @@ QUERY_PREFIX = "# Q "
 TXERR_BAD_HEX = "TXERR empty or bad hex"
 
 CONNECT_TIMEOUT_S = 5.0
+# Opening the socket or serial port; an unanswered SYN would otherwise retry ~2 min.
+OPEN_TIMEOUT_S = 10.0
 TX_CONFIRM_TIMEOUT_S = 3.0
 # A gateway that loses power leaves a half-open socket the OS may only notice
 # after ~15 minutes; this many missed TX confirmations in a row drop it sooner.
@@ -268,12 +270,18 @@ class RadioLink:
         self._closing = False
         self._established = False
         try:
-            self._reader, self._writer = await self._open_connection(
-                self._host, self._port
-            )
-        except OSError as err:
+            async with asyncio.timeout(OPEN_TIMEOUT_S):
+                self._reader, self._writer = await self._open_connection(
+                    self._host, self._port
+                )
+        except TimeoutError as err:
             raise RadioLinkError(
-                f"cannot connect to {self._host}:{self._port}"
+                f"timed out connecting to {self._host}:{self._port}"
+            ) from err
+        # ValueError: pyserial refuses an unknown URL scheme (a mistyped path).
+        except (OSError, ValueError) as err:
+            raise RadioLinkError(
+                f"cannot connect to {self._host}:{self._port}: {err}"
             ) from err
         banner = self._add_line_waiter(lambda line: line.startswith(BANNER_PREFIX))
         self._read_task = asyncio.get_running_loop().create_task(self._read_loop())
@@ -540,6 +548,11 @@ class RadioLink:
                 if not raw:
                     break
                 line = raw.decode("ascii", errors="replace").strip()
+                if self._established and line.startswith(BANNER_PREFIX):
+                    # The stick or gateway restarted on the same stream and lost
+                    # its station id, auto-ack, dialect and network: reconnect.
+                    _LOGGER.info("Radio gateway restarted; reconnecting")
+                    break
                 if line:
                     self._dispatch(line)
         except (OSError, asyncio.IncompleteReadError) as err:

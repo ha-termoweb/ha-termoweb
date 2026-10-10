@@ -5,7 +5,9 @@ serial port at 115200 8N1 instead of TCP. ``serial_opener`` returns an
 ``open_connection`` callable for :class:`RadioLink`, so the link works
 unchanged. Any pyserial URL works: a device path such as
 ``/dev/serial/by-id/usb-...``, or ``socket://host:port`` / ``rfc2217://``
-for a stick served over the network.
+for a stick served over the network. pyserial-asyncio-fast opens the port in
+an executor and ``socket://`` with the loop's own connect, so neither blocks
+the event loop.
 """
 
 from __future__ import annotations
@@ -34,7 +36,10 @@ def serial_opener(
 
     async def _open(_host: str, _port: int) -> StreamPair:
         """Open the serial port; RadioLink's host and port are only labels."""
-        opener = open_serial or _default_open()
+        # The first import of pyserial reads many files: keep it off the loop.
+        opener = open_serial or await asyncio.get_running_loop().run_in_executor(
+            None, _default_open
+        )
         return await opener(url=url, baudrate=BAUDRATE)
 
     return _open
