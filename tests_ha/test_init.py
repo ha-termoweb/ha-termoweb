@@ -222,11 +222,6 @@ async def test_setup_auth_failure_starts_reauth(
     assert flows[0]["step_id"] == "reauth_confirm"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F2: setup writes a fictional 'supports_diagnostics' key into "
-    "entry.data (PLAN Phase 2.4/3, setup_energy.md F2)",
-)
 async def test_setup_does_not_modify_entry_data(
     hass: HomeAssistant, cloud: FakeCloud, config_entry: MockConfigEntry
 ) -> None:

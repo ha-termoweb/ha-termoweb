@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-import inspect
 import logging
 import platform
 import typing
@@ -35,11 +34,16 @@ SENSITIVE_FIELDS: Final = {
     "authorization",
     "client_secret",
     "dev_id",
+    "device_id",
     "password",
     "refresh_token",
+    "serial",
+    "serial_id",
     "token",
     "username",
 }
+# Location fields of the gateway's geo_data; the time zone stays for debugging.
+GEO_FIELDS: Final = {"city", "country", "state", "zip"}
 
 
 def _extract_websocket_clients(runtime: EntryRuntime) -> list[dict[str, Any]]:
@@ -154,13 +158,16 @@ async def async_get_config_entry_diagnostics(
         )
         geo_data = getattr(device_metadata, "geo_data", None)
         if geo_data is not None:
-            installation_section["geo_data"] = {
-                "country": geo_data.country,
-                "state": geo_data.state,
-                "city": geo_data.city,
-                "tz_code": geo_data.tz_code,
-                "zip": geo_data.zip,
-            }
+            installation_section["geo_data"] = async_redact_data(
+                {
+                    "country": geo_data.country,
+                    "state": geo_data.state,
+                    "city": geo_data.city,
+                    "tz_code": geo_data.tz_code,
+                    "zip": geo_data.zip,
+                },
+                GEO_FIELDS,
+            )
 
     diagnostics: dict[str, Any] = {
         "integration": {
@@ -202,11 +209,4 @@ async def async_get_config_entry_diagnostics(
         filtered_count,
     )
 
-    try:
-        redacted = async_redact_data(diagnostics, SENSITIVE_FIELDS)
-        if inspect.isawaitable(redacted):
-            redacted = await redacted
-    except Exception:  # pragma: no cover - defensive
-        _LOGGER.exception("Failed to redact diagnostics payload for %s", entry.entry_id)
-        raise
-    return redacted
+    return async_redact_data(diagnostics, SENSITIVE_FIELDS)

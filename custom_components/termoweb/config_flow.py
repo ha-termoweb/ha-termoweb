@@ -503,7 +503,6 @@ def radio_monitor_entry_data(radio: Mapping[str, Any]) -> dict[str, Any]:
     return {
         CONF_BRAND: BRAND_RADIO_MONITOR,
         **_radio_connection(radio),
-        "supports_diagnostics": True,
     }
 
 
@@ -517,7 +516,6 @@ def radio_entry_data(
         CONF_DIALECT: sighting.dialect.name,
         CONF_NETWORK_ID: sighting.network_id.hex().upper(),
         CONF_NODES: [radio_node(addr) for addr in sorted(heaters)],
-        "supports_diagnostics": True,
     }
 
 
@@ -525,7 +523,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Initial setup and (optional) reconfigure without use_push."""
 
     VERSION = 1
-    MINOR_VERSION = 2
+    MINOR_VERSION = 3
 
     @staticmethod
     @callback
@@ -606,7 +604,6 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "password": password,
             CONF_BRAND: brand,
         }
-        data["supports_diagnostics"] = True
         return None, data
 
     async def async_step_user(
