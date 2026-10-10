@@ -187,10 +187,12 @@ async def test_failed_first_refresh_cleans_up(
 
 
 @pytest.mark.xfail(
-    strict=True,
+    # Not strict: whether the site device exists before the gateway depends on
+    # platform setup order, so the bug only shows up on some runs.
+    strict=False,
     reason="The gateway device names a 'site' via_device that is not registered "
     "when the gateway is, so the link is dropped (HA logs it; still not an "
-    "error in 2026.10)",
+    "error in 2026.10). Order-dependent; fixed by the via_device_id migration.",
 )
 async def test_setup_registers_no_dangling_via_device(
     hass: HomeAssistant, cloud: FakeCloud, config_entry: MockConfigEntry
