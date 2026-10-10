@@ -38,7 +38,8 @@ from custom_components.termoweb.domain.ids import (
     NodeId as DomainNodeId,
     NodeType as DomainNodeType,
 )
-from custom_components.termoweb.inventory import Inventory, normalize_node_addr
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import normalize_node_addr
 
 _LOGGER = logging.getLogger(__name__)
 

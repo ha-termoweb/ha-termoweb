@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from custom_components.termoweb.inventory import Inventory, build_node_inventory
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import build_node_inventory
 
 
 def test_unknown_heater_address_uses_the_default_name() -> None:

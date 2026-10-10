@@ -46,12 +46,8 @@ from .coordinator.state import DeviceMetadata, StateCoordinator, build_device_me
 from .domain.ids import NodeType
 from .energy import energy_import_store
 from .identifiers import build_cloud_unique_id, migrate_unique_id
-from .inventory import (
-    Inventory,
-    build_node_inventory,
-    normalize_node_addr,
-    normalize_node_type,
-)
+from .inventory import Inventory
+from .nodes import build_node_inventory, normalize_node_addr, normalize_node_type
 from .runtime import EntryRuntime, TermoWebConfigEntry
 from .services.energy_history import async_register_import_energy_history_service
 from .services.radio_capture import async_register_radio_capture_service

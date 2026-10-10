@@ -40,8 +40,8 @@ from custom_components.termoweb.identifiers import (
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
 )
-from custom_components.termoweb.inventory import (
-    Inventory,
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import (
     PowerMonitorNode,
     normalize_node_addr,
     normalize_node_type,

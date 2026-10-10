@@ -46,7 +46,8 @@ from .entity import (
     resolve_boost_runtime_minutes,
 )
 from .identifiers import build_heater_unique_id
-from .inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
+from .inventory import Inventory
+from .nodes import HeaterNode, normalize_node_addr, normalize_node_type
 from .runtime import require_runtime
 
 _LOGGER = logging.getLogger(__name__)

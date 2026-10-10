@@ -48,11 +48,8 @@ from custom_components.termoweb.domain.state import (
     clone_state,
 )
 from custom_components.termoweb.domain.view import DomainStateView
-from custom_components.termoweb.inventory import (
-    Inventory,
-    normalize_node_addr,
-    normalize_node_type,
-)
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import normalize_node_addr, normalize_node_type
 
 _LOGGER = logging.getLogger(__name__)
 

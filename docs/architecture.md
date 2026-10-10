@@ -65,8 +65,12 @@ This map defines responsibilities for each module family in the final design.
   setup/teardown, runtime construction, and platform forwarding.
 - `runtime.py` — `EntryRuntime` definition, `require_runtime(...)` accessor, and
   runtime invariants (single instance per entry).
-- `inventory.py` — immutable inventory models and lookup helpers.
-  `normalize_node_type` is the string form (stripped, lowercased, any value).
+- `inventory.py` — the immutable `Inventory` (node lookups, address maps,
+  sample targets, heater names).
+- `nodes.py` — node models (`Node`, `HeaterNode`, `AccumulatorNode`,
+  `PowerMonitorNode`, `ThermostatNode`), `build_node_inventory` (gateway
+  payload to nodes) and the identifier normalisers. `normalize_node_type` is
+  the string form (stripped, lowercased, any value).
 - `domain/` — domain dataclasses, deltas, `DomainStateStore` (including energy
   snapshots and the gateway power limit), and `DomainStateView`. `domain/ids.py` owns `NodeType`, the
   node-type groups (`HEATER_NODE_TYPES`, `HEATING_NODE_TYPES`,

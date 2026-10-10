@@ -29,7 +29,8 @@ from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.backend.termoweb_ws import TermoWebWSClient
 from custom_components.termoweb.const import WS_NAMESPACE, signal_ws_status
 from custom_components.termoweb.domain import state_to_dict
-from custom_components.termoweb.inventory import Inventory, build_node_inventory
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import build_node_inventory
 from tests.fakes.cloud import DEV_ID, FakeCloud
 from tests.fakes.ws_harness import (
     FakeResponse,

@@ -16,7 +16,7 @@ from typing import Any
 
 from .backend.factory import backend_capabilities
 from .const import DOMAIN
-from .inventory import normalize_node_addr, normalize_node_type
+from .nodes import normalize_node_addr, normalize_node_type
 
 _KEY = r"[a-z0-9]+(?:_[a-z0-9]+)*"
 _KEY_RE = re.compile(_KEY)

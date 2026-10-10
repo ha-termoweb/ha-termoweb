@@ -30,11 +30,8 @@ from custom_components.termoweb.domain import (
     NodeType as DomainNodeType,
     canonicalize_settings_payload,
 )
-from custom_components.termoweb.inventory import (
-    Inventory,
-    normalize_node_addr,
-    normalize_node_type,
-)
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import normalize_node_addr, normalize_node_type
 from custom_components.termoweb.runtime import require_runtime
 
 from .ws_health import WsHealthTracker

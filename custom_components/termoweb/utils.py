@@ -8,7 +8,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration
 
 from .const import CLOUD_CONFIGURATION_URL, DOMAIN, get_brand_label
-from .inventory import normalize_node_addr
+from .nodes import normalize_node_addr
 from .runtime import EntryRuntime, require_runtime
 
 

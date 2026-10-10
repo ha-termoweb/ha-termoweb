@@ -29,7 +29,8 @@ from custom_components.termoweb.const import (
 )
 from custom_components.termoweb.coordinator.state import StateCoordinator
 from custom_components.termoweb.domain import state_to_dict
-from custom_components.termoweb.inventory import Inventory, build_node_inventory
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import build_node_inventory
 from custom_components.termoweb.runtime import EntryRuntime
 from tests.fakes.rest import LatchedResponse
 from tests.fakes.runtime import build_entry_runtime
