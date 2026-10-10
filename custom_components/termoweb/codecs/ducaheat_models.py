@@ -16,12 +16,6 @@ class DucaheatModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-class SelectRequest(DucaheatModel):
-    """Selection gate payload."""
-
-    select: bool
-
-
 class StatusWritePayload(DucaheatModel):
     """Status write payload covering mode, setpoint and presets."""
 
@@ -186,7 +180,6 @@ __all__ = [
     "LockWritePayload",
     "ModeWritePayload",
     "PriorityWritePayload",
-    "SelectRequest",
     "SetupPayload",
     "StatusWritePayload",
 ]

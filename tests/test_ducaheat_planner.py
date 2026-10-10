@@ -16,7 +16,7 @@ def test_plan_command_returns_write_call_only() -> None:
 
     plan = plan_command("dev123", node_id, SetMode("Auto"))
 
-    assert [call.method for call in plan] == ["POST"]
+    assert len(plan) == 1
     assert plan[0].path.endswith("/htr/01/status")
     assert plan[0].json == {"mode": "auto"}
 

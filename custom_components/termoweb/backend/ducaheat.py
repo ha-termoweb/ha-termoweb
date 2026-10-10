@@ -84,7 +84,6 @@ class DucaheatRESTClient(RESTClient):
         dev_id: str,
         addr: str,
         node_type: str,
-        ignore_statuses: Iterable[int] | None = None,
     ) -> Any:
         """Log segmented POST requests before delegating to ``_request``."""
 
@@ -95,13 +94,9 @@ class DucaheatRESTClient(RESTClient):
             addr=addr,
             payload=payload,
         )
-        request_kwargs: dict[str, Any] = {
-            "headers": dict(headers),
-            "json": dict(payload),
-        }
-        if ignore_statuses:
-            request_kwargs["ignore_statuses"] = tuple(ignore_statuses)
-        return await self._request("POST", path, **request_kwargs)
+        return await self._request(
+            "POST", path, headers=dict(headers), json=dict(payload)
+        )
 
     def _log_segmented_post(
         self,
@@ -570,108 +565,21 @@ class DucaheatRESTClient(RESTClient):
         self,
         target: dict[str, Any],
         source: Mapping[str, typing.Any] | None,
-        *,
-        prefer_existing: bool = False,
     ) -> None:
         """Copy accumulator charge metadata from ``source`` into ``target``."""
 
         if not isinstance(source, Mapping):
             return
 
-        def _should_assign(key: str) -> bool:
-            if not prefer_existing:
-                return True
-            if key not in target:
-                return True
-            return target[key] is None
-
         charging_value = coerce_boost_bool(source.get("charging"))
-        if charging_value is not None and _should_assign("charging"):
+        if charging_value is not None:
             target["charging"] = charging_value
 
         for key in ("current_charge_per", "target_charge_per"):
-            if not _should_assign(key):
-                continue
             coerced = coerce_int(source.get(key))
             if coerced is None:
                 continue
             target[key] = max(0, min(100, coerced))
-
-    def _normalise_prog(self, data: Any) -> list[int] | None:
-        """Convert vendor programme payloads into a 168-slot list."""
-        if isinstance(data, list):
-            try:
-                return self._ensure_prog(data)
-            except ValueError:
-                return None
-
-        if not isinstance(data, dict):
-            return None
-
-        days_section: dict[str, Any] | None = None
-        if isinstance(data.get("days"), dict):
-            days_section = data["days"]
-        else:
-            candidate = {k: v for k, v in data.items() if k in _DAY_ORDER}
-            if candidate:
-                days_section = candidate
-
-        if days_section is None and isinstance(data.get("prog"), dict):
-            days_section = data["prog"]
-
-        if not isinstance(days_section, dict):
-            return None
-
-        def _coerce_slots(entry: Any) -> list[int] | None:
-            """Convert a day's slots into a 24-value list."""
-
-            candidate = entry
-            if isinstance(candidate, dict):
-                slots_candidate = candidate.get("slots")
-                values_candidate = candidate.get("values")
-                if isinstance(slots_candidate, list):
-                    candidate = slots_candidate
-                else:
-                    candidate = values_candidate
-
-            if candidate is None:
-                return None
-
-            if not isinstance(candidate, list):
-                return None
-
-            try:
-                values = [int(v) for v in candidate]
-            except (TypeError, ValueError):
-                return None
-
-            if len(values) == 48:
-                values = [max(values[i : i + 2]) for i in range(0, 48, 2)]
-
-            if len(values) < 24:
-                values = values + [0] * (24 - len(values))
-            if len(values) > 24:
-                values = values[:24]
-
-            return values if len(values) == 24 else None
-
-        values: list[int] = []
-        for idx, day in enumerate(_DAY_ORDER):
-            entry = days_section.get(day)
-            if entry is None:
-                entry = days_section.get(str(idx))
-            if entry is None:
-                entry = days_section.get(idx)
-
-            if entry is None:
-                day_values = [0] * 24
-            else:
-                day_values = _coerce_slots(entry)
-                if day_values is None:
-                    return None
-            values.extend(day_values)
-
-        return values if len(values) == 168 else None
 
     async def _collect_boost_metadata(
         self,
@@ -974,19 +882,6 @@ class DucaheatRESTClient(RESTClient):
         """Serialise preset temperatures into the API schema."""
         cold, night, day = self._ensure_ptemp(ptemp)
         return {"cold": cold, "night": night, "day": day}
-
-    def _safe_temperature(self, value: Any) -> str | None:
-        """Defensively format inbound temperature values."""
-
-        if value is None:
-            return None
-        try:
-            return self._ensure_temperature(value)
-        except ValueError:
-            if isinstance(value, str):
-                cleaned = value.strip()
-                return cleaned or None
-            return None
 
 
 class DucaheatBackend(Backend):

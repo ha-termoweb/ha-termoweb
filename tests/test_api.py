@@ -493,30 +493,12 @@ async def test_authed_headers_builds_expected_payload(
     expected = {
         "Authorization": "Bearer token",
         "Accept": "application/json",
-        "User-Agent": client.user_agent,
+        "User-Agent": client._user_agent,
         "Accept-Language": api.ACCEPT_LANGUAGE,
     }
-    if client.requested_with:
-        expected["X-Requested-With"] = client.requested_with
+    if client._requested_with:
+        expected["X-Requested-With"] = client._requested_with
     assert headers == expected
-
-
-@pytest.mark.asyncio
-async def test_refresh_token_public_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
-    session = FakeSession()
-    client = RESTClient(session, "user", "pass")
-    client._access_token = "cached"
-    client._token_expiry_monotonic = 456.0
-    client._token_obtained_monotonic = 987.0
-    ensure_mock = AsyncMock(return_value="new-token")
-    monkeypatch.setattr(client, "_ensure_token", ensure_mock)
-
-    await client.refresh_token()
-
-    assert client._access_token is None
-    assert client._token_expiry_monotonic == 0.0
-    assert client._token_obtained_monotonic == 0.0
-    assert ensure_mock.await_count == 1
 
 
 def test_request_rate_limit_error() -> None:
@@ -1168,51 +1150,6 @@ def test_request_generic_exception_logs(caplog: pytest.LogCaptureFixture) -> Non
 
     assert "Request GET" in caplog.text
     assert "Bearer ***" in caplog.text
-
-
-def test_request_final_auth_error_after_retries(monkeypatch) -> None:
-    async def _run() -> None:
-        session = FakeSession()
-        session.queue_post(
-            MockResponse(
-                200,
-                {"access_token": "initial", "expires_in": 3600},
-                headers={"Content-Type": "application/json"},
-            ),
-            MockResponse(
-                200,
-                {"access_token": "refresh1", "expires_in": 3600},
-                headers={"Content-Type": "application/json"},
-            ),
-            MockResponse(
-                200,
-                {"access_token": "refresh2", "expires_in": 3600},
-                headers={"Content-Type": "application/json"},
-            ),
-        )
-        session.queue_request(
-            LatchedResponse(
-                MockResponse(
-                    401,
-                    {"error": "invalid_token"},
-                    headers={"Content-Type": "application/json"},
-                    text_data='{"error":"invalid_token"}',
-                )
-            )
-        )
-
-        client = RESTClient(session, "user", "pass")
-        headers = await client.authed_headers()
-        monkeypatch.setattr(api, "range", lambda _n: (0, 0), raising=False)
-
-        with pytest.raises(api.BackendAuthError) as err:
-            await client._request("GET", "/api/fail", headers=headers)
-
-        assert str(err.value) == "Unauthorized"
-        assert len(session.request_calls) == 2
-        assert len(session.post_calls) == 3
-
-    asyncio.run(_run())
 
 
 def test_set_node_settings_invalid_units() -> None:
@@ -2054,47 +1991,6 @@ def test_ducaheat_get_node_samples_keeps_second_payload(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_ducaheat_normalise_prog_with_varied_inputs() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-    data = {
-        "mon": {"values": [0, 1, 2]},
-        "tue": [1] * 10,
-        "wed": {"slots": [2] * 30},
-        "fri": {"slots": [0] * 24},
-        "sat": {"values": [1] * 24},
-    }
-
-    result = client._normalise_prog(data)
-    assert result is not None
-    assert len(result) == 168
-    # Monday should extend with zeros to 24 slots
-    assert result[:3] == [0, 1, 2]
-
-
-def test_ducaheat_normalise_prog_invalid_inputs() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-
-    assert client._normalise_prog("bad") is None
-    assert client._normalise_prog({"foo": "bar"}) is None
-    assert client._normalise_prog([0] * 168 + ["x"]) is None
-
-    bad_day = {"days": {"mon": ["x"]}}
-    assert client._normalise_prog(bad_day) is None
-    assert client._normalise_prog({"days": {"mon": {"slots": None}}}) is None
-    assert client._normalise_prog({"days": {"mon": {"slots": 123}}}) is None
-    assert client._normalise_prog({"days": {"mon": {"values": "abc"}}}) is None
-
-
 def test_ducaheat_serialise_prog_expands_half_hours() -> None:
     client = DucaheatRESTClient(
         FakeSession(),
@@ -2118,21 +2014,6 @@ def test_rest_client_normalise_ws_nodes_passthrough() -> None:
     client = RESTClient(FakeSession(), "user", "pass", api_base="https://api.fake")
     payload = {"htr": {"settings": {"01": {}}}}
     assert client.normalise_ws_nodes(payload) is payload
-
-
-def test_ducaheat_safe_temperature_handles_strings() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-
-    assert client._safe_temperature(None) is None
-    assert client._safe_temperature(" 21.2 ") == "21.2"
-    assert client._safe_temperature("   ") is None
-    assert client._safe_temperature("abc") == "abc"
-    assert client._safe_temperature(["oops"]) is None
 
 
 def test_extract_samples_handles_list_payload() -> None:
@@ -2213,27 +2094,3 @@ async def test_rest_client_rejects_cancel_boost_for_non_acm() -> None:
             ("pmo", "1"),
             cancel_boost=True,
         )
-
-
-def test_rest_client_header_properties_exposed() -> None:
-    client = RESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-
-    assert client.user_agent == get_brand_user_agent(BRAND_TERMOWEB)
-    assert client.requested_with == get_brand_requested_with(BRAND_TERMOWEB)
-
-
-def test_ducaheat_rest_client_header_properties_exposed() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base=api.DUCAHEAT_API_BASE,
-    )
-
-    assert client.user_agent == get_brand_user_agent(BRAND_DUCAHEAT)
-    assert client.requested_with == get_brand_requested_with(BRAND_DUCAHEAT)

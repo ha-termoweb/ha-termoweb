@@ -8,7 +8,6 @@ from typing import Any
 from custom_components.termoweb.domain import canonicalize_settings_payload
 from custom_components.termoweb.domain.commands import (
     AccumulatorCommand,
-    BaseCommand,
     SetExtraOptions,
     SetLock,
     SetMode,
@@ -85,7 +84,6 @@ def encode_setpoint_command(
     *,
     units: str | None = None,
     mode: str | None = None,
-    boost: bool | None = None,
     boost_time: int | None = None,
 ) -> dict[str, Any]:
     """Encode a SetSetpoint command for the status endpoint."""
@@ -95,8 +93,6 @@ def encode_setpoint_command(
         payload["units"] = units
     if mode is not None:
         payload["mode"] = mode
-    if boost is not None:
-        payload["boost"] = boost
     if boost_time is not None:
         payload["boost_time"] = boost_time
     return StatusWritePayload.model_validate(payload).model_dump(exclude_none=True)
@@ -201,24 +197,3 @@ def encode_priority_command(command: SetPriority) -> dict[str, Any]:
     return PriorityWritePayload.model_validate(
         {"priority": command.priority}
     ).model_dump()
-
-
-def infer_status_endpoint(node_type: NodeType, command: BaseCommand) -> str:
-    """Return the segmented endpoint name for a status-like command."""
-
-    _ = node_type  # reserved for future specialisation
-    if isinstance(command, SetProgram):
-        return "prog"
-    if isinstance(command, SetMode):
-        return "mode"
-    if isinstance(command, (SetSetpoint, SetPresetTemps, SetUnits)):
-        return "status"
-    if isinstance(command, SetExtraOptions):
-        return "setup"
-    if isinstance(command, (StartBoost, StopBoost)):
-        return "boost"
-    if isinstance(command, SetLock):
-        return "lock"
-    if isinstance(command, SetPriority):
-        return "setup"
-    raise TypeError(f"Unsupported command type: {type(command).__name__}")

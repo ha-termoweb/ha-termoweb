@@ -87,7 +87,6 @@ class RESTClient:
         self._api_base = api_base.rstrip("/") if api_base else API_BASE
         self._basic_auth_b64 = basic_auth_b64 or BASIC_AUTH_B64
         self._access_token: str | None = None
-        self._token_obtained_monotonic: float = 0.0
         self._token_expiry_monotonic: float = 0.0
         self._lock = asyncio.Lock()
         self._is_ducaheat = self._api_base == DUCAHEAT_API_BASE
@@ -126,7 +125,8 @@ class RESTClient:
         url = path if path.startswith("http") else f"{self._api_base}{path}"
         _LOGGER.debug("HTTP %s %s", method, url)
 
-        for attempt in range(2):
+        retried_auth = False
+        while True:
             try:
                 async with self._session.request(
                     method, url, headers=headers, timeout=timeout, **kwargs
@@ -158,7 +158,8 @@ class RESTClient:
                         )
 
                     if resp.status == 401:
-                        if attempt == 0:
+                        if not retried_auth:
+                            retried_auth = True
                             self._access_token = None
                             self._token_expiry_monotonic = 0.0
                             token = await self._ensure_token()
@@ -209,7 +210,6 @@ class RESTClient:
                     redact_text(str(e)),
                 )
                 raise
-        raise BackendAuthError("Unauthorized")
 
     async def _ensure_token(self) -> str:
         """Ensure a bearer token is present; fetch if missing."""
@@ -274,7 +274,6 @@ class RESTClient:
                     raise BackendAuthError("No access_token in response")
                 self._access_token = token
                 now_mono = time_mod()
-                self._token_obtained_monotonic = now_mono
                 expires_in = js.get("expires_in")
                 if isinstance(expires_in, (int, float)):
                     ttl = max(float(expires_in), 0.0)
@@ -282,18 +281,6 @@ class RESTClient:
                     ttl = 3600.0
                 self._token_expiry_monotonic = now_mono + ttl
                 return token
-
-    @property
-    def user_agent(self) -> str:
-        """Return the configured User-Agent string."""
-
-        return self._user_agent
-
-    @property
-    def requested_with(self) -> str | None:
-        """Return the configured X-Requested-With header."""
-
-        return self._requested_with
 
     # ----------------- Public API -----------------
 
@@ -312,15 +299,6 @@ class RESTClient:
         if self._is_ducaheat:
             headers["X-SerialId"] = DUCAHEAT_SERIAL_ID
         return headers
-
-    async def refresh_token(self) -> None:
-        """Refresh the cached bearer token immediately."""
-
-        async with self._lock:
-            self._access_token = None
-            self._token_obtained_monotonic = 0.0
-            self._token_expiry_monotonic = 0.0
-        await self._ensure_token()
 
     async def list_devices(self) -> list[dict[str, Any]]:
         """Return normalized device list: [{'dev_id', ...}, ...]."""
@@ -485,7 +463,7 @@ class RESTClient:
         if ptemp is not None:
             commands.append(SetPresetTemps(ptemp))
 
-        payload = build_settings_payload(node_type, commands)
+        payload = build_settings_payload(commands)
 
         headers = await self.authed_headers()
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"

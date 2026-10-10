@@ -31,7 +31,7 @@ def test_build_settings_payload_formats_fields() -> None:
         SetPresetTemps([18, 19.5, "20"]),
     ]
 
-    payload = build_settings_payload("htr", commands)
+    payload = build_settings_payload(commands)
 
     assert payload == {
         "mode": "manual",
@@ -47,7 +47,6 @@ def test_build_settings_payload_invalid_program_length() -> None:
 
     with pytest.raises(ValueError, match="prog must be a list of 168 integers"):
         build_settings_payload(
-            "htr",
             [
                 SetUnits("C"),
                 SetProgram([0] * 24),
@@ -58,7 +57,7 @@ def test_build_settings_payload_invalid_program_length() -> None:
 def test_build_settings_payload_preserves_modified_auto_mode() -> None:
     """Ensure modified_auto survives mode normalisation unchanged."""
 
-    payload = build_settings_payload("htr", [SetMode(" modified_auto ")])
+    payload = build_settings_payload([SetMode(" modified_auto ")])
 
     assert payload == {"mode": "modified_auto"}
 

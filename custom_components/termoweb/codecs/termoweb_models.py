@@ -20,15 +20,6 @@ class DevSummary(BaseModel):
     name: str | None = None
 
 
-class DevListResponse(BaseModel):
-    """Device list payload supporting multiple legacy shapes."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    devs: list[DevSummary] | None = None
-    devices: list[DevSummary] | None = None
-
-
 class NodeSummary(BaseModel):
     """Minimal node descriptor returned by the manager endpoints."""
 

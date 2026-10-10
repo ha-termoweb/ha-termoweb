@@ -13,10 +13,7 @@ from conftest import FakeCoordinator, _install_stubs, build_coordinator_device_s
 
 _install_stubs()
 
-from custom_components.termoweb.codecs.ducaheat_codec import (
-    encode_priority_command,
-    infer_status_endpoint,
-)
+from custom_components.termoweb.codecs.ducaheat_codec import encode_priority_command
 from custom_components.termoweb.codecs.ducaheat_models import PriorityWritePayload
 from custom_components.termoweb.codecs.ducaheat_read_models import (
     DucaheatSegmentedSettings,
@@ -333,23 +330,6 @@ class TestPriorityWritePayload:
 
 
 # ---------------------------------------------------------------------------
-# 9. infer_status_endpoint with SetPriority
-# ---------------------------------------------------------------------------
-
-
-class TestInferStatusEndpointPriority:
-    """Tests that infer_status_endpoint routes SetPriority to setup."""
-
-    def test_set_priority_routes_to_setup(self):
-        cmd = SetPriority(priority=5)
-        assert infer_status_endpoint(NodeType.HEATER, cmd) == "setup"
-
-    def test_set_priority_routes_to_setup_for_accumulator(self):
-        cmd = SetPriority(priority=10)
-        assert infer_status_endpoint(NodeType.ACCUMULATOR, cmd) == "setup"
-
-
-# ---------------------------------------------------------------------------
 # 10. _build_write_call with SetPriority
 # ---------------------------------------------------------------------------
 
@@ -367,7 +347,6 @@ class TestBuildWriteCallPriority:
             units=None,
         )
         assert isinstance(call, PlannedHttpCall)
-        assert call.method == "POST"
         assert call.path == "/api/v2/devs/dev123/htr/H1/setup"
         assert call.json == {"priority": 7}
 
