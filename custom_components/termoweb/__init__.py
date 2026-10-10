@@ -63,6 +63,7 @@ from .coordinator import (
     StateCoordinator,
     build_device_metadata,
 )
+from .domain.ids import NodeType
 from .energy import energy_import_store
 from .identifiers import build_cloud_unique_id
 from .inventory import (
@@ -118,8 +119,6 @@ def _platforms_for_brand(brand: str) -> list[str]:
 
 reset_samples_rate_limit_state()
 
-_SUPPORTED_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "pmo"})
-
 
 def _log_unknown_node_types(inventory: Inventory) -> None:
     """Log node types the integration does not support yet."""
@@ -133,7 +132,7 @@ def _log_unknown_node_types(inventory: Inventory) -> None:
             getattr(node, "type", None),
             use_default_when_falsey=True,
         )
-        if not node_type or node_type in _SUPPORTED_NODE_TYPES:
+        if not node_type or NodeType.coerce(node_type) is not None:
             continue
         addr = normalize_node_addr(
             getattr(node, "addr", None),

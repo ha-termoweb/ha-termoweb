@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import StateCoordinator
+from custom_components.termoweb.domain.ids import HEATING_NODE_TYPES
 from custom_components.termoweb.domain.state import DomainState
 from custom_components.termoweb.entities.heater import (
     NodeRefreshFallback,
@@ -30,8 +31,6 @@ from custom_components.termoweb.runtime import require_runtime
 from custom_components.termoweb.utils import translate_default_device_name
 
 _LOGGER = logging.getLogger(__name__)
-
-_LOCK_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm"})
 
 
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
@@ -227,7 +226,7 @@ def _iter_lockable_inventory_nodes(
 ) -> Iterable[tuple[str, str, str]]:
     """Yield htr and acm node metadata from ``inventory``."""
 
-    for metadata in inventory.iter_nodes_metadata(node_types=_LOCK_NODE_TYPES):
+    for metadata in inventory.iter_nodes_metadata(node_types=HEATING_NODE_TYPES):
         canonical_type = normalize_node_type(
             metadata.node_type,
             use_default_when_falsey=True,

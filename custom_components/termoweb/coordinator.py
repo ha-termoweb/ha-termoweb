@@ -30,7 +30,11 @@ from .domain.energy import (
     build_empty_snapshot,
     coerce_snapshot,
 )
-from .domain.ids import NodeId as DomainNodeId, NodeType as DomainNodeType
+from .domain.ids import (
+    ENERGY_NODE_TYPES,
+    NodeId as DomainNodeId,
+    NodeType as DomainNodeType,
+)
 from .domain.state import (
     AccumulatorState,
     DomainState,
@@ -68,7 +72,6 @@ class RaiseUpdateFailedCoordinator(DataUpdateCoordinator[_DataT]):
 _PENDING_SETTINGS_TTL = 10.0
 _SETPOINT_TOLERANCE = 0.05
 
-ENERGY_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "pmo"})
 # Minute past each hour at which REST energy samples are polled, so the
 # previous hour's final sample is available.
 ENERGY_POLL_MINUTE = 5
@@ -637,11 +640,9 @@ class StateCoordinator(
 
         node_ids: list[DomainNodeId] = []
         for node in inventory.nodes:
-            try:
-                node_type = DomainNodeType(node.type)
+            node_type = DomainNodeType.coerce(node.type)
+            if node_type is not None:
                 node_ids.append(DomainNodeId(node_type, node.addr))
-            except ValueError:
-                continue
         return node_ids
 
     def handle_ws_deltas(
@@ -953,9 +954,8 @@ class EnergyStateCoordinator(
     def _node_id_for(node_type: str, addr: str) -> DomainNodeId | None:
         """Return a canonical node identifier for energy tracking."""
 
-        try:
-            node_type_enum = DomainNodeType(node_type)
-        except ValueError:
+        node_type_enum = DomainNodeType.coerce(node_type)
+        if node_type_enum is None:
             return None
         try:
             return DomainNodeId(node_type_enum, addr)

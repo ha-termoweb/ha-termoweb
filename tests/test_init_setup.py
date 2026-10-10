@@ -346,7 +346,7 @@ def test_async_setup_entry_logs_unknown_node_types_without_probing(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Unknown node types are logged at DEBUG; setup sends no extra probe GETs."""
+    """Unknown node types (not thm) are logged at DEBUG; no extra probe GETs."""
 
     class ProbeClient(BaseFakeClient):
         instances: list["ProbeClient"] = []
@@ -366,6 +366,7 @@ def test_async_setup_entry_logs_unknown_node_types_without_probing(
                     {"addr": "9", "type": "foo"},
                     {"addr": "9", "type": "foo"},
                     {"addr": "1", "type": "htr"},
+                    {"addr": "2", "type": "thm"},
                 ]
             }
 

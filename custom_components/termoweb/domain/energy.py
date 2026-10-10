@@ -6,7 +6,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .ids import NodeId, NodeType, normalize_node_type
+from .ids import NodeId, NodeType
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,9 +33,8 @@ class EnergySnapshot:
     ) -> dict[str, EnergyNodeMetrics]:
         """Return metrics keyed by address for ``node_type`` when known."""
 
-        try:
-            normalized_type = normalize_node_type(node_type)
-        except ValueError:
+        normalized_type = NodeType.coerce(node_type)
+        if normalized_type is None:
             return {}
 
         return {

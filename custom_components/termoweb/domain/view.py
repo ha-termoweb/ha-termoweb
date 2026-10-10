@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .energy import EnergyNodeMetrics, EnergySnapshot
-from .ids import NodeId, NodeType, normalize_node_type
+from .ids import NodeId, NodeType
 from .state import (
     DomainState,
     DomainStateStore,
@@ -70,9 +70,8 @@ class DomainStateView:
         snapshot = self.get_energy_snapshot()
         if snapshot is None:
             return None
-        try:
-            normalized_type = normalize_node_type(node_type)
-        except ValueError:
+        normalized_type = NodeType.coerce(node_type)
+        if normalized_type is None:
             return None
         try:
             node_id = NodeId(normalized_type, addr)

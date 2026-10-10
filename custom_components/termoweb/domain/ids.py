@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 
 class NodeType(str, Enum):
@@ -14,14 +15,29 @@ class NodeType(str, Enum):
     THERMOSTAT = "thm"
     POWER_MONITOR = "pmo"
 
+    @classmethod
+    def coerce(cls, value: Any) -> NodeType | None:
+        """Return the NodeType for ``value`` (case-insensitive, stripped) or None."""
 
-def normalize_node_type(node_type: NodeType | str) -> NodeType:
-    """Normalize assorted node type inputs to ``NodeType``."""
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, str):
+            return None
+        try:
+            return cls(value.strip().lower())
+        except ValueError:
+            return None
 
-    try:
-        return NodeType(node_type)
-    except ValueError as err:
-        raise ValueError(f"Unknown node type: {node_type}") from err
+
+# Canonical node-type groups (plain strings; compare with normalised type strings).
+HEATER_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "thm"})
+"""Node types with a heater-style climate entity."""
+
+HEATING_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm"})
+"""Node types with their own heating element (lock, flash, total energy)."""
+
+ENERGY_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "pmo"})
+"""Node types that report energy samples."""
 
 
 @dataclass(frozen=True, slots=True)
