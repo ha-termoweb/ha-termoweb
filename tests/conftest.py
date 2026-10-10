@@ -1383,6 +1383,13 @@ def _install_stubs() -> None:
             self.tasks.append(task)
             return task
 
+        def async_create_background_task(
+            self, target: Any, name: str, eager_start: bool = True
+        ) -> asyncio.Task[Any]:
+            task = asyncio.create_task(target, name=name)
+            self.tasks.append(task)
+            return task
+
         async def async_add_executor_job(
             self, func: Callable[..., Any], *args: Any
         ) -> Any:
