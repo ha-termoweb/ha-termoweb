@@ -18,7 +18,14 @@ from .dialect import (
     encode,
     frame_total_length,
 )
-from .link import AckResult, GatewayInfo, RadioLink, RadioLinkError, ReceivedFrame
+from .link import (
+    AckResult,
+    GatewayInfo,
+    RadioLink,
+    RadioLinkError,
+    ReceivedFrame,
+    UnsupportedDialectError,
+)
 from .protocol import (
     MODE_AUTO,
     MODE_MANUAL,
@@ -64,6 +71,7 @@ __all__ = [
     "ReceivedFrame",
     "StatusRecord",
     "Unsolicited",
+    "UnsupportedDialectError",
     "build_ack",
     "build_frame",
     "classify_unsolicited",

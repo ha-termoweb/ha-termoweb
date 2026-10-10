@@ -6,7 +6,14 @@ import asyncio
 import logging
 
 import pytest
-from radio_fakes import NET, FakeGateway, FakeTime, heater, rx_line
+from radio_fakes import (
+    NET,
+    Q_LINE_NANOCUL,
+    FakeGateway,
+    FakeTime,
+    heater,
+    rx_line,
+)
 
 from custom_components.termoweb.backend.radio import link as link_mod, protocol as p
 from custom_components.termoweb.backend.radio.dialect import (
@@ -18,6 +25,7 @@ from custom_components.termoweb.backend.radio.dialect import (
 from custom_components.termoweb.backend.radio.link import (
     RadioLink,
     RadioLinkError,
+    UnsupportedDialectError,
     parse_query_line,
     parse_rx_line,
 )
@@ -120,7 +128,8 @@ async def test_connect_handshake_dialect_b() -> None:
     assert gw.commands == ["I01", "A1", "Y1", "N1234", "Q"]
     assert link.connected
     info = link.gateway_info
-    assert info.version == "3.5"
+    assert info.version == "3.6-esp32"
+    assert info.dialect == "B"
     assert info.sync == "2DD4"
     assert info.autoack is True
     assert info.station_id == 1
@@ -153,10 +162,27 @@ async def test_connect_dialect_a_custom_ids(caplog) -> None:
 async def test_connect_q_without_sync() -> None:
     """A Q line without sync= is accepted without a mismatch check."""
     gw = FakeGateway()
-    gw.q_line = "# Q termoweb_rx 3.5 autoack=on id=01"
+    gw.q_line = "# Q termoweb_rx 3.6-esp32 autoack=on id=01 dialect=B"
     link = make_link(gw, FakeTime())
     info = await link.connect()
     assert info.sync is None
+    await link.close()
+
+
+@pytest.mark.asyncio
+async def test_stock_nanocul_firmware_is_dialect_a_only() -> None:
+    """A Q line without dialect= means firmware with dialect A compiled in."""
+    gw = FakeGateway()
+    gw.q_line = Q_LINE_NANOCUL
+    with pytest.raises(UnsupportedDialectError, match="does not support dialect B"):
+        await make_link(gw, FakeTime()).connect()
+    assert gw.writer.closed
+
+    gw = FakeGateway(DIALECT_A)
+    gw.q_line = Q_LINE_NANOCUL
+    link = make_link(gw, FakeTime())
+    info = await link.connect()
+    assert info.dialect is None and info.mac is None and info.sync == "2DE5"
     await link.close()
 
 

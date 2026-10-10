@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
+from dataclasses import dataclass
+import functools
 import logging
+from pathlib import Path
 from typing import Any
 
 from aiohttp import ClientError
@@ -14,7 +18,7 @@ from homeassistant.data_entry_flow import FlowResult
 import voluptuous as vol
 
 from . import async_list_devices, create_rest_client
-from .backend.radio import DIALECTS, RadioLink, RadioLinkError
+from .backend.radio import DIALECT_A, DIALECTS, RadioLink, RadioLinkError
 from .backend.radio.discovery import (
     DISCOVERY_DIALECTS,
     SCAN_ADDRESSES,
@@ -23,6 +27,7 @@ from .backend.radio.discovery import (
     probe_heaters,
 )
 from .backend.radio.link import DEFAULT_PORT as RADIO_DEFAULT_PORT
+from .backend.radio.serial_link import serial_device_id, serial_opener
 from .backend.radio_client import dev_id_from_mac
 from .backend.radio_power import KEY_RATED_POWER
 from .backend.rest_client import BackendAuthError, BackendRateLimitError
@@ -33,15 +38,20 @@ from .const import (
     BRAND_TERMOWEB,
     BRAND_TEVOLVE,
     CONF_BRAND,
+    CONF_DEVICE,
     CONF_DIALECT,
     CONF_HOST,
     CONF_NETWORK_ID,
     CONF_NODES,
     CONF_PORT,
+    CONF_RADIO_DEVICE_ID,
     CONF_RADIO_POWER,
+    CONF_RADIO_TYPE,
     DEFAULT_BRAND,
     DOMAIN,
     RADIO_GATEWAY_LABEL,
+    RADIO_TYPE_ESP32,
+    RADIO_TYPE_NANOCUL,
     get_brand_label,
 )
 from .utils import async_get_integration_version
@@ -85,6 +95,46 @@ DIALECT_AUTO = "auto"
 RATED_POWER_FIELD = "rated_power_"  # + radio address, in the radio options form
 MAX_RATED_POWER_W = 10000
 CONF_RESCAN = "rescan"
+MANUAL_DEVICE = "manual"  # nanoCUL port choice: type a path or URL instead
+SERIAL_BY_ID_DIR = "/dev/serial/by-id"
+NANOCUL_LABEL = "nanoCUL"
+_CAPABLE = "dialect_capable"  # flow state: firmware switches dialects at runtime
+
+
+@dataclass(frozen=True)
+class SerialPort:
+    """A serial port offered for a nanoCUL stick."""
+
+    device: str  # stable /dev/serial/by-id path when there is one
+    description: str
+    serial_number: str | None
+
+
+def _by_id_path(device: str) -> str:
+    """Return the /dev/serial/by-id link for ``device``, else ``device`` itself."""
+    try:
+        links = sorted(Path(SERIAL_BY_ID_DIR).iterdir())
+    except OSError:
+        return device
+    real = Path(device).resolve()
+    for link in links:
+        if link.resolve() == real:
+            return str(link)
+    return device
+
+
+def list_serial_ports() -> list[SerialPort]:
+    """Return the host's serial ports (blocking: run in the executor)."""
+    from serial.tools import list_ports  # noqa: PLC0415 - pyserial, USB sticks only
+
+    return [
+        SerialPort(
+            _by_id_path(port.device),
+            port.description or port.device,
+            port.serial_number,
+        )
+        for port in list_ports.comports()
+    ]
 
 
 class RadioSetupError(Exception):
@@ -127,6 +177,55 @@ def _reconfigure_radio_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
+def _dialect_fields(defaults: Mapping[str, Any]) -> dict[Any, Any]:
+    """Return the optional dialect and network id fields shared by radio forms."""
+    return {
+        vol.Optional(
+            CONF_DIALECT, default=defaults.get(CONF_DIALECT, DIALECT_AUTO)
+        ): vol.In([DIALECT_AUTO, *DIALECTS]),
+        vol.Optional(CONF_NETWORK_ID, default=defaults.get(CONF_NETWORK_ID, "")): str,
+    }
+
+
+def _nanocul_schema(ports: list[SerialPort], defaults: Mapping[str, Any]) -> vol.Schema:
+    """Build the nanoCUL port choice: detected ports plus a manual entry."""
+    choices = {port.device: f"{port.description} ({port.device})" for port in ports}
+    choices[MANUAL_DEVICE] = "Enter the port path or URL myself"
+    default = defaults.get(CONF_DEVICE)
+    if default not in choices:
+        default = next(iter(choices))
+    return vol.Schema(
+        {
+            vol.Required(CONF_DEVICE, default=default): vol.In(choices),
+            **_dialect_fields(defaults),
+        }
+    )
+
+
+def _nanocul_manual_schema(defaults: Mapping[str, Any]) -> vol.Schema:
+    """Build the manual nanoCUL form: a device path or pyserial URL."""
+    device = defaults.get(CONF_DEVICE)
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_DEVICE,
+                default="" if device in (None, MANUAL_DEVICE) else device,
+            ): str,
+            **_dialect_fields(defaults),
+        }
+    )
+
+
+def _reconfigure_nanocul_schema(defaults: Mapping[str, Any]) -> vol.Schema:
+    """Build the nanoCUL reconfigure schema: port plus an optional re-scan."""
+    return vol.Schema(
+        {
+            vol.Required(CONF_DEVICE, default=defaults.get(CONF_DEVICE, "")): str,
+            vol.Optional(CONF_RESCAN, default=False): bool,
+        }
+    )
+
+
 def parse_network_id(text: str | None) -> bytes | None:
     """Return 4 hex digits as two bytes, None when blank; raise ValueError otherwise."""
     cleaned = (text or "").replace(" ", "").replace(":", "").strip()
@@ -154,8 +253,51 @@ async def probe_gateway(host: str, port: int) -> str:
     return dev_id
 
 
+async def probe_nanocul(device: str, usb_serial: str | None = None) -> tuple[str, bool]:
+    """Connect to a nanoCUL without transmitting; return ``(dev_id, dialect_capable)``.
+
+    Stock termoweb_rx firmware reports neither a MAC nor runtime dialects: its
+    id then comes from the USB serial number (or the path), and only dialect A
+    is possible.
+    """
+    link = RadioLink(
+        device,
+        0,
+        DIALECT_A,
+        network_id=b"\x00\x00",
+        auto_ack=False,
+        open_connection=serial_opener(device),
+    )
+    info = await link.connect()
+    await link.close()
+    dev_id = dev_id_from_mac(info.mac) or serial_device_id(device, usb_serial)
+    return dev_id, info.dialect is not None
+
+
+def radio_link_factory(radio: Mapping[str, Any]) -> Any:
+    """Return the RadioLink factory for a flow's radio: TCP, or the nanoCUL's port."""
+    if radio.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
+        return functools.partial(
+            RadioLink, open_connection=serial_opener(radio[CONF_DEVICE])
+        )
+    return RadioLink
+
+
+def radio_address(radio: Mapping[str, Any]) -> tuple[str, int]:
+    """Return the (host, port) label RadioLink uses for a flow's radio."""
+    if radio.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
+        return radio[CONF_DEVICE], 0
+    return radio[CONF_HOST], radio[CONF_PORT]
+
+
 async def discover_radio(
-    host: str, port: int, dialect: str, network_id: bytes | None
+    host: str,
+    port: int,
+    dialect: str,
+    network_id: bytes | None,
+    *,
+    link_factory: Any = RadioLink,
+    dialect_capable: bool = True,
 ) -> tuple[NetworkSighting, dict[int, Any]]:
     """Learn the network (unless given), then confirm heaters by address."""
     if dialect != DIALECT_AUTO and (
@@ -164,10 +306,15 @@ async def discover_radio(
         known = DIALECTS[dialect]
         sighting = NetworkSighting(known, network_id or known.network_id)
     else:
-        dialects = (
-            DISCOVERY_DIALECTS if dialect == DIALECT_AUTO else (DIALECTS[dialect],)
+        if dialect != DIALECT_AUTO:
+            dialects: tuple[Any, ...] = (DIALECTS[dialect],)
+        elif dialect_capable:
+            dialects = DISCOVERY_DIALECTS
+        else:
+            dialects = (DIALECT_A,)  # stock nanoCUL firmware: dialect A only
+        sighting = await discover_network(
+            host, port, dialects=dialects, link_factory=link_factory
         )
-        sighting = await discover_network(host, port, dialects=dialects)
         if sighting is None:
             raise RadioSetupError("no_traffic")
     heaters = await probe_heaters(
@@ -176,6 +323,7 @@ async def discover_radio(
         sighting.dialect,
         sighting.network_id,
         set(SCAN_ADDRESSES) | sighting.sources,
+        link_factory=link_factory,
     )
     if not heaters:
         raise RadioSetupError("no_heaters")
@@ -183,13 +331,24 @@ async def discover_radio(
 
 
 def radio_entry_data(
-    host: str, port: int, sighting: NetworkSighting, heaters: dict[int, Any]
+    radio: Mapping[str, Any], sighting: NetworkSighting, heaters: dict[int, Any]
 ) -> dict[str, Any]:
     """Return config entry data for a discovered radio installation."""
+    if radio.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
+        connection: dict[str, Any] = {
+            CONF_RADIO_TYPE: RADIO_TYPE_NANOCUL,
+            CONF_DEVICE: radio[CONF_DEVICE],
+            CONF_RADIO_DEVICE_ID: radio[CONF_RADIO_DEVICE_ID],
+        }
+    else:
+        connection = {
+            CONF_RADIO_TYPE: RADIO_TYPE_ESP32,
+            CONF_HOST: radio[CONF_HOST],
+            CONF_PORT: radio[CONF_PORT],
+        }
     return {
         CONF_BRAND: BRAND_RADIO,
-        CONF_HOST: host,
-        CONF_PORT: port,
+        **connection,
         CONF_DIALECT: sighting.dialect.name,
         CONF_NETWORK_ID: sighting.network_id.hex().upper(),
         CONF_NODES: [
@@ -293,7 +452,9 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Offer the cloud account or the local radio gateway."""
-        return self.async_show_menu(step_id="user", menu_options=["cloud", "radio"])
+        return self.async_show_menu(
+            step_id="user", menu_options=["cloud", "radio", "nanocul"]
+        )
 
     async def async_step_cloud(
         self, user_input: dict[str, Any] | None = None
@@ -333,7 +494,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(
                 step_id="radio", data_schema=_radio_schema(self._radio)
             )
-        self._radio = dict(user_input)
+        self._radio = {**user_input, CONF_RADIO_TYPE: RADIO_TYPE_ESP32}
         errors: dict[str, str] = {}
         try:
             network_id = parse_network_id(user_input.get(CONF_NETWORK_ID))
@@ -365,12 +526,15 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._radio_task is None:
             self._radio_result = None
             self._radio_error = None
+            host, port = radio_address(self._radio)
             self._radio_task = self.hass.async_create_task(
                 discover_radio(
-                    self._radio[CONF_HOST],
-                    self._radio[CONF_PORT],
+                    host,
+                    port,
                     self._radio.get(CONF_DIALECT, DIALECT_AUTO),
                     self._radio.get("network_bytes"),
+                    link_factory=radio_link_factory(self._radio),
+                    dialect_capable=self._radio.get(_CAPABLE, True),
                 )
             )
         if not self._radio_task.done():
@@ -385,14 +549,12 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except RadioSetupError as err:
             self._radio_error = err.reason
         except RadioLinkError:
-            self._radio_error = "cannot_connect_radio"
+            self._radio_error = self._connect_error()
         except Exception:
             _LOGGER.exception("Unexpected error during radio discovery")
             self._radio_error = "unknown"
         else:
-            self._radio_result = radio_entry_data(
-                self._radio[CONF_HOST], self._radio[CONF_PORT], sighting, heaters
-            )
+            self._radio_result = radio_entry_data(self._radio, sighting, heaters)
         return self.async_show_progress_done(next_step_id="radio_finish")
 
     async def async_step_radio_finish(
@@ -400,12 +562,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Create (or update) the radio entry, or return to the form with the error."""
         if self._radio_result is None:
-            step_id = "reconfigure_radio" if self._reconfigure_entry() else "radio"
-            schema = (
-                _reconfigure_radio_schema(self._radio)
-                if step_id == "reconfigure_radio"
-                else _radio_schema(self._radio)
-            )
+            step_id, schema = self._radio_form()
             return self.async_show_form(
                 step_id=step_id,
                 data_schema=schema,
@@ -416,8 +573,148 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if entry is not None:
             self.hass.config_entries.async_update_entry(entry, data=data)
             return self.async_abort(reason="reconfigure_successful")
-        title = f"{RADIO_GATEWAY_LABEL} ({data[CONF_HOST]})"
+        if data[CONF_RADIO_TYPE] == RADIO_TYPE_NANOCUL:
+            title = f"{NANOCUL_LABEL} ({data[CONF_DEVICE]})"
+        else:
+            title = f"{RADIO_GATEWAY_LABEL} ({data[CONF_HOST]})"
         return self.async_create_entry(title=title, data=data)
+
+    def _nanocul_flow(self) -> bool:
+        """Return True while the flow sets up (or reconfigures) a nanoCUL."""
+        return self._radio.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL
+
+    def _connect_error(self) -> str:
+        """Return the flow error key for a radio that cannot be reached."""
+        return (
+            "cannot_connect_nanocul" if self._nanocul_flow() else "cannot_connect_radio"
+        )
+
+    def _radio_form(self) -> tuple[str, vol.Schema]:
+        """Return the step id and schema to show again after a failed discovery."""
+        if self._reconfigure_entry() is not None:
+            if self._nanocul_flow():
+                return "reconfigure_nanocul", _reconfigure_nanocul_schema(self._radio)
+            return "reconfigure_radio", _reconfigure_radio_schema(self._radio)
+        if self._nanocul_flow():
+            return "nanocul_manual", _nanocul_manual_schema(self._radio)
+        return "radio", _radio_schema(self._radio)
+
+    async def async_step_nanocul(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Choose the nanoCUL's serial port (or a manual path), then discover."""
+        ports = await self.hass.async_add_executor_job(list_serial_ports)
+        if user_input is None:
+            return self.async_show_form(
+                step_id="nanocul", data_schema=_nanocul_schema(ports, self._radio)
+            )
+        if user_input[CONF_DEVICE] == MANUAL_DEVICE:
+            self._radio = {**user_input, CONF_RADIO_TYPE: RADIO_TYPE_NANOCUL}
+            return await self.async_step_nanocul_manual()
+        usb_serial = next(
+            (p.serial_number for p in ports if p.device == user_input[CONF_DEVICE]),
+            None,
+        )
+        return await self._start_nanocul(
+            "nanocul", user_input, usb_serial, _nanocul_schema(ports, user_input)
+        )
+
+    async def async_step_nanocul_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Type the nanoCUL's port path or pyserial URL, then discover."""
+        if user_input is None:
+            return self.async_show_form(
+                step_id="nanocul_manual",
+                data_schema=_nanocul_manual_schema(self._radio),
+            )
+        return await self._start_nanocul(
+            "nanocul_manual", user_input, None, _nanocul_manual_schema(user_input)
+        )
+
+    async def _start_nanocul(
+        self,
+        step_id: str,
+        user_input: dict[str, Any],
+        usb_serial: str | None,
+        schema: vol.Schema,
+    ) -> FlowResult:
+        """Probe the stick, check its firmware can speak the dialect, discover."""
+        device = str(user_input[CONF_DEVICE]).strip()
+        self._radio = {
+            **user_input,
+            CONF_DEVICE: device,
+            CONF_RADIO_TYPE: RADIO_TYPE_NANOCUL,
+        }
+        errors: dict[str, str] = {}
+        network_id = None
+        try:
+            network_id = parse_network_id(user_input.get(CONF_NETWORK_ID))
+        except ValueError:
+            errors[CONF_NETWORK_ID] = "invalid_network_id"
+        if not errors:
+            try:
+                dev_id, capable = await probe_nanocul(device, usb_serial)
+            except RadioLinkError:
+                errors["base"] = "cannot_connect_nanocul"
+            else:
+                wants_b = user_input.get(CONF_DIALECT, DIALECT_AUTO) not in (
+                    DIALECT_AUTO,
+                    "A",
+                )
+                if wants_b and not capable:
+                    errors["base"] = "dialect_unsupported_firmware"
+        if errors:
+            return self.async_show_form(
+                step_id=step_id, data_schema=schema, errors=errors
+            )
+        await self.async_set_unique_id(f"{BRAND_RADIO}:{dev_id}")
+        self._abort_if_unique_id_configured()
+        self._radio.update(
+            {
+                "network_bytes": network_id,
+                CONF_RADIO_DEVICE_ID: dev_id,
+                _CAPABLE: capable,
+            }
+        )
+        return await self.async_step_radio_discover()
+
+    async def async_step_reconfigure_nanocul(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Change the nanoCUL's port; optionally scan for heaters again."""
+        entry = self._reconfigure_entry()
+        if entry is None:
+            return self.async_abort(reason="no_config_entry")
+        if user_input is None:
+            return self.async_show_form(
+                step_id="reconfigure_nanocul",
+                data_schema=_reconfigure_nanocul_schema(dict(entry.data)),
+            )
+        device = str(user_input[CONF_DEVICE]).strip()
+        self._radio = {**entry.data, CONF_DEVICE: device}
+        try:
+            _dev_id, capable = await probe_nanocul(device)
+        except RadioLinkError:
+            return self.async_show_form(
+                step_id="reconfigure_nanocul",
+                data_schema=_reconfigure_nanocul_schema(self._radio),
+                errors={"base": "cannot_connect_nanocul"},
+            )
+        if entry.data.get(CONF_DIALECT) != "A" and not capable:
+            return self.async_show_form(
+                step_id="reconfigure_nanocul",
+                data_schema=_reconfigure_nanocul_schema(self._radio),
+                errors={"base": "dialect_unsupported_firmware"},
+            )
+        if user_input.get(CONF_RESCAN):
+            self._radio["network_bytes"] = bytes.fromhex(entry.data[CONF_NETWORK_ID])
+            self._radio[_CAPABLE] = capable
+            return await self.async_step_radio_discover()
+        self.hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_DEVICE: device}
+        )
+        return self.async_abort(reason="reconfigure_successful")
 
     def _reconfigure_entry(self) -> ConfigEntry | None:
         """Return the entry being reconfigured, or None during initial setup."""
@@ -472,6 +769,8 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if entry is None:
             return self.async_abort(reason="no_config_entry")
         if entry.data.get(CONF_BRAND) == BRAND_RADIO:
+            if entry.data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
+                return await self.async_step_reconfigure_nanocul()
             return await self.async_step_reconfigure_radio()
 
         ver = await _get_version(self.hass)

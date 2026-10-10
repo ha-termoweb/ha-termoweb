@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+import functools
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import HomeAssistant
@@ -60,12 +61,33 @@ def create_radio_client(
     network_id: bytes | None,
     *,
     power: PowerManager | None = None,
+    serial_url: str | None = None,
+    device_id: str | None = None,
 ) -> RadioClient:
-    """Return a radio client for the gateway at ``host:port`` and its stored nodes."""
+    """Return a radio client for the gateway at ``host:port`` (or a USB stick)."""
 
-    from .radio_client import RadioClient  # noqa: PLC0415
+    from .radio_client import NANOCUL_MODEL, RadioClient  # noqa: PLC0415
 
-    return RadioClient(host, port, dialect, nodes, network_id=network_id, power=power)
+    if serial_url is None:
+        return RadioClient(
+            host, port, dialect, nodes, network_id=network_id, power=power
+        )
+    from .radio.link import RadioLink  # noqa: PLC0415
+    from .radio.serial_link import serial_opener  # noqa: PLC0415
+
+    return RadioClient(
+        serial_url,
+        port,
+        dialect,
+        nodes,
+        network_id=network_id,
+        power=power,
+        link_factory=functools.partial(
+            RadioLink, open_connection=serial_opener(serial_url)
+        ),
+        device_id=device_id,
+        model=NANOCUL_MODEL,
+    )
 
 
 def create_rest_client(

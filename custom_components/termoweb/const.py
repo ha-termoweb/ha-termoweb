@@ -34,6 +34,11 @@ CONF_PORT: Final = "port"
 CONF_DIALECT: Final = "dialect"
 CONF_NETWORK_ID: Final = "network_id"  # 4 hex digits
 CONF_NODES: Final = "nodes"
+CONF_RADIO_TYPE: Final = "radio_type"  # "esp32" (default) or "nanocul"
+CONF_DEVICE: Final = "device"  # nanoCUL serial port path or pyserial URL
+CONF_RADIO_DEVICE_ID: Final = "radio_device_id"  # dev_id when firmware has no MAC
+RADIO_TYPE_ESP32: Final = "esp32"
+RADIO_TYPE_NANOCUL: Final = "nanocul"
 CONF_RADIO_POWER: Final = (
     "radio_power"  # options: power manager limit/priority/rated power
 )

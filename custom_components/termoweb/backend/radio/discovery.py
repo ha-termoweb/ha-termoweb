@@ -15,7 +15,7 @@ import time
 
 from . import protocol
 from .dialect import DIALECT_A, DIALECT_B, Dialect
-from .link import DEFAULT_PORT, RadioLink, ReceivedFrame
+from .link import DEFAULT_PORT, RadioLink, ReceivedFrame, UnsupportedDialectError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -111,20 +111,32 @@ async def discover_network(
     sleep: Sleep = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> NetworkSighting | None:
-    """Alternate listening windows across ``dialects`` until a network is heard."""
+    """Alternate listening windows across ``dialects`` until a network is heard.
 
+    A dialect the gateway firmware cannot speak (a stock nanoCUL only knows
+    dialect A) is dropped from the rotation; if none is left, RadioLinkError.
+    """
+
+    remaining = list(dialects)
     start = clock()
     while clock() - start < total_s:
-        for dialect in dialects:
-            sighting = await listen_once(
-                host,
-                port,
-                dialect,
-                window_s,
-                link_factory=link_factory,
-                sleep=sleep,
-                clock=clock,
-            )
+        for dialect in list(remaining):
+            try:
+                sighting = await listen_once(
+                    host,
+                    port,
+                    dialect,
+                    window_s,
+                    link_factory=link_factory,
+                    sleep=sleep,
+                    clock=clock,
+                )
+            except UnsupportedDialectError as err:
+                _LOGGER.info("Skipping dialect %s: %s", dialect.name, err)
+                remaining.remove(dialect)
+                if not remaining:
+                    raise
+                continue
             if sighting is not None:
                 return sighting
             if clock() - start >= total_s:

@@ -280,8 +280,27 @@ own power in `BE`, which is used when no power is entered.
 
 ## Setup (config flow)
 
-The first step is a menu: **cloud** (the existing brand + login form) or
-**radio**.
+The first step is a menu: **cloud** (the existing brand + login form),
+**radio** (the ESP32 gateway over TCP) or **nanocul** (a nanoCUL USB stick).
+
+nanoCUL sticks speak the same line protocol over a serial port at 115200 baud
+(`backend/radio/serial_link.py`: an `open_connection` for `RadioLink` built
+on pyserial-asyncio-fast; any pyserial URL works, including `socket://`). The
+`nanocul` step lists the host's serial ports (by-id paths) and offers a manual
+path. Stock `termoweb_rx` firmware differs from the ESP32 port in two ways
+that the flow and the link detect from the `Q` line:
+
+- no `dialect=` field: the firmware only speaks dialect A. Connecting in
+  dialect B raises `UnsupportedDialectError`; discovery listens in dialect A
+  only, and a requested dialect B is refused (`dialect_unsupported_firmware`).
+- no `mac=` field: the device id comes from the USB serial number of the
+  chosen port (else a hash of the path) and is stored as `radio_device_id`;
+  `list_devices` falls back to it.
+
+Entry data for a stick: `radio_type: nanocul`, `device` (path or URL),
+`radio_device_id`, plus the dialect, network id and nodes below. ESP32
+entries store `radio_type: esp32`; entries without the key are ESP32
+entries. Reconfigure changes the port and can re-scan.
 
 The radio form asks for host, port (2323), an optional dialect (`auto`, `A`,
 `B`) and an optional network id (4 hex digits).

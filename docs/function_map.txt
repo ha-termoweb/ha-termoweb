@@ -269,7 +269,7 @@ custom_components/termoweb/backend/factory.py :: create_backend
 custom_components/termoweb/backend/factory.py :: backend_capabilities
     Return the optional features the brand's backend supports.
 custom_components/termoweb/backend/factory.py :: create_radio_client
-    Return a radio client for the gateway at ``host:port`` and its stored nodes.
+    Return a radio client for the gateway at ``host:port`` (or a USB stick).
 custom_components/termoweb/backend/factory.py :: create_rest_client
     Return a REST client configured for the selected brand.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.__init__
@@ -796,14 +796,32 @@ custom_components/termoweb/config_flow.py :: _validate_login
     Ensure the provided credentials authenticate successfully.
 custom_components/termoweb/config_flow.py :: RadioSetupError.__init__
     Store the error key.
+custom_components/termoweb/config_flow.py :: _by_id_path
+    Return the /dev/serial/by-id link for ``device``, else ``device`` itself.
+custom_components/termoweb/config_flow.py :: list_serial_ports
+    Return the host's serial ports (blocking: run in the executor).
 custom_components/termoweb/config_flow.py :: _radio_schema
     Build the radio gateway form schema with provided defaults.
 custom_components/termoweb/config_flow.py :: _reconfigure_radio_schema
     Build the radio reconfigure schema: address plus an optional re-scan.
+custom_components/termoweb/config_flow.py :: _dialect_fields
+    Return the optional dialect and network id fields shared by radio forms.
+custom_components/termoweb/config_flow.py :: _nanocul_schema
+    Build the nanoCUL port choice: detected ports plus a manual entry.
+custom_components/termoweb/config_flow.py :: _nanocul_manual_schema
+    Build the manual nanoCUL form: a device path or pyserial URL.
+custom_components/termoweb/config_flow.py :: _reconfigure_nanocul_schema
+    Build the nanoCUL reconfigure schema: port plus an optional re-scan.
 custom_components/termoweb/config_flow.py :: parse_network_id
     Return 4 hex digits as two bytes, None when blank; raise ValueError otherwise.
 custom_components/termoweb/config_flow.py :: probe_gateway
     Connect to the radio gateway without transmitting; return its ``dev_id``.
+custom_components/termoweb/config_flow.py :: probe_nanocul
+    Connect to a nanoCUL without transmitting; return ``(dev_id, dialect_capable)``.
+custom_components/termoweb/config_flow.py :: radio_link_factory
+    Return the RadioLink factory for a flow's radio: TCP, or the nanoCUL's port.
+custom_components/termoweb/config_flow.py :: radio_address
+    Return the (host, port) label RadioLink uses for a flow's radio.
 custom_components/termoweb/config_flow.py :: discover_radio
     Learn the network (unless given), then confirm heaters by address.
 custom_components/termoweb/config_flow.py :: radio_entry_data
@@ -824,6 +842,20 @@ custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio
     Listen for heater traffic and scan heaters while showing progress.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_finish
     Create (or update) the radio entry, or return to the form with the error.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._nanocul_flow
+    Return True while the flow sets up (or reconfigures) a nanoCUL.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._connect_error
+    Return the flow error key for a radio that cannot be reached.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._radio_form
+    Return the step id and schema to show again after a failed discovery.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_nanocul
+    Choose the nanoCUL's serial port (or a manual path), then discover.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_nanocul_manual
+    Type the nanoCUL's port path or pyserial URL, then discover.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._start_nanocul
+    Probe the stick, check its firmware can speak the dialect, discover.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reconfigure_nanocul
+    Change the nanoCUL's port; optionally scan for heaters again.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._reconfigure_entry
     Return the entry being reconfigured, or None during initial setup.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reconfigure_radio
@@ -2007,6 +2039,14 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink._fail_waiters
     Fail and forget every pending waiter.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._wait
     Return ``future``'s result, or None if the injected sleep finishes first.
+custom_components/termoweb/backend/radio/serial_link.py :: _default_open
+    Return pyserial-asyncio-fast's stream opener (imported on first use).
+custom_components/termoweb/backend/radio/serial_link.py :: serial_opener
+    Return an ``open_connection(host, port)`` that opens serial ``url`` instead.
+custom_components/termoweb/backend/radio/serial_link.py :: serial_opener._open
+    Open the serial port; RadioLink's host and port are only labels.
+custom_components/termoweb/backend/radio/serial_link.py :: serial_device_id
+    Return a stable device id: the USB serial number, else a hash of the path.
 custom_components/termoweb/backend/radio/discovery.py :: listen_once
     Listen in ``dialect`` for up to ``window_s``; return the first network heard.
 custom_components/termoweb/backend/radio/discovery.py :: listen_once._on_frame
@@ -2074,7 +2114,7 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.read_power_rec
 custom_components/termoweb/backend/radio_client.py :: RadioClient._program
     Return the heater's ``prog``, re-reading it after ``program_refresh_s``.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.list_devices
-    Return the radio gateway as the single device, keyed by its MAC.
+    Return the radio gateway as the single device, keyed by its MAC (or id).
 custom_components/termoweb/backend/radio_client.py :: RadioClient.get_nodes
     Return the stored heater list in the cloud ``{"nodes": [...]}`` shape.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.get_node_settings

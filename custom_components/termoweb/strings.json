@@ -3,10 +3,11 @@
     "step": {
       "user": {
         "title": "How do your heaters connect?",
-        "description": "Choose the cloud account if you use the TermoWeb, Ducaheat or Tevolve app. Choose the radio gateway if you built the ESP32 radio gateway and want to control the heaters locally, without the cloud.",
+        "description": "Choose the cloud account if you use the TermoWeb, Ducaheat or Tevolve app. Choose a local radio if you control the heaters without the cloud: the ESP32 radio gateway on your network, or a nanoCUL USB stick plugged into this Home Assistant computer.",
         "menu_options": {
           "cloud": "Cloud account (TermoWeb, Ducaheat or Tevolve app)",
-          "radio": "Local radio gateway (ESP32 + CC1101)"
+          "radio": "Local radio gateway: ESP32 + CC1101 on your network",
+          "nanocul": "Local radio: nanoCUL USB stick (CC1101 868 MHz)"
         }
       },
       "cloud": {
@@ -37,6 +38,32 @@
           "port": "Port",
           "rescan": "Scan for heaters again"
         }
+      },
+      "nanocul": {
+        "title": "Connect to the nanoCUL USB stick",
+        "description": "Choose the port of your nanoCUL stick (it usually shows as a USB serial device). Leave the dialect on \"auto\" and the network id empty: the integration listens to your heaters to learn them. This can take up to 6 minutes. Heaters talk when they start heating, so turning one heater's temperature up first makes this faster.",
+        "data": {
+          "device": "USB port",
+          "dialect": "Radio dialect",
+          "network_id": "Network id (4 hex digits, optional)"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Enter the nanoCUL port",
+        "description": "Type the port path, for example /dev/serial/by-id/usb-..., or a network address such as socket://192.0.2.10:2323 for a stick shared over the network.",
+        "data": {
+          "device": "Port path or URL",
+          "dialect": "Radio dialect",
+          "network_id": "Network id (4 hex digits, optional)"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Change the nanoCUL port",
+        "description": "Change the stick's port path or URL. Tick \"Scan for heaters again\" if you added or removed a heater.",
+        "data": {
+          "device": "Port path or URL",
+          "rescan": "Scan for heaters again"
+        }
       }
     },
     "error": {
@@ -44,7 +71,9 @@
       "no_gateway_mac": "The radio gateway did not report its MAC address. Update the gateway firmware.",
       "no_traffic": "No heater radio traffic was heard. Turn one heater's temperature up so it starts heating, move the gateway closer to it, and try again. You can also enter the dialect and network id.",
       "no_heaters": "No heater answered. Move the gateway closer to the heaters and try again.",
-      "invalid_network_id": "The network id must be 4 hex digits, for example 1A2B."
+      "invalid_network_id": "The network id must be 4 hex digits, for example 1A2B.",
+      "cannot_connect_nanocul": "Cannot open the nanoCUL stick. Check that it is plugged in, that the port is right, and that it runs the termoweb_rx firmware.",
+      "dialect_unsupported_firmware": "This nanoCUL firmware only knows radio dialect A. Choose dialect A or auto, or update the stick's firmware."
     },
     "abort": {
       "already_configured": "This gateway is already set up.",

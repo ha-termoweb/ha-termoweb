@@ -65,6 +65,7 @@ VERDICT_LEN = 2  # ``<opcode+1> 55|56``
 CLOCK_REPLY_REQUEST = protocol.OP_CLOCK_STEADY  # both 51 and 52 are answered ``53``
 GATEWAY_NAME = "Radio gateway"
 GATEWAY_MODEL = "ESP32 + CC1101 radio gateway"
+NANOCUL_MODEL = "nanoCUL USB stick"
 
 LinkFactory = Callable[..., RadioLink]
 
@@ -132,8 +133,14 @@ class RadioClient:
         link_factory: LinkFactory = RadioLink,
         clock: Callable[[], float] = time.monotonic,
         power: PowerManager | None = None,
+        device_id: str | None = None,
+        model: str = GATEWAY_MODEL,
     ) -> None:
-        """Store the gateway address, dialect and stored node list; nothing connects."""
+        """Store the gateway address, dialect and stored node list; nothing connects.
+
+        ``device_id`` names a gateway whose firmware reports no MAC address
+        (a nanoCUL stick); ``model`` is what Home Assistant shows for it.
+        """
 
         dialect = DIALECTS.get(str(dialect_name).strip().upper())
         if dialect is None:
@@ -145,6 +152,8 @@ class RadioClient:
         self._port = int(port) if port else DEFAULT_PORT
         self._dialect = dialect
         self._station_id = station_id
+        self._device_id = device_id
+        self._model = model
         self._link_factory = link_factory
         self._clock = clock
         self._nodes = [dict(node) for node in nodes if isinstance(node, Mapping)]
@@ -447,17 +456,17 @@ class RadioClient:
     # --- HttpClientProto -----------------------------------------------------
 
     async def list_devices(self) -> list[dict[str, Any]]:
-        """Return the radio gateway as the single device, keyed by its MAC."""
+        """Return the radio gateway as the single device, keyed by its MAC (or id)."""
 
         info = (await self.async_connect()).gateway_info
-        dev_id = dev_id_from_mac(None if info is None else info.mac)
+        dev_id = dev_id_from_mac(None if info is None else info.mac) or self._device_id
         if info is None or dev_id is None:
             raise RadioError("the radio gateway did not report its MAC address")
         return [
             {
                 "dev_id": dev_id,
                 "name": GATEWAY_NAME,
-                "model": f"{GATEWAY_MODEL} (dialect {self._dialect.name})",
+                "model": f"{self._model} (dialect {self._dialect.name})",
                 "serial_id": dev_id,
                 "fw_version": info.version,
             }

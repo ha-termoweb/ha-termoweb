@@ -40,16 +40,20 @@ from .const import (
     BRAND_RADIO,
     BRAND_TEVOLVE as BRAND_TEVOLVE,
     CONF_BRAND,
+    CONF_DEVICE,
     CONF_DIALECT,
     CONF_HOST,
     CONF_NETWORK_ID,
     CONF_NODES,
     CONF_PORT,
+    CONF_RADIO_DEVICE_ID,
     CONF_RADIO_POWER,
+    CONF_RADIO_TYPE,
     DEFAULT_BRAND,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     MIN_POLL_INTERVAL,
+    RADIO_TYPE_NANOCUL,
     signal_ws_status,
 )
 from .coordinator import (
@@ -220,15 +224,25 @@ def _create_client(hass: HomeAssistant, entry: ConfigEntry, brand: str) -> Any:
                 entry, options={**entry.options, CONF_RADIO_POWER: settings}
             )
 
+        power = PowerManager(lambda: entry.options.get(CONF_RADIO_POWER), _save_power)
+        if data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
+            return create_radio_client(
+                data[CONF_DEVICE],
+                0,
+                data[CONF_DIALECT],
+                data.get(CONF_NODES, []),
+                bytes.fromhex(data[CONF_NETWORK_ID]),
+                power=power,
+                serial_url=data[CONF_DEVICE],
+                device_id=data.get(CONF_RADIO_DEVICE_ID),
+            )
         return create_radio_client(
             data[CONF_HOST],
             int(data[CONF_PORT]),
             data[CONF_DIALECT],
             data.get(CONF_NODES, []),
             bytes.fromhex(data[CONF_NETWORK_ID]),
-            power=PowerManager(
-                lambda: entry.options.get(CONF_RADIO_POWER), _save_power
-            ),
+            power=power,
         )
     return create_rest_client(hass, data["username"], data["password"], brand)
 
