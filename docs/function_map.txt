@@ -1776,6 +1776,8 @@ custom_components/termoweb/radio_pairing.py :: saved_snapshot
     Return the settings saved for ``addr`` before its factory reset, if any.
 custom_components/termoweb/radio_pairing.py :: store_snapshot
     Save (or with None, drop) the settings to restore for heater ``addr``.
+custom_components/termoweb/radio_pairing.py :: async_reset_keeping_settings
+    Save heater ``addr``'s settings, then factory-reset it; True if any were saved.
 custom_components/termoweb/radio_pairing.py :: add_nodes
     Add heaters to the entry's node list and reload it; False if none were new.
 custom_components/termoweb/radio_rehome.py :: _addr

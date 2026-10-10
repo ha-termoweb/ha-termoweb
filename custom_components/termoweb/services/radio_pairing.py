@@ -20,6 +20,7 @@ from custom_components.termoweb.backend.radio_client import (
 from custom_components.termoweb.const import CONF_NODES, DOMAIN
 from custom_components.termoweb.radio_pairing import (
     add_nodes,
+    async_reset_keeping_settings,
     heater_snapshot,
     saved_snapshot,
     store_snapshot,
@@ -113,18 +114,18 @@ async def async_register_radio_pairing_services(hass: HomeAssistant) -> None:
         """Save the heater's settings, then factory-reset it (it leaves the network)."""
 
         entry_id, addr = call.data["entry_id"], int(call.data["heater"])
-        runtime, client = _radio_runtime(hass, entry_id)
+        runtime, _client = _radio_runtime(hass, entry_id)
         _require_node(runtime, addr)
-        snapshot = with_manual_target(heater_snapshot(runtime, addr), client, addr)
         try:
-            await client.async_factory_reset(addr)
+            saved = await async_reset_keeping_settings(hass, runtime, addr)
         except RadioUnsupportedError as err:
             raise ServiceValidationError(str(err)) from err
         except (RadioError, RadioLinkError) as err:
-            raise HomeAssistantError(f"Factory reset failed: {err}") from err
-        if snapshot is not None:
-            store_snapshot(hass, runtime.config_entry, addr, snapshot)
-        return {"heater": addr, "settings_saved": snapshot is not None}
+            raise HomeAssistantError(
+                f"Factory reset failed: {err}. If the heater did reset, its "
+                "settings are saved: pair it with the Radio pair action."
+            ) from err
+        return {"heater": addr, "settings_saved": saved}
 
     async def _async_pair(call: ServiceCall) -> dict[str, Any]:
         """Pair one heater: to its old address (and restore it), or as a new heater."""
