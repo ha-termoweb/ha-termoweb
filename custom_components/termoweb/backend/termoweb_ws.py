@@ -82,7 +82,7 @@ class TermoWebWSClient(_WSCommon):
         self._stop_event = asyncio.Event()
         self._handshake_logged = False
         self._last_event_at: float | None = None
-        self._last_heartbeat_at: float | None = None
+        self._connected_at: float | None = None
 
         self._idle_restart_task: asyncio.Task | None = None
         self._idle_restart_pending = False
@@ -396,14 +396,8 @@ class TermoWebWSClient(_WSCommon):
     async def maybe_restart_after_write(self) -> None:
         """Restart the websocket if writes follow long periods of inactivity."""
 
-        tracker = self._ws_health_tracker()
-        last_payload = tracker.last_payload_at or tracker.last_heartbeat_at
-        if not last_payload:
-            last_payload = self._stats.last_event_ts or self._last_event_at
-        if not last_payload:
-            return
-        idle_for = time.time() - last_payload
-        if idle_for < self._payload_idle_window:
+        idle_for = self._session_idle_for(time.time())
+        if idle_for is None or idle_for < self._payload_idle_window:
             return
         _LOGGER.debug(
             "WS: write acknowledged after %.0f s without payloads; restarting",
@@ -475,6 +469,7 @@ class TermoWebWSClient(_WSCommon):
                 self._hs_fail_start = 0.0
                 self._hb_send_interval = max(5.0, min(30.0, hb_timeout * 0.45))
                 await self._connect_ws(sid)
+                self._connected_at = time.time()
                 _LOGGER.debug("WS: websocket connection established")
                 # Yield to the event loop so any pending server-initiated
                 # close frames are processed before we attempt to write.
@@ -494,9 +489,7 @@ class TermoWebWSClient(_WSCommon):
                 self._healthy_since = None
                 self._update_status("connected")
                 _LOGGER.debug("WS: starting legacy idle monitor")
-                self._idle_monitor_task = self._loop.create_task(
-                    self._idle_monitor(connected_at=time.time())
-                )
+                self._idle_monitor_task = self._loop.create_task(self._idle_monitor())
                 self._hb_task = self._loop.create_task(self._heartbeat_loop())
                 self._rtc_keepalive_task = self._loop.create_task(
                     self._rtc_keepalive_loop()
@@ -781,22 +774,29 @@ class TermoWebWSClient(_WSCommon):
         now = time.time()
         self._stats.last_event_ts = now
         self._last_event_at = now
-        self._last_heartbeat_at = now
         self._mark_ws_heartbeat(timestamp=now)
 
-    async def _idle_monitor(self, *, connected_at: float) -> None:
+    def _session_idle_for(self, now: float) -> float | None:
+        """Return the open session's payload silence, or None when not connected."""
+
+        connected_at = self._connected_at
+        ws = self._ws
+        if connected_at is None or ws is None or ws.closed:
+            return None
+        # Only this session's payloads count: silence since connecting is
+        # idle time, whatever an earlier session last received.
+        last_payload = self._ws_health_tracker().last_payload_at or connected_at
+        return now - max(last_payload, connected_at)
+
+    async def _idle_monitor(self) -> None:
         """Restart the session when it has had no payload for the idle window."""
 
         while not self._closing:
             await asyncio.sleep(60)
-            ws = self._ws
-            if ws is None or ws.closed:
-                break
-            # Only this session's payloads count: silence since connecting is
-            # idle time, whatever an earlier session last received.
-            last_payload = self._ws_health_tracker().last_payload_at or connected_at
             now = time.time()
-            idle_for = now - max(last_payload, connected_at)
+            idle_for = self._session_idle_for(now)
+            if idle_for is None:
+                break
             self._refresh_ws_payload_state(now=now, reason="idle_monitor")
             if idle_for >= self._payload_idle_window:
                 _LOGGER.debug(

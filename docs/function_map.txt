@@ -434,6 +434,8 @@ custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._ws_payloa
     Yield websocket payload strings.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._record_heartbeat
     Record receipt of a heartbeat frame.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._session_idle_for
+    Return the open session's payload silence, or None when not connected.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._idle_monitor
     Restart the session when it has had no payload for the idle window.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._run_heartbeat

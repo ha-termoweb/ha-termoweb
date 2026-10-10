@@ -435,3 +435,84 @@ async def test_slow_snapshot_after_reconnect_is_not_restarted(env: Env) -> None:
     assert len(session.sockets) == 2
 
     await _stop(client)
+
+
+async def test_write_soon_after_reconnect_keeps_new_session(
+    env: Env, hass: HomeAssistant, write_mock: AsyncMock
+) -> None:
+    """A write is judged on the current session, not the previous one's silence."""
+    session = FakeSession(get=_ok_handshake)
+    client = env.client(session)
+    client.start()
+    await until(lambda: len(session.sockets) == 1, "socket")
+    ws = session.sockets[0]
+    ws.feed(
+        _event("dev_data", {"nodes": {"htr": {"settings": {"1": {"mode": "auto"}}}}})
+    )
+    await until(lambda: env.status() == "healthy", "healthy")
+
+    # The first session goes quiet for 200 s (inside the window), then drops.
+    await env.clock.advance(200)
+    ws.server_close()
+    await env.advance_until(lambda: len(session.sockets) == 2)
+    ws2 = session.sockets[1]
+    await until(lambda: SNAPSHOT_REQUEST in ws2.sent, "second snapshot request")
+
+    # 50 s into the new session (over 240 s since the old session's last
+    # payload), a heater write must not recycle the fresh socket.
+    await env.clock.advance(50)
+    await hass.services.async_call(
+        "climate",
+        "set_temperature",
+        {"entity_id": "climate.living_room", "temperature": 23},
+        blocking=True,
+    )
+    for _ in range(5):  # the debounced write runs in a background task
+        await settle()
+        await hass.async_block_till_done()
+
+    assert write_mock.await_count == 1
+    assert ws2.close_calls == []
+    assert len(session.sockets) == 2
+
+    await _stop(client)
+
+
+async def test_write_without_open_session_restarts_nothing(
+    env: Env, hass: HomeAssistant, write_mock: AsyncMock
+) -> None:
+    """Writes and idle checks leave a client without an open socket alone."""
+
+    async def _set_temperature() -> None:
+        await hass.services.async_call(
+            "climate",
+            "set_temperature",
+            {"entity_id": "climate.living_room", "temperature": 23},
+            blocking=True,
+        )
+        for _ in range(5):  # the debounced write runs in a background task
+            await settle()
+            await hass.async_block_till_done()
+
+    session = FakeSession(get=_ok_handshake)
+    client = env.client(session)
+    await _set_temperature()  # never connected
+    assert session.sockets == []
+
+    client.start()
+    await until(lambda: len(session.sockets) == 1, "socket")
+    ws = session.sockets[0]
+    await until(lambda: env.status() == "connected", "connected")
+
+    # The transport dies silently long after connecting: neither the idle
+    # check nor a write tries to close the dead socket.
+    await env.clock.advance(200)
+    ws.closed = True
+    await env.clock.advance(60)
+    await _set_temperature()
+    assert write_mock.await_count == 2
+    assert ws.close_calls == []
+
+    ws.drop()
+    await env.advance_until(lambda: len(session.sockets) == 2)
+    await _stop(client)
