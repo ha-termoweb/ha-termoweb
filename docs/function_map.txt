@@ -342,112 +342,62 @@ custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.create_ws_clie
     Instantiate the unified websocket client for TermoWeb.
 custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.fetch_hourly_samples
     Return hourly samples for ``nodes`` using the REST API.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.__init__
-    Initialise the websocket client container.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._reset_handshake_cache
-    Clear cached handshake metadata to avoid retaining payloads.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._brand_headers
-    Return baseline headers aligned with the REST client brand.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._sanitise_url
-    Return a redacted representation of the websocket URL.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._wrap_background_task
-    Schedule socket.io background tasks on the HA loop.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.start
-    Start the websocket client background task.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.stop
-    Cancel tasks and close websocket sessions.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._runner
-    Manage connection attempts with backoff.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._handle_connection_lost
-    Record connection loss metadata before the next restart.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._connect_once
-    Open the Socket.IO connection.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._wait_for_events
-    Wait for the connection to close or stop to be requested.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._disconnect
-    Ensure the AsyncClient is disconnected.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._build_engineio_target
-    Return the Engine.IO base URL and path.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._on_connect
-    Handle socket connection establishment.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._on_namespace_connect
-    Join the namespace and request the initial snapshot.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._register_debug_catch_all
-    Register a catch-all listener to trace websocket traffic when debugging.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._register_debug_catch_all._log_catch_all
-    Emit DEBUG logs for all websocket events received.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._on_disconnect
-    Handle socket disconnection.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._on_reconnect
-    Handle socket reconnection attempts.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._on_connect_error
-    Log ``connect_error`` events with their payload.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._on_error
-    Log socket.io ``error`` events with full details.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._on_reconnect_failed
-    Log ``reconnect_failed`` events with the reported context.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._on_namespace_disconnect
-    Log namespace-level disconnect callbacks with their reason.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._on_dev_handshake
-    Handle the ``dev_handshake`` payload.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._on_dev_data
-    Handle the ``dev_data`` payload.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._on_update
-    Handle the ``update`` payload.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._idle_monitor
-    Monitor idle websocket periods and trigger restarts.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._refresh_subscription
-    Re-request device data to keep the websocket session active.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._handle_handshake
-    Process the initial handshake payload from the server.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._handle_dev_data
-    Handle the first full snapshot of nodes from the websocket.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._handle_update
-    Merge incremental node updates from the websocket feed.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._apply_nodes_payload
-    Update cached nodes from the websocket payload and notify listeners.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._translate_path_update
-    Translate ``{"path": ..., "body": ...}`` frames into nodes.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._translate_path_deltas
-    Translate path frames into node dictionaries and domain deltas.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._resolve_update_section
-    Map a websocket path segment onto the node bucket name.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._forward_sample_updates
-    Relay websocket heater sample updates to the energy coordinator.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._extract_nodes
-    Extract the nodes dictionary from a websocket payload.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._translate_nodes_list
-    Convert list-based node payloads into the nested mapping schema.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._nodes_to_deltas
-    Convert websocket node payloads into domain delta objects.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._apply_deltas_to_store
-    Apply deltas to the domain store via the coordinator.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._heater_sample_subscription_targets
-    Return ordered ``(node_type, addr)`` heater sample subscriptions.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._heater_sample_subscription_targets._bind_inventory
-    Yield subscription targets sourced from the inventory cache.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._subscribe_heater_samples
-    Subscribe to heater and accumulator sample updates.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._mark_event
-    Record receipt of a websocket event batch for health tracking.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._schedule_idle_restart
-    Log idle payload detection and close the websocket for restart.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._cancel_idle_restart
-    Cancel any scheduled idle restart due to new payload activity.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._get_token
-    Reuse the REST client token for websocket authentication.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._force_refresh_token
-    Force the REST client to fetch a fresh access token.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._api_base
-    Return the base REST API URL used for websocket routes.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient.__init__
     Initialise the legacy websocket client container.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._brand_headers
+    Return baseline headers aligned with the REST client brand.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._sanitise_url
+    Return a redacted representation of the websocket URL.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient.start
+    Start the websocket client background task.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_handshake
+    Process the initial handshake payload from the server.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_dev_data
+    Handle the first full snapshot of nodes from the websocket.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_update
+    Merge incremental node updates from the websocket feed.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_power_limit_update
+    Apply a system-level power_limit push to the runtime.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._apply_nodes_payload
+    Update cached nodes from the websocket payload and notify listeners.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._translate_path_update
+    Translate ``{"path": ..., "body": ...}`` frames into nodes.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._translate_path_deltas
+    Translate path frames into node dictionaries and domain deltas.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._resolve_update_section
+    Map a websocket path segment onto the node bucket name.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._forward_sample_updates
+    Relay websocket heater sample updates to the energy coordinator.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._extract_nodes
+    Extract the nodes dictionary from a websocket payload.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._translate_nodes_list
+    Convert list-based node payloads into the nested mapping schema.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._nodes_to_deltas
+    Convert websocket node payloads into domain delta objects.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._apply_deltas_to_store
+    Apply deltas to the domain store via the coordinator.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._heater_sample_subscription_targets
+    Return ordered ``(node_type, addr)`` heater sample subscriptions.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._heater_sample_subscription_targets._bind_inventory
+    Yield subscription targets sourced from the inventory cache.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._mark_event
+    Record receipt of a websocket event batch for health tracking.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._schedule_idle_restart
+    Log idle payload detection and close the websocket for restart.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._cancel_idle_restart
+    Cancel any scheduled idle restart due to new payload activity.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._get_token
+    Reuse the REST client token for websocket authentication.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._force_refresh_token
+    Force the REST client to fetch a fresh access token.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._api_base
+    Return the base REST API URL used for websocket routes.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._install_write_hook
     Wrap REST writes so we can observe successful node updates.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient.maybe_restart_after_write
     Restart the websocket if writes follow long periods of inactivity.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient.stop
-    Cancel tasks, close websocket sessions and reset legacy state.
+    Cancel tasks, close the websocket and clear runtime state.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._runner
     Manage reconnection attempts and lifecycle.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._run_socketio_09

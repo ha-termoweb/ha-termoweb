@@ -4,21 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import codecs
-from collections.abc import (
-    AsyncIterator,
-    Awaitable,
-    Callable,
-    Iterable,
-    Mapping,
-    MutableMapping,
-)
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from functools import partial, wraps
 import json
 import logging
 import random
 import time
-from types import SimpleNamespace
 import typing
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -26,13 +18,11 @@ import weakref
 
 import aiohttp
 from homeassistant.core import HomeAssistant
-import socketio
 
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.const import (
     ACCEPT_LANGUAGE,
     API_BASE,
-    BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
     DOMAIN,
     USER_AGENT,
@@ -73,8 +63,8 @@ _SENSITIVE_PLACEHOLDERS: Mapping[str, str] = {
 }
 
 
-class WebSocketClient(_WSCommon):
-    """Unified websocket client wrapping ``socketio.AsyncClient``."""
+class TermoWebWSClient(_WSCommon):
+    """Legacy Socket.IO 0.9 websocket client for TermoWeb."""
 
     def __init__(
         self,
@@ -85,12 +75,11 @@ class WebSocketClient(_WSCommon):
         api_client: RESTClient,
         coordinator: Any,
         session: aiohttp.ClientSession | None = None,
-        handshake_fail_threshold: int = 5,  # legacy compatibility
-        protocol: str | None = None,
-        namespace: str = WS_NAMESPACE,
+        handshake_fail_threshold: int = 5,
         inventory: Inventory | None = None,
     ) -> None:
-        """Initialise the websocket client container."""
+        """Initialise the legacy websocket client container."""
+
         _WSCommon.__init__(self, inventory=inventory)
         self.hass = hass
         self.entry_id = entry_id
@@ -98,80 +87,38 @@ class WebSocketClient(_WSCommon):
         self._client = api_client
         self._coordinator = coordinator
         self._session = session or getattr(api_client, "_session", None)
-        self._protocol_hint = protocol
+        if self._session is None:
+            raise RuntimeError("aiohttp session required for websocket client")
         self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
         self._task: asyncio.Task | None = None
-        self._namespace = namespace or WS_NAMESPACE
-
-        is_ducaheat = getattr(api_client, "_is_ducaheat", False)
-        brand = BRAND_DUCAHEAT if is_ducaheat else BRAND_TERMOWEB
-        self._user_agent = getattr(
-            api_client, "user_agent", None
-        ) or get_brand_user_agent(brand)
-        requested_with = getattr(api_client, "requested_with", None)
-        if requested_with is None:
-            requested_with = get_brand_requested_with(brand)
-        self._requested_with = requested_with
-
-        http_session = (
-            self._session if isinstance(self._session, aiohttp.ClientSession) else None
-        )
-        self._sio = socketio.AsyncClient(
-            reconnection=False,
-            logger=_LOGGER.getChild(f"socketio.{dev_id}"),
-            engineio_logger=_LOGGER.getChild(f"engineio.{dev_id}"),
-            http_session=http_session,
-        )
-        self._sio.start_background_task = self._wrap_background_task
-        http_target: Any = self._session
-        if http_target is None or not hasattr(http_target, "closed"):
-            http_target = SimpleNamespace(closed=True)
-        try:
-            self._sio.http = http_target
-        except AttributeError:
-            setattr(self._sio, "http", http_target)
-        if hasattr(self._sio, "eio"):
-            self._sio.eio.start_background_task = self._wrap_background_task
-            eio_http = getattr(self._sio.eio, "http", None)
-            if eio_http is None or not hasattr(eio_http, "closed"):
-                self._sio.eio.http = http_target
-            else:
-                self._sio.eio.http = eio_http
-
-        self._sio.on("connect", handler=self._on_connect)
-        self._sio.on("disconnect", handler=self._on_disconnect)
-        self._sio.on("reconnect", handler=self._on_reconnect)
-        self._sio.on("connect_error", handler=self._on_connect_error)
-        self._sio.on("error", handler=self._on_error)
-        self._sio.on("reconnect_failed", handler=self._on_reconnect_failed)
-        self._sio.on(
-            "connect", namespace=self._namespace, handler=self._on_namespace_connect
-        )
-        self._sio.on(
-            "disconnect",
-            namespace=self._namespace,
-            handler=self._on_namespace_disconnect,
-        )
-        self._sio.on(
-            "dev_handshake", namespace=self._namespace, handler=self._on_dev_handshake
-        )
-        self._sio.on("dev_data", namespace=self._namespace, handler=self._on_dev_data)
-        self._sio.on("update", namespace=self._namespace, handler=self._on_update)
-
-        self._closing = False
-        self._status: str = "stopped"
-        self._stop_event = asyncio.Event()
+        self._namespace = WS_NAMESPACE
+        self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._disconnected = asyncio.Event()
         self._disconnected.set()
+
+        self._user_agent = get_brand_user_agent(BRAND_TERMOWEB)
+        self._requested_with = get_brand_requested_with(BRAND_TERMOWEB)
+
+        self._closing = False
+        self._healthy_since: float | None = None
+        self._hb_send_interval: float = 27.0
+        self._hb_task: asyncio.Task | None = None
+        self._rtc_keepalive_task: asyncio.Task | None = None
+        self._rtc_keepalive_interval: float = 30.0
+
         self._backoff_seq = [5, 10, 30, 120, 300]
         self._backoff_idx = 0
+        self._hs_fail_threshold = handshake_fail_threshold
+        self._hs_fail_count: int = 0
+        self._hs_fail_start: float = 0.0
 
-        self._connected_since: float | None = None
-        self._healthy_since: float | None = None
-        self._last_event_at: float | None = None
         self._stats = WSStats()
+        self._status: str = "stopped"
+        self._stop_event = asyncio.Event()
+        self._handshake_logged = False
+        self._last_event_at: float | None = None
+        self._last_heartbeat_at: float | None = None
 
-        self._handshake_payload: dict[str, Any] | None = None
         self._payload_idle_window: float = 240.0
         self._idle_restart_task: asyncio.Task | None = None
         self._idle_restart_pending = False
@@ -179,44 +126,14 @@ class WebSocketClient(_WSCommon):
 
         self._subscription_refresh_lock = asyncio.Lock()
         self._subscription_refresh_failed = False
-        self._subscription_refresh_last_attempt: float = 0.0
-        self._subscription_refresh_last_success: float | None = None
-        self._handshake_logged = False
-        self._debug_catch_all_registered = False
 
         self._ws_state: dict[str, Any] | None = None
         state = self._ws_state_bucket()
         state.setdefault("last_payload_at", None)
         state.setdefault("idle_restart_pending", False)
 
-    def _reset_handshake_cache(self, *, clear_state: bool = False) -> None:
-        """Clear cached handshake metadata to avoid retaining payloads."""
-
-        self._handshake_payload = None
-        if not clear_state:
-            return
-
-        state = getattr(self, "_ws_state", None)
-        if isinstance(state, MutableMapping):
-            state.pop("handshake_keys", None)
-            state.pop("last_handshake_at", None)
-            return
-
-        try:
-            runtime = require_runtime(self.hass, self.entry_id)
-        except LookupError:
-            return
-
-        ws_bucket = runtime.ws_state
-        if not isinstance(ws_bucket, MutableMapping):
-            return
-
-        state_bucket = ws_bucket.get(self.dev_id)
-        if not isinstance(state_bucket, MutableMapping):
-            return
-
-        state_bucket.pop("handshake_keys", None)
-        state_bucket.pop("last_handshake_at", None)
+        self._write_hook_installed = False
+        self._install_write_hook()
 
     def _brand_headers(self, *, origin: str | None = None) -> dict[str, str]:
         """Return baseline headers aligned with the REST client brand."""
@@ -263,19 +180,6 @@ class WebSocketClient(_WSCommon):
     # ------------------------------------------------------------------
     # Public control
     # ------------------------------------------------------------------
-    def _wrap_background_task(
-        self, target: Any, *args: Any, **kwargs: Any
-    ) -> asyncio.Task:
-        """Schedule socket.io background tasks on the HA loop."""
-        coro = target(*args, **kwargs)
-        if not asyncio.iscoroutine(coro):
-
-            async def _runner() -> Any:
-                return coro
-
-            coro = _runner()
-        return self._loop.create_task(coro)
-
     def start(self) -> asyncio.Task:
         """Start the websocket client background task."""
         if self._task and not self._task.done():
@@ -289,324 +193,6 @@ class WebSocketClient(_WSCommon):
             self._runner(), name=f"{DOMAIN}-ws-{self.dev_id}"
         )
         return self._task
-
-    async def stop(self) -> None:
-        """Cancel tasks and close websocket sessions."""
-        _LOGGER.debug("WS: stop requested")
-        self._closing = True
-        self._stop_event.set()
-        if self._idle_restart_task:
-            self._idle_restart_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._idle_restart_task
-            self._idle_restart_task = None
-        self._idle_restart_pending = False
-        if self._idle_monitor_task:
-            self._idle_monitor_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._idle_monitor_task
-            self._idle_monitor_task = None
-        self._subscription_refresh_failed = False
-        await self._disconnect(reason="client stop")
-        if self._task:
-            self._task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._task
-            self._task = None
-        self._update_status("stopped")
-        self._cleanup_ws_state()
-
-    # ------------------------------------------------------------------
-    # Core loop and protocol dispatch
-    # ------------------------------------------------------------------
-    async def _runner(self) -> None:
-        """Manage connection attempts with backoff."""
-        self._update_status("starting")
-        try:
-            while not self._closing:
-                error: Exception | None = None
-                try:
-                    await self._throttle_connection_attempt()
-                    await self._connect_once()
-                    await self._wait_for_events()
-                except asyncio.CancelledError:
-                    raise
-                except Exception as err:
-                    error = err
-                    _LOGGER.info(
-                        "WS: connection error (%s: %s); will retry",
-                        type(err).__name__,
-                        err,
-                    )
-                    _LOGGER.debug("WS: connection error details", exc_info=True)
-                finally:
-                    await self._disconnect(reason="loop cleanup")
-                    if not self._closing:
-                        self._update_status("disconnected")
-                        await self._handle_connection_lost(error)
-                if self._closing:
-                    break
-                delay = self._backoff_seq[
-                    min(self._backoff_idx, len(self._backoff_seq) - 1)
-                ]
-                self._backoff_idx = min(
-                    self._backoff_idx + 1, len(self._backoff_seq) - 1
-                )
-                await asyncio.sleep(delay * random.uniform(0.8, 1.2))
-        finally:
-            self._update_status("stopped")
-
-    async def _handle_connection_lost(self, error: Exception | None) -> None:
-        """Record connection loss metadata before the next restart."""
-
-        state = self._ws_state_bucket()
-        restart_count = int(state.get("restart_count") or 0) + 1
-        state["restart_count"] = restart_count
-        state["last_disconnect_at"] = time.time()
-        state["last_disconnect_error"] = (
-            f"{type(error).__name__}: {error}" if error else None
-        )
-
-    async def _connect_once(self) -> None:
-        """Open the Socket.IO connection."""
-        if self._stop_event.is_set():
-            return
-        url, engineio_path = await self._build_engineio_target()
-        _LOGGER.debug("WS: connecting to %s (path=%s)", url, engineio_path)
-        self._disconnected.clear()
-        self._backoff_idx = 0
-        await self._sio.connect(
-            url,
-            transports=["websocket"],
-            namespaces=[self._namespace],
-            socketio_path=engineio_path,
-            wait=True,
-            wait_timeout=15,
-        )
-
-    async def _wait_for_events(self) -> None:
-        """Wait for the connection to close or stop to be requested."""
-        stop_task = self._loop.create_task(self._stop_event.wait())
-        disconnect_task = self._loop.create_task(self._disconnected.wait())
-        try:
-            done, pending = await asyncio.wait(
-                [stop_task, disconnect_task], return_when=asyncio.FIRST_COMPLETED
-            )
-            for task in pending:
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
-            for task in done:
-                with suppress(asyncio.CancelledError):
-                    await task
-        finally:
-            stop_task.cancel()
-            disconnect_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await stop_task
-            with suppress(asyncio.CancelledError):
-                await disconnect_task
-
-    async def _disconnect(self, *, reason: str) -> None:
-        """Ensure the AsyncClient is disconnected."""
-        if self._sio.connected:
-            try:
-                await self._sio.disconnect()
-            except Exception:
-                _LOGGER.debug("WS: disconnect due to %s failed", reason, exc_info=True)
-        self._disconnected.set()
-        self._reset_handshake_cache(clear_state=True)
-        self._cleanup_ws_state()
-
-    async def _build_engineio_target(self) -> tuple[str, str]:
-        """Return the Engine.IO base URL and path."""
-        token = await self._get_token()
-        base = self._api_base().rstrip("/")
-        parsed = urlsplit(base if base else API_BASE)
-        scheme = parsed.scheme or "https"
-        netloc = parsed.netloc or parsed.path
-        if not netloc:
-            raise RuntimeError("invalid API base")
-        query = urlencode({"token": token, "dev_id": self.dev_id})
-        url = urlunsplit((scheme, netloc, "/socket.io", query, ""))
-        return url, "socket.io"
-
-    # ------------------------------------------------------------------
-    # Socket.IO event handlers
-    # ------------------------------------------------------------------
-    async def _on_connect(self) -> None:
-        """Handle socket connection establishment."""
-        _LOGGER.debug("WS: connected")
-        now = time.time()
-        self._connected_since = now
-        self._healthy_since = None
-        self._last_event_at = now
-        self._stats.frames_total = 0
-        self._stats.events_total = 0
-        self._handshake_logged = False
-        self._subscription_refresh_failed = False
-        self._reset_handshake_cache(clear_state=True)
-        self._update_status("connected")
-        if self._idle_monitor_task is None or self._idle_monitor_task.done():
-            self._idle_monitor_task = self._loop.create_task(self._idle_monitor())
-        self._register_debug_catch_all()
-
-    async def _on_namespace_connect(self) -> None:
-        """Join the namespace and request the initial snapshot."""
-
-        try:
-            if self._namespace != "/":
-                await self._sio.emit("join", namespace=self._namespace)
-            await self._sio.emit("dev_data", namespace=self._namespace)
-        except Exception:
-            _LOGGER.debug("WS: namespace join failed", exc_info=True)
-
-    def _register_debug_catch_all(self) -> None:
-        """Register a catch-all listener to trace websocket traffic when debugging."""
-
-        if self._debug_catch_all_registered:
-            return
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
-
-        async def _log_catch_all(event: str, *args: Any, **kwargs: Any) -> None:
-            """Emit DEBUG logs for all websocket events received."""
-
-            if not _LOGGER.isEnabledFor(logging.DEBUG):
-                return
-            _LOGGER.debug(
-                "WS: catch-all (%s) event=%s args=%s kwargs=%s",
-                self._namespace,
-                event,
-                args,
-                kwargs,
-            )
-
-        self._sio.on("*", handler=_log_catch_all, namespace=self._namespace)
-        self._debug_catch_all_registered = True
-
-    async def _on_disconnect(self) -> None:
-        """Handle socket disconnection."""
-        _LOGGER.debug("WS: disconnected")
-        if self._idle_monitor_task:
-            self._idle_monitor_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._idle_monitor_task
-            self._idle_monitor_task = None
-        self._subscription_refresh_failed = False
-        self._handshake_logged = False
-        self._reset_handshake_cache(clear_state=True)
-        self._disconnected.set()
-        self._cleanup_ws_state()
-
-    async def _on_reconnect(self) -> None:
-        """Handle socket reconnection attempts."""
-        _LOGGER.debug("WS: reconnect event")
-        self._reset_handshake_cache(clear_state=True)
-        await self._subscribe_heater_samples()
-
-    async def _on_connect_error(self, data: Any) -> None:
-        """Log ``connect_error`` events with their payload."""
-
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS: connect_error payload: %s", data)
-
-    async def _on_error(self, data: Any) -> None:
-        """Log socket.io ``error`` events with full details."""
-
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS: error event payload: %s", data)
-
-    async def _on_reconnect_failed(self, data: Any | None = None) -> None:
-        """Log ``reconnect_failed`` events with the reported context."""
-
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS: reconnect_failed details: %s", data)
-
-    async def _on_namespace_disconnect(self, reason: Any | None = None) -> None:
-        """Log namespace-level disconnect callbacks with their reason."""
-
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS: namespace disconnect (%s): %s", self._namespace, reason)
-
-    async def _on_dev_handshake(self, data: Any) -> None:
-        """Handle the ``dev_handshake`` payload."""
-        self._stats.frames_total += 1
-        if not self._handshake_logged and _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS: dev_handshake payload: %s", data)
-            self._handshake_logged = True
-        self._handle_handshake(data)
-
-    async def _on_dev_data(self, data: Any) -> None:
-        """Handle the ``dev_data`` payload."""
-        self._stats.frames_total += 1
-        self._handle_dev_data(data)
-        await self._subscribe_heater_samples()
-
-    async def _on_update(self, data: Any) -> None:
-        """Handle the ``update`` payload."""
-        self._stats.frames_total += 1
-        self._handle_update(data)
-
-    async def _idle_monitor(self) -> None:
-        """Monitor idle websocket periods and trigger restarts."""
-        while not self._closing:
-            await asyncio.sleep(60)
-            if not self._sio.connected:
-                if self._disconnected.is_set():
-                    break
-                continue
-            tracker = self._ws_health_tracker()
-            last_payload = tracker.last_payload_at or tracker.last_heartbeat_at
-            if not last_payload:
-                last_payload = self._last_event_at or self._stats.last_event_ts
-            if not last_payload:
-                continue
-            now = time.time()
-            idle_for = now - last_payload
-            self._refresh_ws_payload_state(now=now, reason="idle_monitor")
-            if idle_for >= self._payload_idle_window:
-                _LOGGER.info("WS: idle for %.0fs; refreshing websocket lease", idle_for)
-                try:
-                    await self._refresh_subscription(reason="idle monitor")
-                except asyncio.CancelledError:  # pragma: no cover - task lifecycle
-                    raise
-                except Exception:
-                    self._schedule_idle_restart(
-                        idle_for=idle_for, source="idle monitor refresh failed"
-                    )
-                    break
-                continue
-            if self._subscription_refresh_failed:
-                # Retry quickly if the last scheduled renewal failed.
-                _LOGGER.info(
-                    "WS: retrying websocket lease after failure; idle for %.0fs",
-                    idle_for,
-                )
-                try:
-                    await self._refresh_subscription(reason="idle monitor retry")
-                except asyncio.CancelledError:  # pragma: no cover - task lifecycle
-                    raise
-                except Exception:
-                    self._schedule_idle_restart(
-                        idle_for=idle_for, source="idle monitor retry failed"
-                    )
-                    break
-
-    async def _refresh_subscription(self, *, reason: str) -> None:
-        """Re-request device data to keep the websocket session active."""
-
-        async with self._subscription_refresh_lock:
-            if not self._sio.connected:
-                raise RuntimeError("websocket not connected")
-            now = time.time()
-            self._subscription_refresh_last_attempt = now
-            if _LOGGER.isEnabledFor(logging.INFO):
-                _LOGGER.info("WS: refreshing websocket lease (%s)", reason)
-            await self._sio.emit("dev_data", namespace=self._namespace)
-            await self._subscribe_heater_samples()
-            self._subscription_refresh_failed = False
-            self._subscription_refresh_last_success = time.time()
 
     # ------------------------------------------------------------------
     # Payload handlers
@@ -636,7 +222,7 @@ class WebSocketClient(_WSCommon):
     def _handle_dev_data(self, data: Any) -> None:
         """Handle the first full snapshot of nodes from the websocket."""
         self._apply_nodes_payload(data, merge=False, event="dev_data")
-        self._reset_handshake_cache()
+        self._handshake_payload = None
 
     def _handle_update(self, data: Any) -> None:
         """Merge incremental node updates from the websocket feed."""
@@ -977,21 +563,6 @@ class WebSocketClient(_WSCommon):
 
         return _bind_inventory()
 
-    async def _subscribe_heater_samples(self) -> None:
-        """Subscribe to heater and accumulator sample updates."""
-
-        try:
-            for node_type, addr in self._heater_sample_subscription_targets():
-                await self._sio.emit(
-                    "subscribe",
-                    f"/{node_type}/{addr}/samples",
-                    namespace=self._namespace,
-                )
-        except asyncio.CancelledError:  # pragma: no cover - task lifecycle
-            raise
-        except Exception:
-            _LOGGER.debug("WS: sample subscription setup failed", exc_info=True)
-
     def _mark_event(self, *, count_event: bool = False) -> None:
         """Record receipt of a websocket event batch for health tracking."""
         now = time.time()
@@ -1067,89 +638,6 @@ class WebSocketClient(_WSCommon):
             return base.rstrip("/")
         return API_BASE
 
-
-# ----------------------------------------------------------------------
-# Legacy Socket.IO 0.9 client
-# ----------------------------------------------------------------------
-
-
-class TermoWebWSClient(WebSocketClient):
-    """Legacy Socket.IO 0.9 websocket client for TermoWeb."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        *,
-        entry_id: str,
-        dev_id: str,
-        api_client: RESTClient,
-        coordinator: Any,
-        session: aiohttp.ClientSession | None = None,
-        handshake_fail_threshold: int = 5,
-        inventory: Inventory | None = None,
-    ) -> None:
-        """Initialise the legacy websocket client container."""
-
-        # Run only the shared _WSCommon init (connect limiter, inventory);
-        # the socketio base initialiser is not used by this client.
-        _WSCommon.__init__(self, inventory=inventory)
-        self.hass = hass
-        self.entry_id = entry_id
-        self.dev_id = dev_id
-        self._client = api_client
-        self._coordinator = coordinator
-        self._session = session or getattr(api_client, "_session", None)
-        if self._session is None:
-            raise RuntimeError("aiohttp session required for websocket client")
-        self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
-        self._task: asyncio.Task | None = None
-        self._namespace = WS_NAMESPACE
-        self._ws: aiohttp.ClientWebSocketResponse | None = None
-        self._disconnected = asyncio.Event()
-        self._disconnected.set()
-
-        self._user_agent = get_brand_user_agent(BRAND_TERMOWEB)
-        self._requested_with = get_brand_requested_with(BRAND_TERMOWEB)
-
-        self._closing = False
-        self._healthy_since: float | None = None
-        self._hb_send_interval: float = 27.0
-        self._hb_task: asyncio.Task | None = None
-        self._rtc_keepalive_task: asyncio.Task | None = None
-        self._rtc_keepalive_interval: float = 30.0
-
-        self._backoff_seq = [5, 10, 30, 120, 300]
-        self._backoff_idx = 0
-        self._hs_fail_threshold = handshake_fail_threshold
-        self._hs_fail_count: int = 0
-        self._hs_fail_start: float = 0.0
-
-        self._stats = WSStats()
-        self._status: str = "stopped"
-        self._stop_event = asyncio.Event()
-        self._handshake_logged = False
-        self._last_event_at: float | None = None
-        self._last_heartbeat_at: float | None = None
-
-        self._payload_idle_window: float = 240.0
-        self._idle_restart_task: asyncio.Task | None = None
-        self._idle_restart_pending = False
-        self._idle_monitor_task: asyncio.Task | None = None
-
-        self._subscription_refresh_lock = asyncio.Lock()
-        self._subscription_refresh_failed = False
-
-        self._ws_state: dict[str, Any] | None = None
-        state = self._ws_state_bucket()
-        state.setdefault("last_payload_at", None)
-        state.setdefault("idle_restart_pending", False)
-
-        self._write_hook_installed = False
-        self._install_write_hook()
-
-    # ------------------------------------------------------------------
-    # Public control
-    # ------------------------------------------------------------------
     def _install_write_hook(self) -> None:
         """Wrap REST writes so we can observe successful node updates."""
 
@@ -1233,9 +721,11 @@ class TermoWebWSClient(WebSocketClient):
         self._schedule_idle_restart(idle_for=idle_for, source="write notification")
 
     async def stop(self) -> None:
-        """Cancel tasks, close websocket sessions and reset legacy state."""
+        """Cancel tasks, close the websocket and clear runtime state."""
 
+        _LOGGER.debug("WS: stop requested")
         self._closing = True
+        self._stop_event.set()
         if self._hb_task:
             self._hb_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -1246,7 +736,26 @@ class TermoWebWSClient(WebSocketClient):
             with suppress(asyncio.CancelledError):
                 await self._rtc_keepalive_task
             self._rtc_keepalive_task = None
-        await super().stop()
+        if self._idle_restart_task:
+            self._idle_restart_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._idle_restart_task
+            self._idle_restart_task = None
+        self._idle_restart_pending = False
+        if self._idle_monitor_task:
+            self._idle_monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._idle_monitor_task
+            self._idle_monitor_task = None
+        self._subscription_refresh_failed = False
+        await self._disconnect(reason="client stop")
+        if self._task:
+            self._task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None
+        self._update_status("stopped")
+        self._cleanup_ws_state()
 
     # ------------------------------------------------------------------
     # Core loop and protocol dispatch
@@ -1764,5 +1273,4 @@ __all__ = [
     "HandshakeError",
     "TermoWebWSClient",
     "WSStats",
-    "WebSocketClient",
 ]

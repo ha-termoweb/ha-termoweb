@@ -15,7 +15,7 @@ def test_apply_nodes_payload_uses_raw_payload_on_normaliser_failure(
 ) -> None:
     """Normaliser failures should not prevent dispatching the original payload."""
 
-    client, _sio, _dispatcher = _make_client(monkeypatch)
+    client, _dispatcher = _make_client(monkeypatch)
     payload: dict[str, Any] = {
         "nodes": {"htr": {"samples": {"1": {"power": 10}}}},
     }

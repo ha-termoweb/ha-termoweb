@@ -76,34 +76,7 @@ class DummyLoop:
 
 
 @pytest.fixture(autouse=True)
-def patch_async_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patch ``socketio.AsyncClient`` with a controllable stub."""
-
-    class StubAsyncClient:
-        def __init__(self, **_: Any) -> None:
-            self.events: dict[tuple[str, str | None], Any] = {}
-            self.connected = False
-
-        def on(self, event: str, *, handler: Any, namespace: str | None = None) -> None:
-            self.events[(event, namespace)] = handler
-
-        async def disconnect(self) -> None:
-            self.connected = False
-
-        async def emit(
-            self,
-            event: str,
-            data: Any | None = None,
-            *,
-            namespace: str | None = None,
-        ) -> None:  # pragma: no cover - only used for safety
-            self.events[(event, namespace)] = (event, data)
-
-    monkeypatch.setattr(module.socketio, "AsyncClient", StubAsyncClient)
-
-
-@pytest.fixture(autouse=True)
-def reload_ws_modules(patch_async_client: None) -> None:
+def reload_ws_modules() -> None:
     """Reload websocket modules to avoid stale references after other tests."""
 
     global base_ws, module
@@ -162,7 +135,7 @@ def _make_termoweb_client(
     monkeypatch: pytest.MonkeyPatch,
     *,
     hass_loop: Any | None = None,
-) -> module.WebSocketClient:
+) -> module.TermoWebWSClient:
     """Instantiate a TermoWeb websocket client for tests."""
 
     if hass_loop is None:
@@ -179,7 +152,7 @@ def _make_termoweb_client(
     )
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     dispatcher = MagicMock()
-    client = module.WebSocketClient(
+    client = module.TermoWebWSClient(
         hass,
         entry_id="entry",
         dev_id="device",
@@ -238,7 +211,7 @@ async def test_ws_state_cleanup_and_reuse() -> None:
         inventory=inventory,
     )
 
-    client = module.WebSocketClient(
+    client = module.TermoWebWSClient(
         hass,
         entry_id="entry",
         dev_id="device",
@@ -635,24 +608,6 @@ def test_forward_ws_sample_updates_inventory_validation(
     assert handler.call_args.kwargs.get("lease_seconds") == 15
 
 
-def test_termoweb_client_initialises_namespace_and_handlers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensure the TermoWeb client uses the default namespace and registers events."""
-
-    client = _make_termoweb_client(monkeypatch)
-    assert client._namespace == module.WS_NAMESPACE
-    expected = {
-        ("connect", None),
-        ("disconnect", None),
-        ("reconnect", None),
-        ("connect", module.WS_NAMESPACE),
-        ("dev_data", module.WS_NAMESPACE),
-        ("update", module.WS_NAMESPACE),
-    }
-    assert expected.issubset(client._sio.events.keys())
-
-
 def test_ws_state_bucket_initialises_missing_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -989,31 +944,6 @@ async def test_termoweb_get_token_missing_header(
     rest_client.authed_headers = AsyncMock(return_value={})  # type: ignore[attr-defined]
     with pytest.raises(RuntimeError):
         await client._get_token()
-
-
-def test_termoweb_wrap_background_task_handles_sync_callable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Background task wrapper should handle synchronous callables."""
-
-    loop = DummyLoop()
-    client = _make_termoweb_client(monkeypatch, hass_loop=loop)
-
-    task = client._wrap_background_task(lambda value: value + 1, 4)
-    assert isinstance(task, DummyTask)
-    assert loop.created_tasks
-    assert task is loop.created_tasks[0]
-    assert task.done() is False
-
-    async def _async_target(value: int) -> int:
-        return value * 2
-
-    async_task = client._wrap_background_task(_async_target, 6)
-    assert len(loop.created_tasks) == 2
-    assert async_task is loop.created_tasks[1]
-
-    for created in loop.created_tasks:
-        created.cancel()
 
 
 def test_termoweb_start_reuses_existing_task(monkeypatch: pytest.MonkeyPatch) -> None:

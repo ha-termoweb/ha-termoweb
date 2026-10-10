@@ -16,7 +16,7 @@ def test_apply_nodes_payload_passthrough(
 ) -> None:
     """Translated path updates should skip debug warnings."""
 
-    client, _sio, _dispatcher = _make_client(monkeypatch)
+    client, _dispatcher = _make_client(monkeypatch)
 
     translated_nodes: dict[str, Any] = {
         "htr": {"status": {"1": {"temp": 21}}},

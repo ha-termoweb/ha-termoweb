@@ -42,7 +42,7 @@ def translate_update(payload: Any) -> Any:
 
     return ws_client_module.translate_path_update(
         payload,
-        resolve_section=module.WebSocketClient._resolve_update_section,
+        resolve_section=module.TermoWebWSClient._resolve_update_section,
     )
 
 
@@ -80,85 +80,16 @@ class DummyREST:
         self.requested_with = requested_with
 
 
-class StubAsyncClient:
-    """Socket.IO client stub recording method invocations."""
-
-    def __init__(
-        self,
-        allow_http_error: bool = False,
-        *,
-        existing_eio_http: Any | None = None,
-        **_: Any,
-    ) -> None:
-        object.__setattr__(self, "events", {})
-        object.__setattr__(self, "_connected", False)
-        object.__setattr__(self, "connect_calls", [])
-        object.__setattr__(self, "disconnect_calls", 0)
-        object.__setattr__(self, "emit_calls", [])
-        object.__setattr__(self, "_allow_http_error", allow_http_error)
-        object.__setattr__(self, "_http_attempts", 0)
-        object.__setattr__(
-            self,
-            "eio",
-            SimpleNamespace(start_background_task=None, http=existing_eio_http),
-        )
-        object.__setattr__(self, "http", None)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name == "http" and getattr(self, "_allow_http_error", False):
-            attempts = getattr(self, "_http_attempts")
-            if attempts == 0:
-                object.__setattr__(self, "_http_attempts", attempts + 1)
-                object.__setattr__(self, "_allow_http_error", False)
-                raise AttributeError("http is managed dynamically")
-        object.__setattr__(self, name, value)
-
-    def on(self, event: str, *, handler: Any, namespace: str | None = None) -> None:
-        self.events[(event, namespace)] = handler
-
-    async def connect(self, *args: Any, **kwargs: Any) -> None:
-        self.connect_calls.append((args, kwargs))
-        object.__setattr__(self, "_connected", True)
-
-    async def disconnect(self) -> None:
-        object.__setattr__(self, "_connected", False)
-        object.__setattr__(self, "disconnect_calls", self.disconnect_calls + 1)
-
-    async def emit(
-        self, event: str, data: Any | None = None, *, namespace: str | None = None
-    ) -> None:
-        self.emit_calls.append((event, data, namespace))
-
-    @property
-    def connected(self) -> bool:
-        return getattr(self, "_connected")
-
-
 def _make_client(
     monkeypatch: pytest.MonkeyPatch,
     *,
     hass_loop: Any | None = None,
-    allow_http_error: bool = False,
-    requested_with: str | None = "requested",
     rest_headers: dict[str, str] | None = None,
     session: Any | None = None,
-    existing_eio_http: Any | None = None,
     api_base: str | None = "https://api.termoweb",
-) -> tuple[module.WebSocketClient, StubAsyncClient, MagicMock]:
-    """Instantiate a ``WebSocketClient`` with a controllable AsyncClient stub."""
+) -> tuple[module.TermoWebWSClient, MagicMock]:
+    """Instantiate the production ``TermoWebWSClient`` with test doubles."""
 
-    holder: dict[str, StubAsyncClient] = {}
-
-    def factory(**kwargs: Any) -> StubAsyncClient:
-        stub = StubAsyncClient(
-            allow_http_error=allow_http_error,
-            existing_eio_http=existing_eio_http,
-            **kwargs,
-        )
-        holder["client"] = stub
-        return stub
-
-    monkeypatch.setattr(module.socketio, "AsyncClient", factory)
     dispatcher = MagicMock()
 
     if hass_loop is None:
@@ -186,12 +117,11 @@ def _make_client(
         inventory=default_inventory,
         coordinator=coordinator,
     )
-    client = module.WebSocketClient(
+    client = module.TermoWebWSClient(
         hass,
         entry_id="entry",
         dev_id="device",
         api_client=DummyREST(
-            requested_with=requested_with,
             api_base=api_base,
             authed_headers=rest_headers,
         ),
@@ -199,7 +129,7 @@ def _make_client(
         session=session or SimpleNamespace(closed=True),
         inventory=default_inventory,
     )
-    return client, holder["client"], dispatcher
+    return client, dispatcher
 
 
 def test_handshake_error_exposes_fields() -> None:
@@ -218,209 +148,13 @@ def test_handshake_error_exposes_fields() -> None:
     assert error.response_snippet == "body"
 
 
-def test_init_handles_socketio_http_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Initialisation should recover when AsyncClient rejects ``http`` assignment."""
-
-    client, sio, _ = _make_client(monkeypatch, allow_http_error=True)
-    assert isinstance(client, module.WebSocketClient)
-    assert sio._http_attempts == 1
-    assert sio.http is not None
-    assert sio.eio.http is not None
-
-
-def test_init_populates_defaults_and_preserves_existing_http(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Initialisation should fill default metadata and respect existing Engine.IO state."""
-
-    existing_http = SimpleNamespace(closed=False, preserved=True)
-    session = SimpleNamespace()
-
-    client, sio, _ = _make_client(
-        monkeypatch,
-        requested_with=None,
-        session=session,
-        existing_eio_http=existing_http,
-    )
-
-    assert client._requested_with == module.get_brand_requested_with(
-        module.BRAND_TERMOWEB
-    )
-    assert hasattr(client._sio.http, "closed")
-    assert sio.eio.http is existing_http
-
-
-@pytest.mark.asyncio
-async def test_connect_once_invokes_socketio_connect(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """_connect_once should reset backoff and call the AsyncClient."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    monkeypatch.setattr(
-        client,
-        "_build_engineio_target",
-        AsyncMock(return_value=("wss://ws", "socket.io")),
-    )
-    client._stop_event.clear()
-
-    await client._connect_once()
-
-    assert sio.connect_calls
-    assert client._backoff_idx == 0
-
-
-@pytest.mark.asyncio
-async def test_connect_once_aborts_when_stopping(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """_connect_once should exit early when stop is requested."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    client._stop_event.set()
-    await client._connect_once()
-    assert not sio.connect_calls
-
-
-@pytest.mark.asyncio
-async def test_wait_for_events_cancels_pending_tasks(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """_wait_for_events should cancel whichever wait completes second."""
-
-    loop = asyncio.get_running_loop()
-    hass_loop = SimpleNamespace(
-        create_task=lambda coro, **kwargs: loop.create_task(coro, **kwargs),
-        call_soon_threadsafe=lambda cb, *args: loop.call_soon(cb, *args),
-    )
-    client, _sio, _ = _make_client(monkeypatch, hass_loop=hass_loop)
-    client._stop_event = asyncio.Event()
-    client._disconnected = asyncio.Event()
-    client._stop_event.set()
-    client._loop = loop
-
-    await client._wait_for_events()
-
-
-@pytest.mark.asyncio
-async def test_runner_handles_errors_and_backoff(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The connection runner should retry until ``_closing`` is set."""
-
-    client, _sio, _dispatcher = _make_client(monkeypatch)
-    call_order: list[str] = []
-
-    async def connect_once() -> None:
-        call_order.append("connect")
-
-    async def wait_for_events() -> None:
-        call_order.append("wait")
-        raise RuntimeError("boom")
-
-    async def disconnect(**_: Any) -> None:
-        call_order.append("disconnect")
-
-    async def lost(error: Exception | None) -> None:
-        call_order.append(f"lost:{type(error).__name__ if error else 'none'}")
-        client._closing = True
-
-    client._connect_once = AsyncMock(side_effect=connect_once)  # type: ignore[attr-defined]
-    client._wait_for_events = AsyncMock(side_effect=wait_for_events)  # type: ignore[attr-defined]
-    client._disconnect = AsyncMock(side_effect=disconnect)  # type: ignore[attr-defined]
-    client._handle_connection_lost = AsyncMock(side_effect=lost)  # type: ignore[attr-defined]
-
-    async def fake_sleep(delay: float) -> None:
-        call_order.append(f"sleep:{delay}")
-        client._closing = True
-
-    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-    monkeypatch.setattr(module.random, "uniform", lambda a, b: 1.0)
-
-    await client._runner()
-
-    assert call_order == ["connect", "wait", "disconnect", "lost:RuntimeError"]
-
-
-@pytest.mark.asyncio
-async def test_runner_propagates_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The runner should re-raise cancellation requests."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    client._connect_once = AsyncMock(side_effect=asyncio.CancelledError())  # type: ignore[attr-defined]
-
-    with pytest.raises(asyncio.CancelledError):
-        await client._runner()
-
-
-@pytest.mark.asyncio
-async def test_runner_performs_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The runner should wait using the backoff sequence when retries are needed."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-
-    async def connect_once() -> None:
-        raise RuntimeError("boom")
-
-    client._connect_once = AsyncMock(side_effect=connect_once)  # type: ignore[attr-defined]
-
-    async def fake_sleep(delay: float) -> None:
-        client._closing = True
-
-    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-    monkeypatch.setattr(module.random, "uniform", lambda a, b: 1.0)
-
-    await client._runner()
-
-
-@pytest.mark.asyncio
-async def test_handle_connection_lost_updates_state(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Losing the connection should persist restart metadata."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    state = client._ws_state_bucket()
-    assert state.get("restart_count") is None
-
-    await client._handle_connection_lost(RuntimeError("boom"))
-
-    assert state["restart_count"] == 1
-    assert "RuntimeError" in state["last_disconnect_error"]
-
-
-@pytest.mark.asyncio
-async def test_disconnect_logs_exceptions(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """_disconnect should swallow errors from the socket client."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    object.__setattr__(sio, "_connected", True)
-    sio.disconnect = AsyncMock(side_effect=RuntimeError("boom"))
-    caplog.set_level(logging.DEBUG)
-    await client._disconnect(reason="tests")
-    assert "disconnect due to tests failed" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_disconnect_calls_socketio(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_disconnect should call the AsyncClient when connected."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    await sio.connect()
-    await client._disconnect(reason="tests")
-    assert sio.disconnect_calls == 1
-    assert client._disconnected.is_set()
-
-
 @pytest.mark.asyncio
 async def test_get_token_requires_authorization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """_get_token should raise when the Authorization header is missing."""
 
-    client, _sio, _ = _make_client(monkeypatch, rest_headers={"Authorization": ""})
+    client, _ = _make_client(monkeypatch, rest_headers={"Authorization": ""})
     with pytest.raises(RuntimeError):
         await client._get_token()
 
@@ -431,7 +165,7 @@ async def test_force_refresh_token_resets_access(
 ) -> None:
     """_force_refresh_token should clear cached credentials and ensure tokens."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     client._client._access_token = "token"  # type: ignore[attr-defined]
     await client._force_refresh_token()
     client._client._ensure_token.assert_awaited()  # type: ignore[attr-defined]
@@ -440,154 +174,18 @@ async def test_force_refresh_token_resets_access(
 def test_api_base_defaults_to_constant(monkeypatch: pytest.MonkeyPatch) -> None:
     """_api_base should fall back to the default when the client lacks one."""
 
-    client, _sio, _ = _make_client(monkeypatch, api_base=None)
+    client, _ = _make_client(monkeypatch, api_base=None)
     assert client._api_base() == module.API_BASE
 
 
 def test_ws_state_bucket_initialises_storage(monkeypatch: pytest.MonkeyPatch) -> None:
     """_ws_state_bucket should create storage on hass when missing."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     client.hass = SimpleNamespace(loop=None)
     client._ws_state = None
     bucket = client._ws_state_bucket()
     assert isinstance(bucket, dict)
-
-
-@pytest.mark.asyncio
-async def test_build_engineio_target_uses_token(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Engine.IO URL builder should include the token and device id."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="tok"))
-    url, path = await client._build_engineio_target()
-    assert url.startswith("https://api.termoweb")
-    assert "token=tok" in url and "dev_id=device" in url
-    assert path == "socket.io"
-
-
-@pytest.mark.asyncio
-async def test_on_connect_schedules_idle_monitor(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Connecting should reset metrics and schedule the idle monitor."""
-
-    loop = asyncio.get_running_loop()
-    created: list[asyncio.Task] = []
-
-    def create_task(coro: Any, **_: Any) -> asyncio.Task:
-        if isinstance(coro, asyncio.Task):
-            task = coro
-        else:
-            task = loop.create_task(coro)
-        created.append(task)
-        return task
-
-    hass_loop = SimpleNamespace(
-        create_task=create_task,
-        call_soon_threadsafe=lambda cb, *args: loop.call_soon(cb, *args),
-    )
-    client, _sio, dispatcher = _make_client(monkeypatch, hass_loop=hass_loop)
-    await client._on_connect()
-    assert created
-
-
-@pytest.mark.asyncio
-async def test_namespace_connect_emits_join(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Joining the namespace should emit join and dev_data events."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    await client._on_namespace_connect()
-    assert ("join", None, module.WS_NAMESPACE) in sio.emit_calls
-    assert ("dev_data", None, module.WS_NAMESPACE) in sio.emit_calls
-
-
-@pytest.mark.asyncio
-async def test_namespace_connect_handles_failure(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Namespace join failures should be logged at DEBUG level."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    sio.emit = AsyncMock(side_effect=RuntimeError("boom"))
-    caplog.set_level(logging.DEBUG)
-    await client._on_namespace_connect()
-    assert "namespace join failed" in caplog.text
-
-
-def test_register_debug_catch_all_installs_handler(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Debug catch-all registration should wrap the AsyncClient when DEBUG is enabled."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    caplog.set_level("DEBUG", logger=module._LOGGER.name)
-    client._register_debug_catch_all()
-    assert ("*", module.WS_NAMESPACE) in sio.events
-
-
-@pytest.mark.asyncio
-async def test_register_debug_catch_all_reuses_handler(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Calling register twice should reuse the existing handler."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    caplog.set_level(logging.DEBUG)
-    monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
-    client._register_debug_catch_all()
-    handler = sio.events[("*", module.WS_NAMESPACE)]
-    client._register_debug_catch_all()
-    await handler("event", 1, key="value")
-    monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: False)
-    await handler("ignored")
-
-
-@pytest.mark.asyncio
-async def test_on_disconnect_cancels_monitor(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Disconnecting should cancel the idle monitor task and set the flag."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    client._idle_monitor_task = asyncio.create_task(asyncio.sleep(0))
-    await asyncio.sleep(0)
-    await client._on_disconnect()
-    assert client._idle_monitor_task is None
-    assert client._disconnected.is_set()
-
-
-@pytest.mark.asyncio
-async def test_misc_event_logging(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Event handlers should log diagnostic messages when DEBUG is enabled."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    monkeypatch.setattr(client, "_subscribe_heater_samples", AsyncMock())
-    caplog.set_level(logging.DEBUG)
-    monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
-
-    await client._on_reconnect()
-    await client._on_connect_error({"error": "boom"})
-    await client._on_error({"error": "boom"})
-    await client._on_reconnect_failed({"attempts": 3})
-    await client._on_namespace_disconnect("bye")
-
-    assert "reconnect event" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_refresh_subscription_emits(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Refreshing the subscription should emit dev_data and resubscribe samples."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    await sio.connect()
-    monkeypatch.setattr(client, "_subscribe_heater_samples", AsyncMock())
-    await client._refresh_subscription(reason="timer")
-    assert ("dev_data", None, module.WS_NAMESPACE) in sio.emit_calls
-    client._subscribe_heater_samples.assert_awaited()  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
@@ -596,153 +194,15 @@ async def test_refresh_subscription_requires_connection(
 ) -> None:
     """Refreshing while disconnected should raise an error."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     with pytest.raises(RuntimeError):
         await client._refresh_subscription(reason="disconnected")
-
-
-@pytest.mark.asyncio
-async def test_idle_monitor_refreshes_and_exits(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The idle monitor should attempt to refresh and exit when closing."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    await sio.connect()
-    client._payload_idle_window = 1.0
-    client._stats.last_event_ts = 100.0
-    client._subscription_refresh_failed = False
-    client._closing = False
-    refresh_calls: list[str] = []
-
-    async def fake_refresh(**_: Any) -> None:
-        refresh_calls.append("refresh")
-        client._closing = True
-
-    real_sleep = asyncio.sleep
-
-    async def fake_sleep(_: float) -> None:
-        await real_sleep(0)
-
-    monkeypatch.setattr(
-        client, "_refresh_subscription", AsyncMock(side_effect=fake_refresh)
-    )
-    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
-    monkeypatch.setattr(module.time, "time", lambda: 200.0)
-
-    await client._idle_monitor()
-
-    assert refresh_calls == ["refresh"]
-
-
-@pytest.mark.asyncio
-async def test_idle_monitor_breaks_when_disconnected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The idle monitor should exit when disconnected from the socket."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    client._closing = False
-    client._disconnected.set()
-    object.__setattr__(sio, "_connected", False)
-
-    async def fake_sleep(_: float) -> None:
-        client._closing = True
-
-    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-    await client._idle_monitor()
-
-
-@pytest.mark.asyncio
-async def test_idle_monitor_skips_without_last_event(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Idle monitor should continue when no last event timestamp is available."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    await sio.connect()
-    client._closing = False
-    client._disconnected.clear()
-    client._last_event_at = None
-    client._stats.last_event_ts = 0.0
-
-    async def fake_sleep(_: float) -> None:
-        client._closing = True
-
-    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-    await client._idle_monitor()
-
-
-@pytest.mark.asyncio
-async def test_idle_monitor_waits_for_disconnect(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Idle monitor should continue when disconnected flag is unset."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    client._closing = False
-    client._disconnected.clear()
-    object.__setattr__(sio, "_connected", False)
-
-    async def fake_sleep(_: float) -> None:
-        client._closing = True
-
-    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-    await client._idle_monitor()
-
-
-@pytest.mark.asyncio
-async def test_idle_monitor_schedules_restart_on_refresh_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Refresh failures should schedule idle restarts."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    await sio.connect()
-    client._last_event_at = 1.0
-    client._payload_idle_window = 1.0
-    monkeypatch.setattr(module.time, "time", lambda: 5.0)
-    client._closing = False
-    client._schedule_idle_restart = MagicMock()
-    client._refresh_subscription = AsyncMock(side_effect=RuntimeError("boom"))
-
-    async def fake_sleep(_: float) -> None:
-        client._closing = True
-
-    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-    await client._idle_monitor()
-    client._schedule_idle_restart.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_idle_monitor_retries_failed_refresh(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When the previous refresh failed the monitor should retry quickly."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    await sio.connect()
-    client._last_event_at = 5.0
-    client._payload_idle_window = 100.0
-    client._subscription_refresh_failed = True
-    monkeypatch.setattr(module.time, "time", lambda: 10.0)
-    client._closing = False
-    client._schedule_idle_restart = MagicMock()
-    client._refresh_subscription = AsyncMock(side_effect=RuntimeError("boom"))
-
-    async def fake_sleep(_: float) -> None:
-        client._closing = True
-
-    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-    await client._idle_monitor()
-    client._schedule_idle_restart.assert_called_once()
 
 
 def test_translate_path_update_and_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
     """Path based updates should map onto node sections."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     payload = {
         "path": "/api/devs/device/htr/1/settings/temp",
         "body": {"value": 20},
@@ -759,21 +219,21 @@ def test_translate_path_update_and_resolve(monkeypatch: pytest.MonkeyPatch) -> N
         "htr": {"settings": {"1": {"setup": {"program": {"foo": 1}}}}}
     }
     assert client._translate_path_update(setup_payload) == translated_setup
-    assert module.WebSocketClient._resolve_update_section("advanced_setup") == (
+    assert module.TermoWebWSClient._resolve_update_section("advanced_setup") == (
         "advanced",
         "advanced_setup",
     )
-    assert module.WebSocketClient._resolve_update_section("prog") == (
+    assert module.TermoWebWSClient._resolve_update_section("prog") == (
         "settings",
         "prog",
     )
-    assert module.WebSocketClient._resolve_update_section(None) == (None, None)
+    assert module.TermoWebWSClient._resolve_update_section(None) == (None, None)
 
 
 def test_translate_path_update_invalid_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     """Invalid payloads should return None from the path translator."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     for payload in INVALID_TRANSLATION_PAYLOADS:
         assert translate_update(payload) is None
         assert client._translate_path_update(payload) is None
@@ -784,7 +244,7 @@ def test_translate_path_update_rejects_unknown_nodes(
 ) -> None:
     """Path translation should ignore unknown node types and addresses."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     for payload in (
         {"path": "/api/devs/device/ /1/settings", "body": {"v": 1}},
         {"path": "/api/devs/device/htr/ /settings", "body": {"v": 1}},
@@ -798,7 +258,7 @@ def test_handle_handshake_logging(
 ) -> None:
     """Handshake handling should log keys and ignore invalid payloads."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     caplog.set_level(logging.DEBUG)
     monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
     monkeypatch.setattr(module.time, "time", lambda: 123.0)
@@ -811,57 +271,12 @@ def test_handle_handshake_logging(
     client._handle_handshake("invalid")
 
 
-@pytest.mark.asyncio
-async def test_handshake_cache_resets_on_reconnect(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Handshake cache should not grow across reconnect cycles."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    state = client._ws_state_bucket()
-    times = iter([100.0, 200.0, 300.0, 400.0, 500.0, 600.0])
-    monkeypatch.setattr(module.time, "time", lambda: next(times))
-    monkeypatch.setattr(
-        client._loop,
-        "create_task",
-        lambda coro, **_: (
-            coro.close(),
-            SimpleNamespace(done=lambda: True, cancel=lambda: None),
-        )[1],
-    )
-    client._handle_handshake({"foo": list(range(5)), "bar": "value"})
-
-    assert client._handshake_payload == {
-        "keys": ("bar", "foo"),
-        "received_at": 100.0,
-    }
-    assert state.get("handshake_keys") == ("bar", "foo")
-    assert "last_handshake_at" in state
-
-    await client._on_disconnect()
-    assert client._handshake_payload is None
-    assert "handshake_keys" not in state
-    assert "last_handshake_at" not in state
-    baseline_len = len(client._ws_state_bucket())
-
-    await client._on_connect()
-    client._handle_handshake({"baz": "qux"})
-    assert client._handshake_payload
-    assert client._handshake_payload.get("keys") == ("baz",)
-    assert client._handshake_payload.get("received_at") >= 0
-    client._idle_monitor_task = None
-    await client._on_disconnect()
-    refreshed_state = client._ws_state_bucket()
-    assert "handshake_keys" not in refreshed_state
-    assert len(refreshed_state) == baseline_len
-
-
 def test_apply_nodes_payload_debug_branches(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Applying node payloads should log diagnostic information and filter invalid data."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     caplog.set_level(logging.DEBUG)
     monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
     client._forward_sample_updates = MagicMock()
@@ -906,7 +321,7 @@ def test_apply_nodes_payload_debug_branches(
 def test_handle_dev_data_and_update(monkeypatch: pytest.MonkeyPatch) -> None:
     """Direct handlers should call into the payload merger."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     client._apply_nodes_payload = MagicMock()  # type: ignore[attr-defined]
     client._handle_dev_data({"nodes": {"htr": {}}})
     client._apply_nodes_payload.assert_called_with(
@@ -924,7 +339,7 @@ def test_apply_nodes_payload_merges_and_forwards(
 ) -> None:
     """Applying node payloads should normalize and forward updates."""
 
-    client, _sio, dispatcher = _make_client(monkeypatch)
+    client, dispatcher = _make_client(monkeypatch)
     client._collect_update_addresses = MagicMock(return_value=[("htr", "1")])  # type: ignore[attr-defined]
     client._forward_sample_updates = MagicMock()  # type: ignore[attr-defined]
     client._mark_event = MagicMock()  # type: ignore[attr-defined]
@@ -941,7 +356,7 @@ def test_apply_nodes_payload_merges_and_forwards(
 def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> None:
     """Subscription helper should return inventory-derived targets."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]}
     inventory = Inventory(
         client.dev_id,
@@ -960,7 +375,7 @@ def test_heater_sample_subscription_targets_logs_missing_inventory(
 ) -> None:
     """Missing inventory should be logged when resolving subscription targets."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     client._inventory = None
 
     with caplog.at_level(logging.ERROR):
@@ -968,37 +383,6 @@ def test_heater_sample_subscription_targets_logs_missing_inventory(
 
     assert not targets
     assert any("missing inventory" in record.message for record in caplog.records)
-
-
-@pytest.mark.asyncio
-async def test_subscribe_heater_samples_emits(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Subscribing to heater samples should emit for each address."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    monkeypatch.setattr(
-        client,
-        "_heater_sample_subscription_targets",
-        lambda: [("htr", "1"), ("aux", "2")],
-    )
-    await client._subscribe_heater_samples()
-    assert ("subscribe", "/htr/1/samples", module.WS_NAMESPACE) in sio.emit_calls
-    assert ("subscribe", "/aux/2/samples", module.WS_NAMESPACE) in sio.emit_calls
-
-
-@pytest.mark.asyncio
-async def test_subscribe_heater_samples_logs_errors(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Subscribing should log when emit fails."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    monkeypatch.setattr(
-        client, "_heater_sample_subscription_targets", lambda: [("htr", "1")]
-    )
-    sio.emit = AsyncMock(side_effect=RuntimeError("boom"))
-    caplog.set_level(logging.DEBUG)
-    await client._subscribe_heater_samples()
-    assert "sample subscription setup failed" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1010,7 +394,7 @@ async def test_schedule_idle_restart(monkeypatch: pytest.MonkeyPatch) -> None:
         create_task=lambda coro, **kwargs: loop.create_task(coro, **kwargs),
         call_soon_threadsafe=lambda cb, *args: loop.call_soon(cb, *args),
     )
-    client, _sio, _ = _make_client(monkeypatch, hass_loop=hass_loop)
+    client, _ = _make_client(monkeypatch, hass_loop=hass_loop)
     client._closing = False
     client._schedule_idle_restart(idle_for=10, source="test")
     assert client._idle_restart_pending is True
@@ -1026,7 +410,7 @@ def test_schedule_idle_restart_ignored_when_closing(
 ) -> None:
     """Scheduling should be skipped when already closing."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     client._closing = True
     client._schedule_idle_restart(idle_for=10, source="closing")
     assert client._idle_restart_task is None
@@ -1041,7 +425,7 @@ async def test_cancel_idle_restart(monkeypatch: pytest.MonkeyPatch) -> None:
         create_task=lambda coro, **kwargs: loop.create_task(coro, **kwargs),
         call_soon_threadsafe=lambda cb, *args: loop.call_soon(cb, *args),
     )
-    client, _sio, _ = _make_client(monkeypatch, hass_loop=hass_loop)
+    client, _ = _make_client(monkeypatch, hass_loop=hass_loop)
     client._closing = False
     client._schedule_idle_restart(idle_for=10, source="test")
     task = client._idle_restart_task
@@ -1053,14 +437,16 @@ async def test_cancel_idle_restart(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_header_sanitizers(monkeypatch: pytest.MonkeyPatch) -> None:
     """Header and URL sanitisation helpers should redact sensitive values."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
 
     headers = client._brand_headers(origin="https://app")
-    assert headers["X-Requested-With"] == "requested"
+    assert headers["X-Requested-With"] == module.get_brand_requested_with(
+        module.BRAND_TERMOWEB
+    )
     client._requested_with = ""
     headers = client._brand_headers(origin="https://app")
     assert headers["Origin"] == "https://app"
-    assert headers["User-Agent"] == "agent"
+    assert headers["User-Agent"] == module.get_brand_user_agent(module.BRAND_TERMOWEB)
     assert headers["Accept-Language"] == module.ACCEPT_LANGUAGE
 
     assert redact_token_fragment("   ") == ""
@@ -1094,35 +480,9 @@ def test_header_sanitizers(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_redaction_helpers_handle_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
     """Token and identifier masking should treat whitespace as empty."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     assert redact_token_fragment("   ") == ""
     assert mask_identifier("   ") == ""
-
-
-@pytest.mark.asyncio
-async def test_wrap_background_task_handles_sync_callable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Non-coroutine targets should be wrapped in an async task."""
-
-    loop = asyncio.get_running_loop()
-    hass_loop = SimpleNamespace(
-        create_task=lambda coro, **kwargs: loop.create_task(coro, **kwargs),
-        call_soon_threadsafe=lambda cb, *args: loop.call_soon(cb, *args),
-    )
-    client, _sio, _ = _make_client(monkeypatch, hass_loop=hass_loop)
-
-    result: list[int] = []
-
-    def add_value(value: int) -> int:
-        result.append(value)
-        return value * 2
-
-    task = client._wrap_background_task(add_value, 3)
-    await task
-
-    assert result == [3]
-    assert asyncio.iscoroutine(task.result())
 
 
 @pytest.mark.asyncio
@@ -1134,7 +494,7 @@ async def test_start_returns_existing_task(monkeypatch: pytest.MonkeyPatch) -> N
         create_task=lambda coro, **kwargs: loop.create_task(coro, **kwargs),
         call_soon_threadsafe=lambda cb, *args: loop.call_soon(cb, *args),
     )
-    client, _sio, _ = _make_client(monkeypatch, hass_loop=hass_loop)
+    client, _ = _make_client(monkeypatch, hass_loop=hass_loop)
 
     ready = asyncio.Event()
 
@@ -1160,7 +520,7 @@ async def test_start_and_stop_manage_tasks(monkeypatch: pytest.MonkeyPatch) -> N
         create_task=lambda coro, **kwargs: loop.create_task(coro, **kwargs),
         call_soon_threadsafe=lambda cb, *args: loop.call_soon(cb, *args),
     )
-    client, _sio, _ = _make_client(monkeypatch, hass_loop=hass_loop)
+    client, _ = _make_client(monkeypatch, hass_loop=hass_loop)
 
     runner_gate = asyncio.Event()
 
@@ -1184,91 +544,10 @@ async def test_start_and_stop_manage_tasks(monkeypatch: pytest.MonkeyPatch) -> N
     assert task.cancelled() or task.done()
 
 
-def test_handle_connection_lost_records_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Connection loss metadata should be stored in the state bucket."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    bucket = client._ws_state_bucket()
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(client._handle_connection_lost(RuntimeError("boom")))
-    loop.close()
-    assert bucket["restart_count"] == 1
-    assert "RuntimeError" in bucket["last_disconnect_error"]
-
-
-@pytest.mark.asyncio
-async def test_build_engineio_target_handles_invalid_base(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Invalid API bases should raise runtime errors."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    url, path = await client._build_engineio_target()
-    assert path == "socket.io"
-    assert "token" in url and "dev_id" in url
-
-    monkeypatch.setattr(client, "_api_base", lambda: "http://")
-    with pytest.raises(RuntimeError):
-        await client._build_engineio_target()
-
-
-def test_register_debug_catch_all_requires_debug(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Debug catch-all should register only when debugging is enabled."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    client._debug_catch_all_registered = False
-    monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
-    client._register_debug_catch_all()
-    assert client._debug_catch_all_registered is True
-    assert ("*", client._namespace) in sio.events
-
-
-@pytest.mark.asyncio
-async def test_event_handlers_update_stats(monkeypatch: pytest.MonkeyPatch) -> None:
-    """dev_handshake, dev_data, and update events should update counters."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    monkeypatch.setattr(client, "_handle_dev_data", MagicMock())
-    monkeypatch.setattr(client, "_handle_update", MagicMock())
-    monkeypatch.setattr(client, "_subscribe_heater_samples", AsyncMock())
-    monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
-
-    await client._on_dev_handshake({"hello": "world"})
-    assert client._stats.frames_total == 1
-
-    await client._on_dev_data({"nodes": {}})
-    await client._on_update({})
-    assert client._stats.frames_total == 3
-    client._handle_dev_data.assert_called_once()
-    client._handle_update.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_refresh_subscription_behaviour(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Refreshing subscriptions should emit dev_data and resubscribe."""
-
-    client, sio, _ = _make_client(monkeypatch)
-    sio._connected = True
-    emit = AsyncMock()
-    monkeypatch.setattr(client._sio, "emit", emit)
-    monkeypatch.setattr(client, "_subscribe_heater_samples", AsyncMock())
-    monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
-
-    await client._refresh_subscription(reason="manual")
-    emit.assert_called_with("dev_data", namespace=client._namespace)
-    assert client._subscription_refresh_failed is False
-
-    sio._connected = False
-    with pytest.raises(RuntimeError):
-        await client._refresh_subscription(reason="not connected")
-
-
 def test_apply_nodes_payload_translation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Node payload application should merge data and notify listeners."""
 
-    client, _sio, _dispatcher = _make_client(monkeypatch)
+    client, _dispatcher = _make_client(monkeypatch)
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     client._inventory = Inventory(
         client.dev_id,
@@ -1288,7 +567,7 @@ def test_forward_sample_updates_invokes_handler(
 ) -> None:
     """Forwarding sample updates should notify the energy coordinator handler."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     handler_called: dict[str, Any] = {}
     energy_handler = SimpleNamespace(
         handle_ws_samples=lambda dev_id, payload, **kwargs: handler_called.update(
@@ -1314,7 +593,7 @@ def test_forward_sample_updates_invokes_handler(
 def test_extract_nodes_variants(monkeypatch: pytest.MonkeyPatch) -> None:
     """_extract_nodes should handle dicts, lists, and invalid payloads."""
 
-    client, _sio, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     inventory = Inventory(
         "device",
         build_node_inventory([{"type": "htr", "addr": "1"}]),
@@ -1331,17 +610,17 @@ def test_extract_nodes_variants(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_resolve_update_section_variants() -> None:
     """Update section resolver should map known segments consistently."""
 
-    assert module.WebSocketClient._resolve_update_section(None) == (None, None)
-    assert module.WebSocketClient._resolve_update_section("status") == ("status", None)
-    assert module.WebSocketClient._resolve_update_section("advanced_setup") == (
+    assert module.TermoWebWSClient._resolve_update_section(None) == (None, None)
+    assert module.TermoWebWSClient._resolve_update_section("status") == ("status", None)
+    assert module.TermoWebWSClient._resolve_update_section("advanced_setup") == (
         "advanced",
         "advanced_setup",
     )
-    assert module.WebSocketClient._resolve_update_section("setup") == (
+    assert module.TermoWebWSClient._resolve_update_section("setup") == (
         "settings",
         "setup",
     )
-    assert module.WebSocketClient._resolve_update_section("unknown") == (
+    assert module.TermoWebWSClient._resolve_update_section("unknown") == (
         "settings",
         "unknown",
     )

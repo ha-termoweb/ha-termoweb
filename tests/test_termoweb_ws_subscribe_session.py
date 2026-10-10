@@ -16,7 +16,7 @@ async def test_subscribe_session_metadata_issues_single_write(
 ) -> None:
     """_subscribe_session_metadata should emit a single subscribe frame."""
 
-    client, _, _ = _make_client(monkeypatch)
+    client, _ = _make_client(monkeypatch)
     send = AsyncMock()
     client._send_text = send
 
