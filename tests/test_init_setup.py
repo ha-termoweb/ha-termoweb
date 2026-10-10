@@ -496,6 +496,7 @@ def test_async_setup_entry_happy_path(
         (entry, tuple(termoweb_init.PLATFORMS))
     ]
     assert stub_hass.services.has_service(termoweb_init.DOMAIN, "import_energy_history")
+    assert not stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_survey")
     assert import_mock.await_count == 0
 
 
@@ -789,6 +790,43 @@ def test_async_setup_entry_radio_gateway_unreachable(
     power.set_power_limit(1800)  # saved into the entry options
     assert entry.options["radio_power"]["power_limit"] == 1800
     assert power.power_limit == 1800
+
+
+def test_async_setup_entry_radio_registers_survey_service(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class RadioLikeClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "aabbcc001122"}]
+
+        async def get_nodes(self, dev_id: str) -> dict[str, Any]:
+            return {"nodes": [{"addr": "6", "type": "htr"}]}
+
+    monkeypatch.setattr(
+        termoweb_init,
+        "create_radio_client",
+        lambda *args, **kwargs: RadioLikeClient(None, "", ""),
+    )
+    entry = ConfigEntry(
+        "radio-ok",
+        data={
+            "brand": "radio",
+            "host": "10.0.0.5",
+            "port": 2323,
+            "dialect": "B",
+            "network_id": "1234",
+            "nodes": [{"type": "htr", "addr": "6", "name": "Heater 6"}],
+        },
+    )
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> bool:
+        result = await termoweb_init.async_setup_entry(stub_hass, entry)
+        await _drain_tasks(stub_hass)
+        return result
+
+    assert asyncio.run(_run()) is True
+    assert stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_survey")
 
 
 def test_async_setup_entry_nanocul_builds_a_serial_client(

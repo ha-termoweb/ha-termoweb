@@ -105,6 +105,8 @@ class FakeRadioLink:
         self.replies: dict[int, list[bytes]] = {}
         self.no_ack: set[int] = set()
         self.on_send: Callable[[int, bytes], None] | None = None
+        self.surveys: list[int] = []
+        self.survey_bursts: list[Any] = []
 
     # --- scripting -----------------------------------------------------------
 
@@ -169,3 +171,9 @@ class FakeRadioLink:
             payload = queue.pop(0) if len(queue) > 1 else queue[0]
             self.deliver(received(dst, payload, dialect=self.dialect))
         return AckResult(True, 1, 100, received_ack(dst))
+
+    async def survey(self, seconds: int) -> list[Any]:
+        if not self.connected:
+            raise RadioLinkError("not connected")
+        self.surveys.append(seconds)
+        return list(self.survey_bursts)

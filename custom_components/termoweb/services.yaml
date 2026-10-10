@@ -145,3 +145,28 @@ ws_debug_probe:
       name: Device ID
       description: Restrict the probe to a single gateway device.
       example: 0000abcd
+
+radio_survey:
+  name: Radio survey
+  description: >-
+    Listen to all radio traffic on the heater band, also in dialects this
+    integration does not know, and save a report file in the configuration
+    folder for a GitHub issue.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: The radio gateway or nanoCUL config entry to use.
+      required: true
+      example: abcd1234deadbeef
+      selector:
+        config_entry:
+          integration: termoweb
+    seconds:
+      name: Duration
+      description: How long to listen.
+      default: 120
+      selector:
+        number:
+          min: 10
+          max: 600
+          unit_of_measurement: s

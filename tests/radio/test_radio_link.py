@@ -23,11 +23,13 @@ from custom_components.termoweb.backend.radio.dialect import (
     build_frame,
 )
 from custom_components.termoweb.backend.radio.link import (
+    GatewayInfo,
     RadioLink,
     RadioLinkError,
     UnsupportedDialectError,
     parse_query_line,
     parse_rx_line,
+    supports_survey,
 )
 
 HEATER = 0x06
@@ -584,3 +586,22 @@ async def test_a_confirmation_resets_the_missed_count() -> None:
         await link.send_frame(HEATER, air, wait_ack=False)
     assert lost == [] and link.connected
     await link.close()
+
+
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [
+        ("3.7-esp32", True),
+        ("3.10-esp32", True),
+        ("4.0-esp32", True),
+        ("3.6-esp32", False),
+        ("3.7", False),
+        ("x.y-esp32", False),
+        (None, False),
+    ],
+)
+def test_supports_survey_gates_on_esp32_firmware(version, expected) -> None:
+    """Only ESP32 firmware 3.7 or newer has the raw survey."""
+    info = GatewayInfo(version, None, None, None, None, None, "# Q")
+    assert supports_survey(info) is expected
+    assert supports_survey(None) is False

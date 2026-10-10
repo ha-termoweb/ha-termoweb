@@ -175,3 +175,33 @@ async def test_probe_heaters_keeps_only_answering_addresses() -> None:
     assert "A1" in gw.commands
     assert {frame[4] for frame in gw.transmitted()} == {6, 7}
     assert gw.writer.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [("3.7-esp32", 1), ("3.6-esp32", None)],
+)
+async def test_survey_network_needs_survey_firmware(version, expected) -> None:
+    """A 3.7 gateway returns the bursts it heard; older firmware returns None."""
+    rig = Rig()
+    made: list[FakeGateway] = []
+
+    def factory(host, port, dialect, **kwargs) -> RadioLink:
+        link = rig.link_factory(host, port, dialect, **kwargs)
+        gw = rig.gateways[-1]
+        gw.q_line = gw.q_line.replace("3.6-esp32", version)
+        gw.survey_lines = ["RAWB 1 -90.0", "RAW 1 +104 -104", "RAWE 1", "# survey off"]
+        made.append(gw)
+        return link
+
+    bursts = await d.survey_network("gw", 2323, 30, link_factory=factory)
+    gw = made[0]
+    assert gw.dialect is DIALECT_A and "A0" in gw.commands
+    if expected is None:
+        assert bursts is None
+        assert not any(c.startswith("R") for c in gw.commands)
+    else:
+        assert len(bursts) == expected and bursts[0].rssi_dbm == -90.0
+        assert "R30" in gw.commands
+    assert gw.writer.closed

@@ -321,6 +321,10 @@ The radio form asks for host, port (2323), an optional dialect (`auto`, `A`,
      may stay silent. Every CRC-valid data frame
      gives the network id (bytes 1-2) and its sender. Dialect-B network ids
      belong to one installation, so there is no default to fall back on;
+   - if listening hears nothing, `survey_sighting` runs a 120 s raw survey
+     (gateway firmware 3.7-esp32+) to tell silence from an unknown dialect;
+     see [radio protocol §6](radio_protocol.md#from-home-assistant). Errors:
+     `no_traffic` or `unknown_dialect` (with a saved report file);
    - `discovery.probe_heaters` sends `B8` to addresses 2-32 plus every
      sender heard. Addresses that answer with a status record are the
      heaters.

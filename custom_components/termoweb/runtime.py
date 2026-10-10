@@ -44,6 +44,7 @@ class EntryRuntime:
     brand: str = ""
     debug: bool = False
     last_energy_import_summary: dict[str, Any] | None = None
+    last_radio_survey: dict[str, Any] | None = None
     boost_runtime: dict[str, dict[str, int]] = field(default_factory=dict)
     boost_temperature: dict[str, dict[str, float]] = field(default_factory=dict)
     climate_entities: dict[str, dict[str, str]] = field(default_factory=dict)

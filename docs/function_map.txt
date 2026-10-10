@@ -822,6 +822,12 @@ custom_components/termoweb/config_flow.py :: radio_link_factory
     Return the RadioLink factory for a flow's radio: TCP, or the nanoCUL's port.
 custom_components/termoweb/config_flow.py :: radio_address
     Return the (host, port) label RadioLink uses for a flow's radio.
+custom_components/termoweb/config_flow.py :: UnknownDialectError.__init__
+    Store the report for the flow to save.
+custom_components/termoweb/config_flow.py :: _analyse_inline
+    Analyse survey bursts on the calling loop (tests and fallbacks).
+custom_components/termoweb/config_flow.py :: survey_sighting
+    Raw-survey after silent discovery; raise UnknownDialectError for new dialects.
 custom_components/termoweb/config_flow.py :: discover_radio
     Learn the network (unless given), then confirm heaters by address.
 custom_components/termoweb/config_flow.py :: radio_entry_data
@@ -1016,6 +1022,8 @@ custom_components/termoweb/coordinator.py :: _wrap_logger
     Return a logger proxy that exposes ``isEnabledFor`` when missing.
 custom_components/termoweb/diagnostics.py :: _extract_websocket_clients
     Return websocket telemetry entries for diagnostics.
+custom_components/termoweb/diagnostics.py :: _radio_section
+    Return radio gateway facts and the last survey; no MAC or network id.
 custom_components/termoweb/diagnostics.py :: async_get_config_entry_diagnostics
     Return a diagnostics payload for ``entry``.
 custom_components/termoweb/domain/energy.py :: EnergySnapshot.metrics_for_type
@@ -1790,6 +1798,16 @@ custom_components/termoweb/planner/ducaheat_planner.py :: _build_write_call
     Build the primary write call for the supplied command.
 custom_components/termoweb/planner/ducaheat_planner.py :: _ensure_accumulator
     Validate that accumulator-only commands target an accumulator.
+custom_components/termoweb/radio_survey.py :: async_analyse
+    Analyse survey bursts in the executor: the framing search is CPU work.
+custom_components/termoweb/radio_survey.py :: report_payload
+    Return the redacted, JSON-able report file content (no gateway MAC).
+custom_components/termoweb/radio_survey.py :: report_summary
+    Return the short outcome shown in service responses and diagnostics.
+custom_components/termoweb/radio_survey.py :: _write_json
+    Write ``payload`` as indented JSON to ``path``.
+custom_components/termoweb/radio_survey.py :: async_save_report
+    Save the report in the config directory; return its path, None on failure.
 custom_components/termoweb/runtime.py :: require_runtime
     Return the runtime container stored for ``entry_id``.
 custom_components/termoweb/services/energy_history.py :: async_import_energy_history_with_rate_limit
@@ -1802,6 +1820,10 @@ custom_components/termoweb/services/ws_debug_probe.py :: async_register_ws_debug
     Register the ws_debug_probe debug helper service.
 custom_components/termoweb/services/ws_debug_probe.py :: async_register_ws_debug_probe_service._async_ws_debug_probe
     Emit a websocket dev_data probe for debugging.
+custom_components/termoweb/services/radio_survey.py :: async_register_radio_survey_service
+    Register the radio_survey service once.
+custom_components/termoweb/services/radio_survey.py :: async_register_radio_survey_service._async_radio_survey
+    Survey the air, save a redacted report and return its summary.
 custom_components/termoweb/throttle.py :: MonotonicRateLimiter.async_throttle
     Sleep if required to honour ``min_interval`` seconds between calls.
 custom_components/termoweb/throttle.py :: MonotonicRateLimiter.reset
@@ -2063,6 +2085,8 @@ custom_components/termoweb/backend/radio/link.py :: parse_rx_line
     Parse ``RX <micros> <rssi> <lqi> <crc> <HEX>`` into (air, rssi, lqi, micros).
 custom_components/termoweb/backend/radio/link.py :: parse_query_line
     Parse ``# Q termoweb_rx <ver> key=value ...`` into a GatewayInfo.
+custom_components/termoweb/backend/radio/link.py :: supports_survey
+    Return True when the gateway firmware has the raw survey (ESP32 3.7+).
 custom_components/termoweb/backend/radio/link.py :: RadioLink.__init__
     Store connection parameters; nothing is opened until connect().
 custom_components/termoweb/backend/radio/link.py :: RadioLink.dialect
@@ -2129,6 +2153,8 @@ custom_components/termoweb/backend/radio/discovery.py :: listen_once._on_frame
     Record the network id and sender of every valid data frame.
 custom_components/termoweb/backend/radio/discovery.py :: discover_network
     Alternate listening windows across ``dialects`` until a network is heard.
+custom_components/termoweb/backend/radio/discovery.py :: survey_network
+    Capture raw bursts of any dialect; None when the firmware has no survey.
 custom_components/termoweb/backend/radio/discovery.py :: probe_heaters
     Return the status of every candidate address that answers a ``B8`` request.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.create_ws_client
@@ -2163,6 +2189,8 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.add_disconnect
     Unregister the callback; safe to call more than once.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._handle_disconnect
     Fan a link disconnect out to every registered listener.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.async_survey
+    Capture raw bursts of every dialect on air; heater commands wait meanwhile.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._exchange
     Send ``payload`` to ``addr`` and return its reply; raise on no ack or reply.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._write

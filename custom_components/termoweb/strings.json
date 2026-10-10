@@ -73,7 +73,8 @@
       "no_heaters": "No heater answered. Move the gateway closer to the heaters and try again.",
       "invalid_network_id": "The network id must be 4 hex digits, for example 1A2B.",
       "cannot_connect_nanocul": "Cannot open the nanoCUL stick. Check that it is plugged in, that the port is right, and that it runs the termoweb_rx firmware.",
-      "dialect_unsupported_firmware": "This nanoCUL firmware only knows radio dialect A. Choose dialect A or auto, or update the stick's firmware."
+      "dialect_unsupported_firmware": "This nanoCUL firmware only knows radio dialect A. Choose dialect A or auto, or update the stick's firmware.",
+      "unknown_dialect": "Radio bursts were heard, but none could be decoded. A weak signal can cause this: move the gateway closer to a heater and try again. If it happens again, your heaters may use a radio dialect this integration does not know yet. Please open an issue at {issue_url} and attach the report file {report}."
     },
     "abort": {
       "already_configured": "This gateway is already set up.",
@@ -221,6 +222,21 @@
           "name": "Device ID",
           "description": "Restrict the probe to a single gateway device.",
           "example": "0000abcd"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Radio survey",
+      "description": "Listen to all radio traffic on the heater band for a while, also traffic in dialects this integration does not know, and save a report file in the Home Assistant configuration folder. Attach the file to a GitHub issue to ask for support of a new heater dialect.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "The radio gateway or nanoCUL config entry to use.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Duration",
+          "description": "How long to listen. Heaters send most when they start or stop heating."
         }
       }
     }

@@ -269,3 +269,66 @@ def test_diagnostics_with_inventory_missing_version(
 
     assert "Diagnostics inventory cache for entry-two: raw=1, filtered=1" in caplog.text
     assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+
+
+def test_diagnostics_radio_section_without_mac_or_network_id(
+    diagnostics_record: Callable[..., tuple[Any, Inventory]],
+) -> None:
+    """Radio entries report gateway facts and the last survey, never MAC or net id."""
+
+    from fake_radio_link import FakeRadioLink, gateway_info
+
+    from custom_components.termoweb.backend.radio_client import RadioClient
+
+    links: list[FakeRadioLink] = []
+
+    def factory(host, port, dialect, **kwargs):
+        link = FakeRadioLink(host, port, dialect, **kwargs)
+        link.info = gateway_info(version="3.7-esp32")
+        links.append(link)
+        return link
+
+    hass = HomeAssistant()
+    entry = ConfigEntry("entry-radio", data={CONF_BRAND: "radio", "network_id": "1234"})
+    record, _ = diagnostics_record([], dev_id="aabbcc001122", entry_id=entry.entry_id)
+    record.client = RadioClient(
+        "10.0.0.5", 2323, "B", [], network_id=b"\x12\x34", link_factory=factory
+    )
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = record
+
+    radio = asyncio.run(async_get_config_entry_diagnostics(hass, entry))["radio"]
+    assert radio == {
+        "radio_type": "esp32",
+        "dialect": "B",
+        "connected": False,
+        "gateway": None,
+    }
+
+    asyncio.run(record.client.async_connect())
+    record.last_radio_survey = {"verdict": "silent"}
+    radio = asyncio.run(async_get_config_entry_diagnostics(hass, entry))["radio"]
+    assert radio["connected"] is True
+    assert radio["gateway"] == {
+        "firmware": "3.7-esp32",
+        "freq": "869.525",
+        "sync": "2DD4",
+        "dialect": None,
+        "autoack": True,
+        "station_id": 1,
+        "survey": True,
+    }
+    assert radio["last_survey"] == {"verdict": "silent"}
+    text = repr(radio)
+    assert "AA:BB" not in text and "1234" not in text
+
+
+def test_diagnostics_cloud_entry_has_no_radio_section(
+    diagnostics_record: Callable[..., tuple[Any, Inventory]],
+) -> None:
+    """Cloud entries carry no radio section."""
+
+    hass = HomeAssistant()
+    entry = ConfigEntry("entry-cloud", data={CONF_BRAND: BRAND_DUCAHEAT})
+    record, _ = diagnostics_record([], dev_id="dev", entry_id=entry.entry_id)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = record
+    assert "radio" not in asyncio.run(async_get_config_entry_diagnostics(hass, entry))

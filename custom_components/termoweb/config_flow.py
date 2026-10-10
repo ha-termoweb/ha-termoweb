@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 import functools
 import logging
@@ -22,12 +22,15 @@ from .backend.radio import DIALECT_A, DIALECTS, RadioLink, RadioLinkError
 from .backend.radio.discovery import (
     DISCOVERY_DIALECTS,
     SCAN_ADDRESSES,
+    SURVEY_S,
     NetworkSighting,
     discover_network,
     probe_heaters,
+    survey_network,
 )
 from .backend.radio.link import DEFAULT_PORT as RADIO_DEFAULT_PORT
 from .backend.radio.serial_link import serial_device_id, serial_opener
+from .backend.radio.survey import RawBurst, SurveyReport, analyse
 from .backend.radio_client import dev_id_from_mac
 from .backend.radio_power import KEY_RATED_POWER
 from .backend.rest_client import BackendAuthError, BackendRateLimitError
@@ -54,6 +57,7 @@ from .const import (
     RADIO_TYPE_NANOCUL,
     get_brand_label,
 )
+from .radio_survey import ISSUE_URL, async_analyse, async_save_report, report_payload
 from .utils import async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
@@ -144,6 +148,23 @@ class RadioSetupError(Exception):
         """Store the error key."""
         super().__init__(reason)
         self.reason = reason
+
+
+class UnknownDialectError(RadioSetupError):
+    """Bursts were heard but no known dialect decoded; carries the survey report."""
+
+    def __init__(self, report: SurveyReport) -> None:
+        """Store the report for the flow to save."""
+        super().__init__("unknown_dialect")
+        self.report = report
+
+
+AnalyseSurvey = Callable[[Sequence[RawBurst]], Awaitable[SurveyReport]]
+
+
+async def _analyse_inline(bursts: Sequence[RawBurst]) -> SurveyReport:
+    """Analyse survey bursts on the calling loop (tests and fallbacks)."""
+    return analyse(bursts)
 
 
 def _radio_schema(defaults: dict[str, Any]) -> vol.Schema:
@@ -290,6 +311,35 @@ def radio_address(radio: Mapping[str, Any]) -> tuple[str, int]:
     return radio[CONF_HOST], radio[CONF_PORT]
 
 
+async def survey_sighting(
+    host: str,
+    port: int,
+    *,
+    link_factory: Any = RadioLink,
+    analyse_survey: AnalyseSurvey = _analyse_inline,
+) -> NetworkSighting | None:
+    """Raw-survey after silent discovery; raise UnknownDialectError for new dialects.
+
+    Returns the network a known dialect was heard on, or None when the air was
+    silent or the gateway firmware has no survey.
+    """
+    bursts = await survey_network(host, port, link_factory=link_factory)
+    if bursts is None:
+        return None
+    report = await analyse_survey(bursts)
+    _LOGGER.info("Radio survey verdict: %s", report.verdict)
+    if report.verdict == "silent":
+        return None
+    if report.verdict == "known" and report.dialect in DIALECTS:
+        known = DIALECTS[report.dialect]
+        if report.network_ids:
+            return NetworkSighting(known, bytes.fromhex(report.network_ids[0]))
+        if known.network_id is not None:
+            return NetworkSighting(known, known.network_id)
+        return None
+    raise UnknownDialectError(report)
+
+
 async def discover_radio(
     host: str,
     port: int,
@@ -298,8 +348,13 @@ async def discover_radio(
     *,
     link_factory: Any = RadioLink,
     dialect_capable: bool = True,
+    analyse_survey: AnalyseSurvey = _analyse_inline,
 ) -> tuple[NetworkSighting, dict[int, Any]]:
-    """Learn the network (unless given), then confirm heaters by address."""
+    """Learn the network (unless given), then confirm heaters by address.
+
+    When listening hears nothing in a known dialect, a raw survey tells a
+    silent installation from one that speaks an unknown dialect.
+    """
     if dialect != DIALECT_AUTO and (
         network_id is not None or DIALECTS[dialect].network_id is not None
     ):
@@ -315,6 +370,13 @@ async def discover_radio(
         sighting = await discover_network(
             host, port, dialects=dialects, link_factory=link_factory
         )
+        if sighting is None:
+            sighting = await survey_sighting(
+                host,
+                port,
+                link_factory=link_factory,
+                analyse_survey=analyse_survey,
+            )
         if sighting is None:
             raise RadioSetupError("no_traffic")
     heaters = await probe_heaters(
@@ -377,6 +439,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._radio_task: asyncio.Task[Any] | None = None
         self._radio_result: dict[str, Any] | None = None
         self._radio_error: str | None = None
+        self._radio_placeholders: dict[str, str] = {}
 
     async def _handle_login_workflow(
         self,
@@ -526,6 +589,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._radio_task is None:
             self._radio_result = None
             self._radio_error = None
+            self._radio_placeholders = {}
             host, port = radio_address(self._radio)
             self._radio_task = self.hass.async_create_task(
                 discover_radio(
@@ -535,6 +599,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._radio.get("network_bytes"),
                     link_factory=radio_link_factory(self._radio),
                     dialect_capable=self._radio.get(_CAPABLE, True),
+                    analyse_survey=functools.partial(async_analyse, self.hass),
                 )
             )
         if not self._radio_task.done():
@@ -546,6 +611,9 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         task, self._radio_task = self._radio_task, None
         try:
             sighting, heaters = task.result()
+        except UnknownDialectError as err:
+            self._radio_error = err.reason
+            await self._save_survey_report(err.report)
         except RadioSetupError as err:
             self._radio_error = err.reason
         except RadioLinkError:
@@ -557,6 +625,22 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._radio_result = radio_entry_data(self._radio, sighting, heaters)
         return self.async_show_progress_done(next_step_id="radio_finish")
 
+    async def _save_survey_report(self, report: SurveyReport) -> None:
+        """Save an unknown-dialect survey report and point the error text at it."""
+        payload = report_payload(
+            report,
+            seconds=SURVEY_S,
+            gateway=None,
+            radio_type=self._radio.get(CONF_RADIO_TYPE),
+            dialect=self._radio.get(CONF_DIALECT, DIALECT_AUTO),
+            version=await _get_version(self.hass),
+        )
+        path = await async_save_report(self.hass, "setup", payload)
+        self._radio_placeholders = {
+            "report": path or "(the report could not be saved, see the log)",
+            "issue_url": ISSUE_URL,
+        }
+
     async def async_step_radio_finish(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -567,6 +651,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 step_id=step_id,
                 data_schema=schema,
                 errors={"base": self._radio_error or "unknown"},
+                description_placeholders=self._radio_placeholders or None,
             )
         data = self._radio_result
         entry = self._reconfigure_entry()
