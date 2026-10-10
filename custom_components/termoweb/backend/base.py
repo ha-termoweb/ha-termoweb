@@ -342,8 +342,17 @@ def normalise_sample_records(
         if counter is None:
             continue
         energy_wh = counter / divider if divider else counter
+        try:
+            ts = datetime.fromtimestamp(timestamp, tz=UTC)
+        except (OverflowError, OSError, ValueError):
+            _LOGGER.debug(
+                "Skipping %s sample with out-of-range timestamp %r",
+                node_type,
+                timestamp,
+            )
+            continue
         sample: dict[str, Any] = {
-            "ts": datetime.fromtimestamp(timestamp, tz=UTC),
+            "ts": ts,
             "energy_wh": energy_wh,
         }
         power = float_or_none(record.get("power"))
@@ -405,7 +414,18 @@ async def fetch_normalised_hourly_samples(
             continue
         if not isinstance(raw_samples, Iterable):
             continue
-        normalised = normalise_sample_records(normalized_type, raw_samples)
+        try:
+            normalised = normalise_sample_records(normalized_type, raw_samples)
+        except Exception as err:  # noqa: BLE001 - one bad node must not abort the batch
+            logger.warning(
+                "%s: failed to normalise samples for %s/%s node_type=%s: %s",
+                log_prefix,
+                mask_identifier(dev_id),
+                mask_identifier(normalized_addr),
+                normalized_type,
+                err,
+            )
+            continue
         if normalised:
             results[(normalized_type, normalized_addr)] = normalised
     return results

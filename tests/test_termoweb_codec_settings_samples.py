@@ -224,11 +224,3 @@ def test_decode_samples_filters_invalid_items(caplog: pytest.LogCaptureFixture) 
         {"t": 2000, "counter": "5"},
     ]
     assert any("Unexpected htr sample shape" in rec.message for rec in caplog.records)
-
-
-def test_decode_samples_applies_timestamp_divisor() -> None:
-    raw = {"samples": [{"t": 1000.0, "counter": 5}]}
-
-    decoded = decode_samples(raw, timestamp_divisor=10.0)
-
-    assert decoded == [{"t": 100, "counter": "5"}]

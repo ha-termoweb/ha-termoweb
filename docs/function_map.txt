@@ -95,7 +95,7 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._log_segmen
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_settings
     Fetch and normalise node settings for the Ducaheat API.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_samples
-    Return heater samples with timestamps normalised to seconds.
+    Return node samples (seconds timestamps); thermostats have none.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._execute_segmented_commands
     Apply one or more segmented commands and return merged segment responses.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_node_settings
@@ -693,7 +693,7 @@ custom_components/termoweb/codecs/termoweb_codec.py :: decode_nodes_payload
 custom_components/termoweb/codecs/termoweb_codec.py :: decode_node_settings
     Validate and normalise node settings while preserving canonical keys only.
 custom_components/termoweb/codecs/termoweb_codec.py :: decode_samples
-    Normalise heater samples payloads into {"t", "counter"} lists.
+    Normalise samples payloads into {"t", "counter"} lists with second timestamps.
 custom_components/termoweb/codecs/termoweb_models.py :: NodeSummary._stringify_numeric
     Convert numeric addresses to strings for consistency.
 custom_components/termoweb/codecs/termoweb_models.py :: _format_temperature
