@@ -24,6 +24,7 @@ import voluptuous as vol
 
 from ..backend.base import BoostContext
 from ..boost import (
+    ALLOWED_BOOST_MINUTES,
     ALLOWED_BOOST_MINUTES_MESSAGE,
     coerce_boost_minutes,
     supports_boost,
@@ -48,6 +49,9 @@ from .heater import (
 
 _LOGGER = logging.getLogger(__name__)
 _CANCELLED_ERROR = asyncio.CancelledError
+
+# Shared boost-duration validator: 60-600 minutes in steps of 60.
+BOOST_MINUTES_VALIDATOR = vol.All(vol.Coerce(int), vol.In(ALLOWED_BOOST_MINUTES))
 
 
 def _is_cancelled_error(err: BaseException) -> bool:
@@ -265,7 +269,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         await entity.async_cancel_boost()
 
     acm_preset_schema = {
-        vol.Optional("minutes"): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
+        vol.Optional("minutes"): BOOST_MINUTES_VALIDATOR,
         vol.Optional("temperature"): vol.Coerce(float),
     }
     platform.async_register_entity_service(
@@ -274,9 +278,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         _svc_set_acm_preset,
     )
 
-    start_boost_schema = {
-        vol.Optional("minutes"): vol.All(vol.Coerce(int), vol.Range(min=1, max=120))
-    }
+    start_boost_schema = {vol.Optional("minutes"): BOOST_MINUTES_VALIDATOR}
     platform.async_register_entity_service(
         "start_boost",
         start_boost_schema,
