@@ -29,6 +29,20 @@
       }
     }
   },
+  "device": {
+    "heater": {
+      "name": "Radiateur {addr}"
+    },
+    "thermostat": {
+      "name": "Thermostat {addr}"
+    },
+    "node": {
+      "name": "Nœud {addr}"
+    },
+    "power_monitor": {
+      "name": "Surveillance d’énergie {addr}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

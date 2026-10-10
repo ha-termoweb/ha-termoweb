@@ -29,6 +29,20 @@
       }
     }
   },
+  "device": {
+    "heater": {
+      "name": "Θερμαντικό {addr}"
+    },
+    "thermostat": {
+      "name": "Θερμοστάτης {addr}"
+    },
+    "node": {
+      "name": "Κόμβος {addr}"
+    },
+    "power_monitor": {
+      "name": "Μετρητής ενέργειας {addr}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

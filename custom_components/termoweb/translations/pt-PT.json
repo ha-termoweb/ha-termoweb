@@ -29,6 +29,20 @@
       }
     }
   },
+  "device": {
+    "heater": {
+      "name": "Aquecedor {addr}"
+    },
+    "thermostat": {
+      "name": "Termóstato {addr}"
+    },
+    "node": {
+      "name": "Nó {addr}"
+    },
+    "power_monitor": {
+      "name": "Monitor de energia {addr}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

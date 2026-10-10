@@ -29,6 +29,20 @@
       }
     }
   },
+  "device": {
+    "heater": {
+      "name": "Isıtıcı {addr}"
+    },
+    "thermostat": {
+      "name": "Termostat {addr}"
+    },
+    "node": {
+      "name": "Düğüm {addr}"
+    },
+    "power_monitor": {
+      "name": "Güç izleyicisi {addr}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

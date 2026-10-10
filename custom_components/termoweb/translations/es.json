@@ -29,6 +29,20 @@
       }
     }
   },
+  "device": {
+    "heater": {
+      "name": "Calefactor {addr}"
+    },
+    "thermostat": {
+      "name": "Termostato {addr}"
+    },
+    "node": {
+      "name": "Nodo {addr}"
+    },
+    "power_monitor": {
+      "name": "Monitor de potencia {addr}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

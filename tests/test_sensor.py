@@ -345,28 +345,28 @@ def test_normalise_energy_value_string_scale_numeric_parse():
 def test_power_monitor_display_name_uses_node_name():
     """Display name should come from node.name when available."""
     node = SimpleNamespace(name="  Kitchen Monitor  ")
-    result = _power_monitor_display_name(node, "01", None)
+    result = _power_monitor_display_name(node, "01")
     assert result == "Kitchen Monitor"
 
 
 def test_power_monitor_display_name_uses_default_name():
     """Display name should fall back to default_name factory."""
     node = SimpleNamespace(name="", default_name=lambda: "  Default Monitor  ")
-    result = _power_monitor_display_name(node, "01", None)
+    result = _power_monitor_display_name(node, "01")
     assert result == "Default Monitor"
 
 
 def test_power_monitor_display_name_fallback():
-    """Display name should use format_fallback when no name is available."""
+    """Display name should use the English default when no name is available."""
     node = SimpleNamespace(name=None)
-    result = _power_monitor_display_name(node, "01", None)
-    assert "01" in result
+    result = _power_monitor_display_name(node, "01")
+    assert result == "Power Monitor 01"
 
 
 def test_power_monitor_display_name_default_name_empty():
     """Display name should fall back when default_name returns empty."""
     node = SimpleNamespace(name="", default_name=lambda: "")
-    result = _power_monitor_display_name(node, "42", None)
+    result = _power_monitor_display_name(node, "42")
     assert "42" in result
 
 

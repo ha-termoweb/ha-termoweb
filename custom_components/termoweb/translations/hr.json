@@ -29,6 +29,20 @@
       }
     }
   },
+  "device": {
+    "heater": {
+      "name": "Grijač {addr}"
+    },
+    "thermostat": {
+      "name": "Termostat {addr}"
+    },
+    "node": {
+      "name": "Čvor {addr}"
+    },
+    "power_monitor": {
+      "name": "Mjerač energije {addr}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

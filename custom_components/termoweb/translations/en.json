@@ -146,6 +146,23 @@
       "pair_heaters": "Waiting for heaters in pairing mode. Put one heater into pairing mode now. This stops 1 minute after the last heater was paired, or after 5 minutes."
     }
   },
+  "device": {
+    "heater": {
+      "name": "Heater {addr}"
+    },
+    "accumulator": {
+      "name": "Accumulator {addr}"
+    },
+    "thermostat": {
+      "name": "Thermostat {addr}"
+    },
+    "power_monitor": {
+      "name": "Power Monitor {addr}"
+    },
+    "node": {
+      "name": "Node {addr}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": { "name": "Gateway online" },

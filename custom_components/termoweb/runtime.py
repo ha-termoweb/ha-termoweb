@@ -50,7 +50,6 @@ class EntryRuntime:
     boost_temperature: dict[str, dict[str, float]] = field(default_factory=dict)
     climate_entities: dict[str, dict[str, str]] = field(default_factory=dict)
     power_limit: int | None = None
-    fallback_translations: dict[str, str] | None = None
     recalc_poll: Callable[[], None] | None = None
     start_ws: Callable[[str], Awaitable[None]] | None = None
     unsub_ws_status: Callable[[], None] | None = None

@@ -31,11 +31,6 @@ from custom_components.termoweb.entities.heater import (
     iter_boostable_heater_nodes,
     log_skipped_nodes,
 )
-from custom_components.termoweb.i18n import (
-    async_get_fallback_translations,
-    attach_fallbacks,
-    format_fallback,
-)
 from custom_components.termoweb.identifiers import (
     build_heater_energy_unique_id,
     build_heater_entity_unique_id,
@@ -119,9 +114,7 @@ def _normalise_energy_value(coordinator: Any, raw: Any) -> float | None:
     return numeric * scale
 
 
-def _power_monitor_display_name(
-    node: PowerMonitorNode, addr: str, fallbacks: Mapping[str, str] | None
-) -> str:
+def _power_monitor_display_name(node: PowerMonitorNode, addr: str) -> str:
     """Return the display name for a power monitor address."""
 
     raw_name = getattr(node, "name", None)
@@ -140,12 +133,7 @@ def _power_monitor_display_name(
             if fallback_trimmed:
                 return fallback_trimmed
 
-    return format_fallback(
-        fallbacks,
-        "fallbacks.power_monitor_name",
-        "Power Monitor {addr}",
-        addr=addr,
-    )
+    return f"Power Monitor {addr}"
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -158,18 +146,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if not isinstance(domain_view, DomainStateView):
         domain_view = None
 
-    fallbacks = await async_get_fallback_translations(hass, runtime)
-    attach_fallbacks(coordinator, fallbacks)
-
     def default_name(addr: str) -> str:
         """Return a placeholder name for heater nodes."""
 
-        return format_fallback(
-            fallbacks,
-            "fallbacks.node_name",
-            "Node {addr}",
-            addr=addr,
-        )
+        return f"Node {addr}"
 
     heater_details = heater_platform_details_for_entry(
         runtime,
@@ -183,7 +163,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if not callable(listener):
             _LOGGER.error("Energy coordinator unavailable for %s", dev_id)
             return
-    attach_fallbacks(energy_coordinator, fallbacks)
 
     power_monitor_entities: list[SensorEntity] = []
     discovered_power_monitors = False
@@ -192,7 +171,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if not isinstance(node, PowerMonitorNode):
             continue
         discovered_power_monitors = True
-        display_name = _power_monitor_display_name(node, metadata.addr, fallbacks)
+        display_name = _power_monitor_display_name(node, metadata.addr)
         energy_unique_id = build_power_monitor_energy_unique_id(dev_id, metadata.addr)
         power_unique_id = build_power_monitor_power_unique_id(dev_id, metadata.addr)
         power_monitor_entities.append(
@@ -240,14 +219,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
             continue
         if canonical_type == "thm":
             heater_fallback = default_name(addr)
-            thermostat_default = format_fallback(
-                fallbacks,
-                "fallbacks.thermostat_name",
-                thermostat_fallback_name(addr),
-                addr=addr,
-            )
             if base_name == heater_fallback:
-                base_name = thermostat_default
+                base_name = thermostat_fallback_name(addr)
 
         new_entities.extend(
             _create_heater_sensors(

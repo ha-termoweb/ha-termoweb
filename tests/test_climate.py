@@ -390,6 +390,13 @@ def test_async_setup_entry_creates_entities(
             assert info["model"] == expected_model
             assert info["via_device"] == (DOMAIN, dev_id)
 
+        # Unnamed nodes get a translatable default device name; named ones don't.
+        default_info = entities_by_addr["B2"].device_info
+        assert default_info["name"] == "Heater B2"
+        assert default_info["translation_key"] == "heater"
+        assert default_info["translation_placeholders"] == {"addr": "B2"}
+        assert "translation_key" not in entities_by_addr["A1"].device_info
+
         schedule_name, _, schedule_handler = platform.registered[0]
         preset_name, _, preset_handler = platform.registered[1]
         assert schedule_name == "set_schedule"

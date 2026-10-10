@@ -31,7 +31,6 @@ from ..boost import (
     validate_boost_minutes,
 )
 from ..domain import DomainState, DomainStateView, GatewayConnectionState, HeaterState
-from ..i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
 from ..identifiers import build_heater_entity_unique_id, thermostat_fallback_name
 from ..inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
 from ..runtime import require_runtime
@@ -80,9 +79,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = runtime.coordinator
     dev_id = runtime.dev_id
 
-    fallbacks = await async_get_fallback_translations(hass, runtime)
-    attach_fallbacks(coordinator, fallbacks)
-
     inventory = runtime.inventory
     if not isinstance(inventory, Inventory):
         _LOGGER.error("TermoWeb climate setup missing inventory for device %s", dev_id)
@@ -91,12 +87,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     def default_name_simple(addr: str) -> str:
         """Return fallback name for heater nodes."""
 
-        return format_fallback(
-            fallbacks,
-            "fallbacks.heater_name",
-            "Heater {addr}",
-            addr=addr,
-        )
+        return f"Heater {addr}"
 
     new_entities: list[ClimateEntity] = []
 
@@ -128,14 +119,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
             continue
         if canonical_type == "thm":
             heater_fallback = default_name_simple(addr)
-            thermostat_default = format_fallback(
-                fallbacks,
-                "fallbacks.thermostat_name",
-                thermostat_fallback_name(addr),
-                addr=addr,
-            )
             if base_name == heater_fallback:
-                base_name = thermostat_default
+                base_name = thermostat_fallback_name(addr)
         unique_id = build_heater_entity_unique_id(
             dev_id,
             canonical_type,

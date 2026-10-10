@@ -1708,10 +1708,6 @@ custom_components/termoweb/entities/switch.py :: _iter_lockable_inventory_nodes
     Yield htr and acm node metadata from ``inventory``.
 custom_components/termoweb/entities/switch.py :: _build_settings_resolver
     Return callable resolving the domain state for a node.
-custom_components/termoweb/fallback_translations.py :: language_candidates
-    Return ordered fallback language candidates for ``language``.
-custom_components/termoweb/fallback_translations.py :: get_fallback_translations
-    Return fallback translation strings for ``language``.
 custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.__init__
     Initialise the poller with Home Assistant context and dependencies.
 custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.async_setup
@@ -1724,14 +1720,6 @@ custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._run_for_prev
     Fetch and merge samples for the hour preceding ``now_local``.
 custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._poll_device
     Fetch samples for ``dev_id`` and merge them into the coordinator.
-custom_components/termoweb/i18n.py :: _tr
-    Return the translated string for ``key`` with ``placeholders``.
-custom_components/termoweb/i18n.py :: async_get_fallback_translations
-    Return cached fallback translation templates for the current language.
-custom_components/termoweb/i18n.py :: format_fallback
-    Return the formatted fallback string for ``key``.
-custom_components/termoweb/i18n.py :: attach_fallbacks
-    Attach fallback translations to ``target`` when supported.
 custom_components/termoweb/identifiers.py :: build_heater_unique_id
     Return the canonical unique ID for a heater node.
 custom_components/termoweb/identifiers.py :: build_heater_entity_unique_id
@@ -1994,6 +1982,8 @@ custom_components/termoweb/utils.py :: build_gateway_device_info
     Return canonical ``DeviceInfo`` for the TermoWeb gateway.
 custom_components/termoweb/utils.py :: build_power_monitor_device_info
     Return canonical ``DeviceInfo`` for a TermoWeb power monitor.
+custom_components/termoweb/utils.py :: translate_default_device_name
+    Attach a device translation key when ``info`` carries a default node name.
 custom_components/termoweb/utils.py :: float_or_none
     Return value as ``float`` if possible, else ``None``.
 scripts/generate_function_map.py :: DocExtractor.__init__

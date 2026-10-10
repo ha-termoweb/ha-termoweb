@@ -804,3 +804,34 @@ def test_accumulator_boost_button_ignores_press_without_hass() -> None:
         await button.async_press()
 
     asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("node_type", "device_name", "model", "translation_key"),
+    [
+        ("acm", "Accumulator 4", "Accumulator", "accumulator"),
+        ("htr", "Kitchen", "Heater", None),
+    ],
+)
+def test_boost_binary_sensor_device_info_translates_default_name(
+    node_type: str, device_name: str, model: str, translation_key: str | None
+) -> None:
+    sensor = binary_sensor_module.HeaterBoostActiveBinarySensor(
+        MagicMock(),
+        "entry",
+        "dev",
+        node_type,
+        "4",
+        None,
+        "uid",
+        inventory=Inventory("dev", []),
+        settings_resolver=lambda: None,
+        device_name=device_name,
+    )
+
+    info = sensor.device_info
+
+    assert info["identifiers"] == {(DOMAIN, "dev", "4")}
+    assert info["name"] == device_name
+    assert info["model"] == model
+    assert info.get("translation_key") == translation_key
