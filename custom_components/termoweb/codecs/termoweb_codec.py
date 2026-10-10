@@ -289,10 +289,7 @@ def decode_samples(
         if isinstance(counter_value, dict):
             counter_min = counter_value.get("min", counter_min)
             counter_max = counter_value.get("max", counter_max)
-            if "value" in counter_value:
-                counter_value = counter_value.get("value")
-            elif "counter" in counter_value:
-                counter_value = counter_value.get("counter")
+            counter_value = counter_value.get("value", counter_value.get("counter"))
         if counter_value is None:
             counter_value = item.get("value")
         if counter_value is None:
