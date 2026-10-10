@@ -372,8 +372,12 @@ dropped.
 Stock gateways have a per-installation network id. Home Assistant derives its
 own: `pairing.site_network_id(seed)` takes the first two bytes of the SHA-256
 of the seed that are not `00 00`, `FF FF` or `1B 30` (the stock dialect-A
-id). Heaters paired into an existing entry join the entry's network
-(`network_id`).
+id). The config flow seeds it with the Home Assistant instance id
+(`homeassistant.helpers.instance_id`) plus the gateway id, `<instance>:<gateway
+dev_id>`, so two gateways in one installation get two networks. The id is
+stored in the config entry (`network_id`); heaters paired later join the
+entry's network. A network id typed into the setup form wins over the
+derived one.
 
 ### Notes
 
@@ -385,6 +389,16 @@ id). Heaters paired into an existing entry join the entry's network
 
 ### From Home Assistant
 
+- Config flow: after the gateway (or nanoCUL) step, a menu offers "Find
+  heaters that are already paired" (discovery, section 6) or "Pair new
+  heaters". Pairing runs `config_flow.pair_radio` →
+  `pairing.pair_new_network` on the site network id, in the chosen dialect
+  (`auto`: B and A in turn; a stock nanoCUL: A only), and creates the entry
+  with the paired heaters. No heater paired: error `no_heaters_paired`.
+- Options flow of a radio entry: a menu offers the settings form or "Pair a
+  new heater". Pairing uses the running client (`async_pair`, 5 minutes,
+  stops 60 s after the last pairing), adds the new heaters to the entry's
+  nodes and reloads the entry.
 - `RadioClient.async_pair(window_s, wanted_id=None, max_heaters=None)` pairs
   under the exchange lock: heater commands wait until it ends. New heaters
   get ids no stored node uses.

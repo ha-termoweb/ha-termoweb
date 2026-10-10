@@ -27,6 +27,11 @@ from homeassistant.core import HomeAssistant
 
 NET = bytes.fromhex("1234")  # synthetic network id
 DEV_ID = "0a0b0c0d0e0f"
+METHOD_MENU = {
+    "type": "menu",
+    "step_id": "radio_method",
+    "menu_options": ["radio_discover", "radio_pair"],
+}
 FORM = {
     "host": "10.0.0.5",
     "port": 2323,
@@ -84,7 +89,10 @@ def gateway(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 async def _run_discovery(flow: config_flow.TermoWebConfigFlow, first: Any) -> Any:
-    """Drive the progress step to completion and return the finish result."""
+    """Choose discovery, drive the progress step and return the finish result."""
+    if first["type"] == "menu":
+        assert first == METHOD_MENU
+        first = await flow.async_step_radio_discover()
     assert first["type"] == "progress"
     assert first["progress_action"] == "radio_discover"
     await asyncio.wait([first["progress_task"]])
@@ -199,7 +207,8 @@ async def test_progress_step_reports_running_task(gateway, monkeypatch) -> None:
 
     monkeypatch.setattr(config_flow, "discover_radio", slow)
     flow = _flow(HomeAssistant())
-    first = await flow.async_step_radio(dict(FORM))
+    assert await flow.async_step_radio(dict(FORM)) == METHOD_MENU
+    await flow.async_step_radio_discover()
     await started.wait()
     again = await flow.async_step_radio_discover()
     assert again["type"] == "progress"
@@ -374,13 +383,16 @@ async def test_radio_options_store_heater_rated_power() -> None:
     flow = config_flow.TermoWebOptionsFlow(entry)
     flow.hass = hass
 
-    form = await flow.async_step_init()
+    menu = await flow.async_step_init()
+    assert menu["menu_options"] == ["settings", "pair_heaters"]
+    form = await flow.async_step_settings()
+    assert form["step_id"] == "settings"
     fields = {str(getattr(k, "schema", k)): k for k in form["data_schema"].schema}
     default = fields["rated_power_6"].default
     assert (default() if callable(default) else default) == 1200
     assert "rated_power_6 = heater 6" in form["description_placeholders"]["heaters"]
 
-    result = await flow.async_step_init({"debug": True, "rated_power_6": 1500})
+    result = await flow.async_step_settings({"debug": True, "rated_power_6": 1500})
     assert result["data"] == {
         "debug": True,
         "radio_power": {"power_limit": 2000, "rated_power": {"6": 1500}},

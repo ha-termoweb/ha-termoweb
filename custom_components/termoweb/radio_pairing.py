@@ -13,7 +13,9 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import instance_id
 
+from .backend.radio.pairing import site_network_id
 from .const import CONF_NODES, CONF_RADIO_RESTORE
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,6 +34,12 @@ def radio_node(addr: int) -> dict[str, str]:
     """Return the stored node entry for a heater with radio id ``addr``."""
 
     return {"type": "htr", "addr": str(addr), "name": f"Heater {addr}"}
+
+
+async def async_site_network_id(hass: HomeAssistant, gateway_id: str) -> bytes:
+    """Return this installation's network id for a gateway: hash of instance + gateway."""
+
+    return site_network_id(f"{await instance_id.async_get(hass)}:{gateway_id}")
 
 
 def _float_or_none(value: Any) -> float | None:
@@ -116,6 +124,7 @@ def add_nodes(hass: HomeAssistant, entry: ConfigEntry, addrs: Iterable[int]) -> 
 
 __all__ = [
     "add_nodes",
+    "async_site_network_id",
     "heater_snapshot",
     "radio_node",
     "saved_snapshot",

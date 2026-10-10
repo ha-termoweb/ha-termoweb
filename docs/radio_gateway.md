@@ -149,11 +149,37 @@ The device page also shows:
 2. Choose **Local radio gateway (ESP32 + CC1101)**.
 3. Enter the gateway's IP address from step 4. Keep the port at **2323**.
 4. Leave **Radio dialect** on **auto** and **Network id** empty.
-5. Press **Submit** and wait. The integration listens to your heaters to learn
-   their radio network. This takes up to 6 minutes. Then it checks every
-   heater it can reach. Heaters talk when they start heating, so turn one
-   heater's temperature up before you press **Submit**.
-6. When it finishes, your heaters appear under **Devices**.
+5. Press **Submit**. Then choose one:
+   - **Find heaters that are already paired**: your heaters already work
+     with a TermoWeb gateway or app. Go to "Find paired heaters" below.
+   - **Pair new heaters**: your heaters are new, or you reset them. Go to
+     "Pair new heaters" below.
+
+### Find paired heaters
+
+1. Turn one heater's temperature up, so that it starts heating. Heaters talk
+   when they start heating.
+2. Wait. The integration listens to your heaters to learn their radio
+   network. This takes up to 6 minutes. Then it checks every heater it can
+   reach.
+3. When it finishes, your heaters appear under **Devices**.
+
+### Pair new heaters
+
+1. Read the steps on the screen, then press **Submit**. You have 5 minutes.
+2. Put one heater into pairing mode. The heater's manual tells you which
+   buttons to press.
+3. Wait about 10 seconds. Then put the next heater into pairing mode. Do one
+   heater at a time.
+4. Setup stops 1 minute after the last heater was paired (or after 5
+   minutes). Your heaters appear under **Devices** as "Heater 2",
+   "Heater 3", and so on.
+
+The integration gives your heaters their own radio network. It does not use
+the network of an old TermoWeb gateway. If you see "No heater was paired",
+move the gateway closer to the heater and try again.
+
+### If no heater is found
 
 If you see "No heater radio traffic was heard":
 
@@ -237,8 +263,12 @@ the settings first, so the pairing can give them back.
 Only heaters that use radio dialect B can be reset. The integration's
 diagnostics download shows the dialect.
 
-If you added or removed a heater later, open the integration, choose
-**Reconfigure**, and tick **Scan for heaters again**.
+To add a new heater later, open the integration, choose **Configure**, then
+**Pair a new heater**, and follow the steps on the screen. The integration
+reloads when the heater is paired.
+
+If you added or removed a heater that is already paired, open the
+integration, choose **Reconfigure**, and tick **Scan for heaters again**.
 
 Only one program can use the gateway at a time. If a second program
 connects, the first one is disconnected.

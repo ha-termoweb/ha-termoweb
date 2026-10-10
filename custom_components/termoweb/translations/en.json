@@ -21,7 +21,7 @@
       },
       "radio": {
         "title": "Connect to the radio gateway",
-        "description": "Enter the IP address of your ESP32 radio gateway. Leave the dialect on \"auto\" and the network id empty: the integration listens to your heaters to learn them. This can take up to 6 minutes. Keep the gateway near the heaters. Heaters talk when they start heating, so turning one heater's temperature up first makes this faster.",
+        "description": "Enter the IP address of your ESP32 radio gateway. Leave the dialect on \"auto\" and the network id empty. Keep the gateway near the heaters. In the next step you choose: find heaters that are already paired, or pair new heaters.",
         "data": {
           "host": "Gateway IP address",
           "port": "Port",
@@ -30,6 +30,19 @@
         }
       },
       "radio_discover": { "title": "Looking for your heaters" },
+      "radio_method": {
+        "title": "Find or pair your heaters",
+        "description": "Choose \"Find heaters that are already paired\" if your heaters already work with a TermoWeb gateway or app. The integration listens to them. This can take up to 6 minutes. Turn one heater's temperature up first: heaters talk when they start heating.\n\nChoose \"Pair new heaters\" if your heaters are new, or were reset. You press the pairing button on each heater.",
+        "menu_options": {
+          "radio_discover": "Find heaters that are already paired",
+          "radio_pair": "Pair new heaters"
+        }
+      },
+      "radio_pair": {
+        "title": "Pair new heaters",
+        "description": "1. Press **Submit**. You then have 5 minutes.\n2. Put one heater into pairing mode. The heater's manual tells you which buttons to press.\n3. Wait about 10 seconds. Then put the next heater into pairing mode. Do one heater at a time.\n\nSetup stops 1 minute after the last heater was paired, or after 5 minutes. Keep the gateway close to the heaters."
+      },
+      "radio_pair_run": { "title": "Pairing your heaters" },
       "reconfigure_radio": {
         "title": "Change the radio gateway",
         "description": "Change the gateway address. Tick \"Scan for heaters again\" if you added or removed a heater.",
@@ -41,7 +54,7 @@
       },
       "nanocul": {
         "title": "Connect to the nanoCUL USB stick",
-        "description": "Choose the port of your nanoCUL stick (it usually shows as a USB serial device). Leave the dialect on \"auto\" and the network id empty: the integration listens to your heaters to learn them. This can take up to 6 minutes. Heaters talk when they start heating, so turning one heater's temperature up first makes this faster.",
+        "description": "Choose the port of your nanoCUL stick (it usually shows as a USB serial device). Leave the dialect on \"auto\" and the network id empty. In the next step you choose: find heaters that are already paired, or pair new heaters.",
         "data": {
           "device": "USB port",
           "dialect": "Radio dialect",
@@ -78,9 +91,10 @@
       "invalid_network_id": "The network id must be 4 hex digits, for example 1A2B.",
       "cannot_connect_nanocul": "Cannot open the nanoCUL stick. Check that it is plugged in, that the port is right, and that it runs the termoweb_rx firmware.",
       "dialect_unsupported_firmware": "This nanoCUL firmware only knows radio dialect A. Choose dialect A or auto, or update the stick's firmware.",
-      "unknown_dialect": "Radio bursts were heard, but none could be decoded. A weak signal can cause this: move the gateway closer to a heater and try again. If it happens again, your heaters may use a radio dialect this integration does not know yet. Please open an issue at {issue_url} and attach the report file {report}."
+      "unknown_dialect": "Radio bursts were heard, but none could be decoded. A weak signal can cause this: move the gateway closer to a heater and try again. If it happens again, your heaters may use a radio dialect this integration does not know yet. Please open an issue at {issue_url} and attach the report file {report}.",
+      "no_heaters_paired": "No heater was paired. Put a heater into pairing mode while the integration waits, move the gateway closer to it, and try again."
     },
-    "progress": { "radio_discover": "Listening for heater radio traffic, then checking each heater. This can take up to 6 minutes. Turning a heater's temperature up makes it talk sooner." },
+    "progress": { "radio_discover": "Listening for heater radio traffic, then checking each heater. This can take up to 6 minutes. Turning a heater's temperature up makes it talk sooner.", "radio_pair": "Waiting for heaters in pairing mode. Put one heater into pairing mode now, then the next one. This stops 1 minute after the last heater was paired, or after 5 minutes." },
     "abort": {
       "already_configured": "This gateway is already set up.",
       "reconfigure_successful": "The settings were saved.",
@@ -92,8 +106,34 @@
       "init": {
         "title": "TermoWeb Options",
         "description": "Version: {version}\n\n{heaters}",
+        "data": { "debug": "Enable debug helpers" },
+        "menu_options": {
+          "settings": "Settings",
+          "pair_heaters": "Pair a new heater"
+        }
+      },
+      "settings": {
+        "title": "TermoWeb Options",
+        "description": "Version: {version}\n\n{heaters}",
         "data": { "debug": "Enable debug helpers" }
-      }
+      },
+      "pair_heaters": {
+        "title": "Pair a new heater",
+        "description": "1. Press **Submit**. You then have 5 minutes.\n2. Put the new heater into pairing mode. The heater's manual tells you which buttons to press.\n3. To add more heaters, wait about 10 seconds, then put the next heater into pairing mode. Do one heater at a time.\n\nHeater control pauses while pairing runs. Pairing stops 1 minute after the last heater was paired, or after 5 minutes. Then the integration reloads and the new heaters appear under Devices."
+      },
+      "pair_run": { "title": "Pairing your heaters" }
+    },
+    "error": {
+      "no_heaters_paired": "No heater was paired. Put the heater into pairing mode while the integration waits, move the gateway closer to it, and try again.",
+      "no_free_address": "All radio numbers are in use. Remove a heater you no longer use first.",
+      "cannot_connect_radio": "Cannot connect to the radio gateway. Check that it is powered on.",
+      "unknown": "Unexpected error. See the Home Assistant log."
+    },
+    "abort": {
+      "not_loaded": "The integration is not running. Start it first, then try again."
+    },
+    "progress": {
+      "pair_heaters": "Waiting for heaters in pairing mode. Put one heater into pairing mode now. This stops 1 minute after the last heater was paired, or after 5 minutes."
     }
   },
   "entity": {
