@@ -43,11 +43,9 @@ from .backend.radio_client import dev_id_from_mac
 from .backend.radio_power import KEY_RATED_POWER
 from .backend.rest_client import BackendAuthError, BackendRateLimitError
 from .const import (
-    BRAND_DUCAHEAT,
     BRAND_LABELS,
     BRAND_RADIO,
     BRAND_RADIO_MONITOR,
-    BRAND_TEVOLVE,
     CONF_BRAND,
     CONF_DEVICE,
     CONF_DIALECT,
