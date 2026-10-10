@@ -170,7 +170,7 @@ class NodeRefreshFallback:
         await asyncio.sleep(WS_ECHO_FALLBACK_REFRESH)
         try:
             await coordinator.async_refresh_heater(self._node)
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - a failed refresh must not crash
             _LOGGER.error(
                 "Refresh fallback failed node=%s: %s", self._node, redact_text(str(err))
             )
@@ -311,7 +311,7 @@ def _derive_boost_state(
     ):
         try:
             boost_end_dt, boost_minutes = resolver(boost_day, boost_minute)
-        except Exception:
+        except Exception:  # noqa: BLE001 - defensive
             boost_end_dt = None
             boost_minutes = None
 
@@ -561,12 +561,11 @@ class HeaterNodeBase(CoordinatorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Expose Home Assistant device metadata for the heater."""
-        model = "Accumulator" if self._node_type == "acm" else "Heater"
         return build_node_device_info(
             self.hass,
             self._entry_id,
             self._dev_id,
             self._addr,
             name=self._device_name,
-            model=model,
+            node_type=self._node_type,
         )

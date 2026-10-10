@@ -36,3 +36,29 @@ async def test_thermostat_named_like_a_heater_keeps_its_name_everywhere(
             (DOMAIN, DEV_ID, "4"), entry.entry_id
         )
         assert device.name == "Heater 4"
+
+
+async def test_node_devices_report_their_kind_as_model(
+    hass: HomeAssistant, cloud: FakeCloud, config_entry: MockConfigEntry
+) -> None:
+    """Heater, accumulator and thermostat devices each carry their own model."""
+    settings = {"mode": "auto", "units": "C"}
+    nodes = FakeNodes(
+        cloud,
+        {
+            ("htr", "1"): (None, dict(settings)),
+            ("acm", "2"): (None, dict(settings)),
+            ("thm", "4"): (None, dict(settings)),
+        },
+    )
+    with nodes.patched():
+        entry = await setup_entry(hass, config_entry)
+
+        registry = dr.async_get(hass)
+        models = {
+            addr: registry.async_get_device_by_identifier(
+                (DOMAIN, DEV_ID, addr), entry.entry_id
+            ).model
+            for addr in ("1", "2", "4")
+        }
+        assert models == {"1": "Heater", "2": "Accumulator", "4": "Thermostat"}

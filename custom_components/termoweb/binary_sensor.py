@@ -231,14 +231,13 @@ class HeaterBoostActiveBinarySensor(
     def device_info(self) -> DeviceInfo:
         """Expose Home Assistant device metadata for the heater."""
 
-        model = "Accumulator" if self._node_type == "acm" else "Heater"
         return build_node_device_info(
             self.hass,
             self._entry_id,
             self._dev_id,
             self._addr,
             name=self._device_name,
-            model=model,
+            node_type=self._node_type,
         )
 
     def boost_state(self) -> BoostState:

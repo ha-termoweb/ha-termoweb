@@ -279,7 +279,7 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
             self.boost_context.dev_id,
             self.boost_context.addr,
             name=self.boost_context.base_name,
-            model="Accumulator",
+            node_type=self.boost_context.node_type,
         )
 
     async def _async_boost_request(
@@ -438,17 +438,13 @@ class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
     def device_info(self) -> DeviceInfo:
         """Expose Home Assistant device metadata for the flash target."""
 
-        model = "Thermostat" if self._flash_context.node_type == "thm" else "Heater"
-        if self._flash_context.node_type == "acm":
-            model = "Accumulator"
-
         return build_node_device_info(
             self.hass,
             self._flash_context.entry_id,
             self._flash_context.dev_id,
             self._flash_context.addr,
             name=self._flash_context.name,
-            model=model,
+            node_type=self._flash_context.node_type,
         )
 
     async def async_press(self) -> None:
