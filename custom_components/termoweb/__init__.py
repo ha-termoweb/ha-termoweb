@@ -41,12 +41,8 @@ from .const import (
     MIN_POLL_INTERVAL,
     signal_ws_status,
 )
-from .coordinator import (
-    DeviceMetadata,
-    EnergyStateCoordinator,
-    StateCoordinator,
-    build_device_metadata,
-)
+from .coordinator.energy import EnergyStateCoordinator
+from .coordinator.state import DeviceMetadata, StateCoordinator, build_device_metadata
 from .domain.ids import NodeType
 from .energy import energy_import_store
 from .identifiers import build_cloud_unique_id, migrate_unique_id

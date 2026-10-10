@@ -27,7 +27,7 @@ from custom_components.termoweb.const import (
     get_brand_api_base,
     signal_ws_status,
 )
-from custom_components.termoweb.coordinator import StateCoordinator
+from custom_components.termoweb.coordinator.state import StateCoordinator
 from custom_components.termoweb.domain import state_to_dict
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from custom_components.termoweb.runtime import EntryRuntime

@@ -28,7 +28,7 @@ from custom_components.termoweb.backend.ducaheat import (
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.backend.termoweb_ws import TermoWebWSClient
 from custom_components.termoweb.const import BRAND_DUCAHEAT, CONF_BRAND, DOMAIN
-from custom_components.termoweb.coordinator import StateCoordinator
+from custom_components.termoweb.coordinator.state import StateCoordinator
 from custom_components.termoweb.identifiers import build_installation_entity_unique_id
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from tests.fakes.cloud import DEV_ID, PASSWORD, USERNAME, FakeCloud

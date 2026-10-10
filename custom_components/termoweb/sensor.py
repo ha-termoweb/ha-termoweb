@@ -22,7 +22,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from custom_components.termoweb.backend.factory import backend_capabilities
 from custom_components.termoweb.coerce import as_float, as_int, as_percentage
 from custom_components.termoweb.const import signal_radio_frames
-from custom_components.termoweb.coordinator import EnergyStateCoordinator
+from custom_components.termoweb.coordinator.energy import EnergyStateCoordinator
 from custom_components.termoweb.domain.ids import HEATING_NODE_TYPES
 from custom_components.termoweb.domain.view import DomainStateView
 from custom_components.termoweb.entity import (

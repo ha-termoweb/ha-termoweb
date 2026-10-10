@@ -16,7 +16,8 @@ from .inventory import Inventory
 if TYPE_CHECKING:
     from .backend import Backend, WsClientProto
     from .backend.base import HttpClientProto
-    from .coordinator import EnergyStateCoordinator, StateCoordinator
+    from .coordinator.energy import EnergyStateCoordinator
+    from .coordinator.state import StateCoordinator
 
 
 @dataclass(slots=True)
