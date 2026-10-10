@@ -23,6 +23,7 @@ from homeassistant.components.recorder.statistics import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util.unit_conversion import EnergyConverter
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.components.recorder.common import (
@@ -146,6 +147,7 @@ def _seed(
         "name": None,
         "source": "recorder",
         "statistic_id": entity_id,
+        "unit_class": EnergyConverter.UNIT_CLASS,
         "unit_of_measurement": "kWh",
     }
     stats = [
@@ -177,6 +179,7 @@ async def test_import_writes_hourly_statistics(
     config_entry: MockConfigEntry,
     hass_storage: dict[str, Any],
     limiter_sleeps: list[float],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A service call writes one statistic per hour with recorder metadata."""
     freezer.move_to(NOW)
@@ -203,6 +206,9 @@ async def test_import_writes_hourly_statistics(
     assert metadata["has_sum"] is True
     assert metadata["source"] == "recorder"
     assert metadata["unit_of_measurement"] == "kWh"
+    assert metadata["unit_class"] == EnergyConverter.UNIT_CLASS
+    # HA >= 2026.11 rejects imports whose metadata omits unit_class.
+    assert "doesn't specify unit_class" not in caplog.text
     assert _progress(hass_storage, config_entry) == {"htr:1": {"imported_from": start}}
     summary = hass.data[DOMAIN][config_entry.entry_id].last_energy_import_summary
     assert summary["nodes"][0]["written"] == 48

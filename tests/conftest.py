@@ -892,6 +892,9 @@ def _install_stubs() -> None:
         frame_mod.async_setup = async_setup  # type: ignore[attr-defined]
     else:  # pragma: no cover - use existing module when available
         frame_mod = frame_mod
+    # Importing the real package runs HA's install_as_voluptuous(), which swaps
+    # the voluptuous stub above for probatio's shim; put the stub back.
+    sys.modules["voluptuous"] = vol
     aiohttp_client_mod = sys.modules.get(
         "homeassistant.helpers.aiohttp_client"
     ) or types.ModuleType("homeassistant.helpers.aiohttp_client")
@@ -2068,6 +2071,13 @@ def _install_stubs() -> None:
     util_mod.dt = dt_mod
     sys.modules["homeassistant.util"] = util_mod
     sys.modules["homeassistant.util.dt"] = dt_mod
+
+    unit_conversion_mod = sys.modules.get(
+        "homeassistant.util.unit_conversion"
+    ) or types.ModuleType("homeassistant.util.unit_conversion")
+    unit_conversion_mod.EnergyConverter = types.SimpleNamespace(UNIT_CLASS="energy")
+    util_mod.unit_conversion = unit_conversion_mod
+    sys.modules["homeassistant.util.unit_conversion"] = unit_conversion_mod
 
 
 _install_stubs()

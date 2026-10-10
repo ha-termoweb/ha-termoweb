@@ -6,8 +6,9 @@ integration. **v2.0.2** is the clean release of this architecture.
 ## Architecture invariants
 
 - **Latest Home Assistant only.** The integration targets the current HA
-  baseline (`homeassistant>=2025.1.0`). There are no compatibility shims or
-  fallback imports for older versions.
+  stable release (`homeassistant>=2026.10.0`, Python 3.14). The minimum moves
+  up with each HA release; there are no compatibility shims or fallback
+  imports for older versions.
 - **Single architecture.** There is one canonical implementation path; legacy
   or transitional code is not allowed.
 - **Vendor payloads are fixed.** Vendor REST/WS schemas are stable external

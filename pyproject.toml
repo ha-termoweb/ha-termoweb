@@ -4,11 +4,10 @@ version = "2.3.1"
 description = "TermoWeb heaters integration for Home Assistant"
 readme = "README.md"
 authors = [{ name = "ha-termoweb" }]
-requires-python = ">=3.13.2"
+requires-python = ">=3.14.2"
 dependencies = [
-    "homeassistant>=2025.1.0",
+    "homeassistant>=2026.10.0",
     "aiohttp>=3.12.0",
-    "voluptuous>=0.13",
     "pydantic>=2.8.0",
 ]
 
@@ -17,7 +16,7 @@ test = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
-    "pytest-homeassistant-custom-component==0.13.281",
+    "pytest-homeassistant-custom-component==0.13.371",
 ]
 
 
@@ -237,7 +236,7 @@ convention = "google"
 property-decorators = ["propcache.api.cached_property"]
 
 [tool.pylint.MAIN]
-py-version = "3.13"
+py-version = "3.14"
 jobs = 2
 init-hook = """\
     from pathlib import Path; \
