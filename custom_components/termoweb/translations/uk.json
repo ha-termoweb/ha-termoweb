@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Параметри TermoWeb",
-        "description": "Версія: {version}",
-        "data": {
-          "debug": "Увімкнути допоміжні засоби налагодження"
-        }
+        "title": "Параметри TermoWeb"
       }
     }
   },
@@ -187,22 +183,6 @@
         "max_history_retrieval": {
           "name": "Максимум днів історії",
           "description": "Кількість днів історії для отримання. Перевизначає значення за замовчуванням лише для цього імпорту."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Видати налагоджувальний зонд веб-сокета",
-      "description": "Запросити негайні розміри фреймів ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``. Перед використанням цього помічника увімкніть опцію налагодження у налаштуваннях інтеграції.",
-      "fields": {
-        "entry_id": {
-          "name": "Ідентифікатор запису конфігурації",
-          "description": "Обмежте зонд одним записом конфігурації TermoWeb.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Ідентифікатор пристрою",
-          "description": "Обмежте зонд одним пристроєм-шлюзом.",
-          "example": "0000abcd"
         }
       }
     }

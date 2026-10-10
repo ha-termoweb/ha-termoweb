@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Alternativer for TermoWeb",
-        "description": "Versjon: {version}",
-        "data": {
-          "debug": "Aktivere feilsøkingshjelpere"
-        }
+        "title": "Alternativer for TermoWeb"
       }
     }
   },
@@ -173,22 +169,6 @@
         "max_history_retrieval": {
           "name": "Maks historikk dager",
           "description": "Antall dager med historikk som skal hentes. Overstyrer den konfigurerte standardinnstillingen kun for denne importen."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Sende ut websocket-feilsøkingssonde",
-      "description": "Be om en umiddelbar ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` rammestørrelse. Aktiver feilsøkingsalternativet i integrasjonsinnstillingene før du bruker denne hjelperen.",
-      "fields": {
-        "entry_id": {
-          "name": "ID for konfigureringsoppføring",
-          "description": "Begrens sonden til én enkelt TermoWeb-konfigurasjonsoppføring.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Enhets-ID",
-          "description": "Begrens proben til én enkelt gateway-enhet.",
-          "example": "0000abcd"
         }
       }
     }

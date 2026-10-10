@@ -1078,22 +1078,6 @@ async def test_termoweb_stop_cancels_background_tasks(
     client._disconnect.assert_awaited()  # type: ignore[attr-defined]
 
 
-@pytest.mark.asyncio
-async def test_termoweb_debug_probe_emits_when_debug_enabled(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Debug probe should emit when debug logging is enabled."""
-
-    client = _make_termoweb_client(monkeypatch)
-    emit = AsyncMock()
-    client._sio.emit = emit  # type: ignore[attr-defined]
-    caplog.set_level(logging.DEBUG, logger=module._LOGGER.name)
-
-    await client.debug_probe()
-
-    emit.assert_awaited_once_with("dev_data", namespace=module.WS_NAMESPACE)
-
-
 def test_termoweb_update_status_records_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

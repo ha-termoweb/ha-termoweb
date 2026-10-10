@@ -480,6 +480,12 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Return the options flow handler for this config entry."""
         return TermoWebOptionsFlow(config_entry)
 
+    @classmethod
+    @callback
+    def async_supports_options_flow(cls, config_entry: ConfigEntry) -> bool:
+        """Offer options only for radio gateway entries; cloud entries have none."""
+        return config_entry.data.get(CONF_BRAND) == BRAND_RADIO
+
     def __init__(self) -> None:
         """Initialise radio discovery state."""
         super().__init__()
@@ -1025,7 +1031,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class TermoWebOptionsFlow(config_entries.OptionsFlow):
-    """Options flow: debug and heater power; radio entries can also pair heaters."""
+    """Options flow for radio gateway entries: heater power, pairing, rehoming."""
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Store the entry being configured."""
@@ -1036,36 +1042,21 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
         self._rehome_task: asyncio.Task[Any] | None = None
         self._rehome_summary = ""
 
-    def _is_radio(self) -> bool:
-        """Return True for a radio gateway or nanoCUL entry."""
-        return self.entry.data.get(CONF_BRAND) == BRAND_RADIO
-
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
-        """Radio entries choose settings or pairing; others go to the settings form."""
-        if self._is_radio() and user_input is None:
-            return self.async_show_menu(
-                step_id="init", menu_options=["settings", "pair_heaters", "rehome"]
-            )
-        return await self._settings_step("init", user_input)
+        """Let the user choose settings, pairing or rehoming."""
+        return self.async_show_menu(
+            step_id="init", menu_options=["settings", "pair_heaters", "rehome"]
+        )
 
     async def async_step_settings(self, user_input: dict[str, Any] | None = None):
-        """Show or save the settings form of a radio entry."""
-        return await self._settings_step("settings", user_input)
-
-    async def _settings_step(self, step_id: str, user_input: dict[str, Any] | None):
-        """Show or process the options form: debug, plus heater power for radio."""
-        radio_addrs = (
-            [str(node.get("addr")) for node in self.entry.data.get(CONF_NODES, [])]
-            if self._is_radio()
-            else []
-        )
+        """Show or save the heater power form of a radio entry."""
+        radio_addrs = [
+            str(node.get("addr")) for node in self.entry.data.get(CONF_NODES, [])
+        ]
         power = dict(self.entry.options.get(CONF_RADIO_POWER) or {})
         if user_input is not None:
             # Keep option keys this form does not own (e.g. energy-import progress).
-            data: dict[str, Any] = {
-                **self.entry.options,
-                "debug": bool(user_input.get("debug", False)),
-            }
+            data: dict[str, Any] = dict(self.entry.options)
             if radio_addrs:
                 data[CONF_RADIO_POWER] = {
                     **power,
@@ -1076,10 +1067,7 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
                 }
             return self.async_create_entry(title="", data=data)
 
-        debug_default = bool(
-            self.entry.options.get("debug", self.entry.data.get("debug", False))
-        )
-        fields: dict[Any, Any] = {vol.Optional("debug", default=debug_default): bool}
+        fields: dict[Any, Any] = {}
         rated = power.get(KEY_RATED_POWER) or {}
         for addr in radio_addrs:
             fields[
@@ -1095,7 +1083,7 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
             else ""
         )
         return self.async_show_form(
-            step_id=step_id,
+            step_id="settings",
             data_schema=vol.Schema(fields),
             description_placeholders={"version": ver, "heaters": heaters},
         )

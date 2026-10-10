@@ -6,7 +6,6 @@ import asyncio
 from collections.abc import Iterable, Mapping
 import logging
 from time import monotonic as time_mod
-import typing
 from typing import Any
 
 import aiohttp
@@ -643,61 +642,6 @@ class RESTClient:
             payload=response,
         )
         return response
-
-    async def debug_probe_get(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, typing.Any] | None = None,
-    ) -> None:
-        """Issue a GET request with verbose logging for discovery probes."""
-
-        headers_dict = dict(headers) if headers is not None else {}
-        if not headers_dict:
-            headers_dict = await self.authed_headers()
-        params_dict = dict(params) if params is not None else None
-        url = path if path.startswith("http") else f"{self._api_base}{path}"
-
-        def _sanitise(mapping: Mapping[str, typing.Any] | None) -> Mapping[str, str]:
-            if mapping is None:
-                return {}
-            return {str(key): redact_text(str(value)) for key, value in mapping.items()}
-
-        _LOGGER.debug(
-            "Probe GET request %s headers=%s params=%s",
-            url,
-            _sanitise(headers_dict),
-            _sanitise(params_dict),
-        )
-
-        try:
-            async with self._session.request(
-                "GET",
-                url,
-                headers=dict(headers_dict),
-                params=dict(params_dict) if params_dict is not None else None,
-                timeout=aiohttp.ClientTimeout(total=25),
-            ) as resp:
-                try:
-                    body_text = await resp.text()
-                except Exception:  # pragma: no cover - defensive
-                    body_text = "<unreadable>"
-                response_headers = dict(resp.headers)
-                _LOGGER.debug(
-                    "Probe GET response %s status=%s headers=%s body=%s",
-                    url,
-                    resp.status,
-                    _sanitise(response_headers),
-                    redact_text(body_text),
-                )
-        except Exception as err:  # noqa: BLE001 - best-effort logging only
-            _LOGGER.debug(
-                "Probe GET request %s failed: %s",
-                url,
-                redact_text(str(err)),
-                exc_info=True,
-            )
 
     async def get_node_samples(
         self,

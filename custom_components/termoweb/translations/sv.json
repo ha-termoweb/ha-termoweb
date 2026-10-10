@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "TermoWeb Alternativ",
-        "description": "Version: {version}__",
-        "data": {
-          "debug": "Aktivera felsökningshjälpmedel"
-        }
+        "title": "TermoWeb Alternativ"
       }
     }
   },
@@ -173,22 +169,6 @@
         "max_history_retrieval": {
           "name": "Max historikdagar",
           "description": "Antal dagar med historik som ska hämtas. Åsidosätter den konfigurerade standardinställningen endast för denna import."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Skicka ut felsökningsprov för websocket",
-      "description": "Begär en omedelbar ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` ramstorlekar. Aktivera felsökningsalternativet i integrationsinställningarna innan du använder den här hjälpen.",
-      "fields": {
-        "entry_id": {
-          "name": "ID för konfigurationspost",
-          "description": "Begränsa proben till en enda TermoWeb-konfigurationspost.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Enhetens ID",
-          "description": "Begränsa proben till en enda gateway-enhet.",
-          "example": "0000abcd"
         }
       }
     }

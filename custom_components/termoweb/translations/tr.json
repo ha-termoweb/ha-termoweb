@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "TermoWeb Seçenekleri",
-        "description": "Versiyon: {version}",
-        "data": {
-          "debug": "Hata ayıklama yardımcılarını etkinleştirin"
-        }
+        "title": "TermoWeb Seçenekleri"
       }
     }
   },
@@ -187,22 +183,6 @@
         "max_history_retrieval": {
           "name": "Maksimum tarih günleri",
           "description": "Alınacak geçmiş gün sayısı. Yalnızca bu içe aktarma için yapılandırılmış varsayılanı geçersiz kılar."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Websocket hata ayıklama probu gönderme",
-      "description": "Anında ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` çerçeve boyutları isteyin. Bu yardımcıyı kullanmadan önce entegrasyon ayarlarında hata ayıklama seçeneğini etkinleştirin.",
-      "fields": {
-        "entry_id": {
-          "name": "Konfigürasyon giriş kimliği",
-          "description": "Probu tek bir TermoWeb yapılandırma girişiyle kısıtlayın.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Cihaz Kimliği",
-          "description": "Probu tek bir ağ geçidi cihazıyla sınırlandırın.",
-          "example": "0000abcd"
         }
       }
     }

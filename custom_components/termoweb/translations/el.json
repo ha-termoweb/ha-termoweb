@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Επιλογές TermoWeb",
-        "description": "Έκδοση: {version}",
-        "data": {
-          "debug": "Ενεργοποίηση βοηθητικών προγραμμάτων εντοπισμού σφαλμάτων"
-        }
+        "title": "Επιλογές TermoWeb"
       }
     }
   },
@@ -187,22 +183,6 @@
         "max_history_retrieval": {
           "name": "Μέγιστες ημέρες ιστορικού",
           "description": "Αριθμός ημερών ιστορικού προς ανάκτηση. Αντικαθιστά την προεπιλεγμένη ρύθμιση μόνο για αυτή την εισαγωγή."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Εκπομπή ανιχνευτή εντοπισμού σφαλμάτων websocket",
-      "description": "Ζητήστε άμεσα μεγέθη πλαισίων ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``. Ενεργοποιήστε την επιλογή εντοπισμού σφαλμάτων στις ρυθμίσεις ενσωμάτωσης πριν χρησιμοποιήσετε αυτόν τον βοηθό.",
-      "fields": {
-        "entry_id": {
-          "name": "Config ID καταχώρησης",
-          "description": "Περιορίστε τον ανιχνευτή σε μία μόνο καταχώρηση ρυθμίσεων TermoWeb.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Αναγνωριστικό συσκευής",
-          "description": "Περιορίστε τον ανιχνευτή σε μία μόνο συσκευή πύλης.",
-          "example": "0000abcd"
         }
       }
     }

@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Options de TermoWeb",
-        "description": "Version : {version}",
-        "data": {
-          "debug": "Activer les aides au débogage"
-        }
+        "title": "Options de TermoWeb"
       }
     }
   },
@@ -187,22 +183,6 @@
         "max_history_retrieval": {
           "name": "Nombre maximal de jours d'antériorité",
           "description": "Nombre de jours d'historique à récupérer. Remplace la valeur par défaut configurée pour cette importation uniquement."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Emission d'une sonde de débogage websocket",
-      "description": "Demande une taille d'image immédiate ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``. Activez l'option de débogage dans les paramètres d'intégration avant d'utiliser cette aide.",
-      "fields": {
-        "entry_id": {
-          "name": "ID de l'entrée de configuration",
-          "description": "Restreindre la sonde à une seule entrée de configuration TermoWeb.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "ID de l'appareil",
-          "description": "Limiter la sonde à un seul dispositif de passerelle.",
-          "example": "0000abcd"
         }
       }
     }

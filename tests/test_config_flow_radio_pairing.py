@@ -296,13 +296,3 @@ async def test_options_pairing_errors_show_the_form_again(error, reason) -> None
 async def test_options_pairing_needs_a_loaded_entry() -> None:
     rig = Options(loaded=False)
     assert await rig.run() == {"type": "abort", "reason": "not_loaded"}
-
-
-@pytest.mark.asyncio
-async def test_cloud_options_still_open_the_settings_form() -> None:
-    hass = HomeAssistant()
-    entry = ConfigEntry("cloud", data={"brand": "termoweb"})
-    flow = config_flow.TermoWebOptionsFlow(entry)
-    flow.hass = hass
-    form = await flow.async_step_init()
-    assert form["type"] == "form" and form["step_id"] == "init"

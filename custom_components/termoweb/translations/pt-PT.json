@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Opções TermoWeb",
-        "description": "Versão: {version}",
-        "data": {
-          "debug": "Ativar auxiliares de depuração"
-        }
+        "title": "Opções TermoWeb"
       }
     }
   },
@@ -187,22 +183,6 @@
         "max_history_retrieval": {
           "name": "Máximo de dias de histórico",
           "description": "Número de dias de histórico a obter. Substitui a predefinição configurada apenas para esta importação."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Emitir sonda de depuração websocket",
-      "description": "Solicite uma atualização imediata de ``dev_data`` ao cliente websocket e registe os tamanhos dos próximos fotogramas ``dev_handshake`` e ``update``. Ative a opção de depuração nas definições da integração antes de usar este auxiliar.",
-      "fields": {
-        "entry_id": {
-          "name": "ID da entrada de configuração",
-          "description": "Restringe a sonda a uma única entrada de configuração TermoWeb.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "ID do dispositivo",
-          "description": "Restringe a sonda a um único dispositivo gateway.",
-          "example": "0000abcd"
         }
       }
     }

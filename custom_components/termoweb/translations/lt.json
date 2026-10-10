@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "\"TermoWeb\" parinktys",
-        "description": "Versija: {version}",
-        "data": {
-          "debug": "Įjungti derinimo pagalbininkus"
-        }
+        "title": "\"TermoWeb\" parinktys"
       }
     }
   },
@@ -173,22 +169,6 @@
         "max_history_retrieval": {
           "name": "Maksimalus istorijos dienų skaičius",
           "description": "Atkuriamos istorijos dienų skaičius. Pakeičia tik šiam importui sukonfigūruotą numatytąjį nustatymą."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Išsiųsti žiniatinklio sąsajos derinimo zondą",
-      "description": "Prašyti nedelsiant ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` kadrų dydžių. Prieš naudodami šią pagalbinę priemonę, integracijos nustatymuose įjunkite derinimo parinktį.",
-      "fields": {
-        "entry_id": {
-          "name": "Konfigūravimo įrašo ID",
-          "description": "Apriboti zondą vienu \"TermoWeb\" konfigūracijos įrašu.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Įrenginio ID",
-          "description": "Apriboti zondą vienu šliuzo įrenginiu.",
-          "example": "0000abcd"
         }
       }
     }

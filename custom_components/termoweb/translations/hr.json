@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "TermoWeb opcije",
-        "description": "Verzija: {version}",
-        "data": {
-          "debug": "Omogući pomoćnike za otklanjanje grešaka"
-        }
+        "title": "TermoWeb opcije"
       }
     }
   },
@@ -187,22 +183,6 @@
         "max_history_retrieval": {
           "name": "Maks. dana povijesti",
           "description": "Broj dana povijesti za dohvat. Zamjenjuje zadanu vrijednost samo za ovaj uvoz."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Pokreni websocket dijagnostiku",
-      "description": "Zatražite trenutažno osvježavanje ``dev_data`` od websocket klijenta i zabilježite veličine sljedećih okvira ``dev_handshake`` i ``update``. Omogućite opciju otklanjanja grešaka u postavkama integracije prije korištenja ovog pomoćnika.",
-      "fields": {
-        "entry_id": {
-          "name": "ID konfiguracijske stavke",
-          "description": "Ograniči dijagnostiku na jednu TermoWeb konfiguracijsku stavku.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "ID uređaja",
-          "description": "Ograniči dijagnostiku na jedan gateway uređaj.",
-          "example": "0000abcd"
         }
       }
     }
