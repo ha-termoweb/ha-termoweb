@@ -290,7 +290,14 @@ class RadioClient:
                 _LOGGER.exception("Radio disconnect listener failed")
 
     async def async_survey(self, seconds: int) -> list[RawBurst]:
-        """Capture raw bursts of every dialect on air; heater commands wait meanwhile."""
+        """Capture raw bursts of every dialect on air; heater commands wait meanwhile.
+
+        Nothing is transmitted during the survey, station replies included
+        (the link holds its send lock). Known risk, pending the owner's
+        measurement of the heaters' keepalive tolerance: a survey, capture or
+        pairing longer than ~150 s also holds back the 120 s keepalive clock
+        syncs. Lock scheduling is not changed until that is measured (#1040).
+        """
 
         link = await self.async_connect()
         if not supports_survey(link.gateway_info):
