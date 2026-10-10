@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from asyncio import CancelledError, Task
+from asyncio import Task
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -298,7 +298,7 @@ class Backend(ABC):
         dev_id: str,
         coordinator: Any,
         *,
-        inventory: Inventory | None = None,
+        inventory: Inventory,
     ) -> WsClientProto:
         """Create a websocket client for the given device."""
 
@@ -418,8 +418,6 @@ async def fetch_normalised_hourly_samples(
                 start_epoch,
                 end_epoch,
             )
-        except CancelledError:
-            raise
         except Exception as err:  # noqa: BLE001 - log and continue on failure
             logger.warning(
                 "%s: failed to fetch samples for %s/%s node_type=%s: %s",

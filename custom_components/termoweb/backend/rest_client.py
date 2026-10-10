@@ -30,13 +30,13 @@ from custom_components.termoweb.const import (
     BASIC_AUTH_B64,
     BRAND_API_BASES,
     BRAND_DUCAHEAT,
+    BRAND_REQUESTED_WITH,
     BRAND_TERMOWEB,
     DEVS_PATH,
     GEO_DATA_PATH_FMT,
     NODE_SAMPLES_PATH_FMT,
     NODES_PATH_FMT,
     TOKEN_PATH,
-    get_brand_requested_with,
     get_brand_user_agent,
 )
 from custom_components.termoweb.domain.commands import (
@@ -174,7 +174,7 @@ class RESTClient:
         self._is_ducaheat = self._api_base == DUCAHEAT_API_BASE
         self._brand = BRAND_DUCAHEAT if self._is_ducaheat else BRAND_TERMOWEB
         self._user_agent = get_brand_user_agent(self._brand)
-        self._requested_with = get_brand_requested_with(self._brand)
+        self._requested_with = BRAND_REQUESTED_WITH[self._brand]
 
     @property
     def api_base(self) -> str:
@@ -200,8 +200,7 @@ class RESTClient:
         ignore_statuses = set(ignore_statuses)
         headers.setdefault("User-Agent", self._user_agent)
         headers.setdefault("Accept-Language", ACCEPT_LANGUAGE)
-        if self._requested_with:
-            headers.setdefault("X-Requested-With", self._requested_with)
+        headers.setdefault("X-Requested-With", self._requested_with)
         timeout = kwargs.pop("timeout", aiohttp.ClientTimeout(total=25))
 
         url = path if path.startswith("http") else f"{self._api_base}{path}"
@@ -337,8 +336,7 @@ class RESTClient:
                 "User-Agent": self._user_agent,
                 "Accept-Language": ACCEPT_LANGUAGE,
             }
-            if self._requested_with:
-                headers["X-Requested-With"] = self._requested_with
+            headers["X-Requested-With"] = self._requested_with
             if self._is_ducaheat:
                 headers["X-SerialId"] = DUCAHEAT_SERIAL_ID
             url = f"{self._api_base}{TOKEN_PATH}"
@@ -400,8 +398,7 @@ class RESTClient:
             "User-Agent": self._user_agent,
             "Accept-Language": ACCEPT_LANGUAGE,
         }
-        if self._requested_with:
-            headers["X-Requested-With"] = self._requested_with
+        headers["X-Requested-With"] = self._requested_with
         if self._is_ducaheat:
             headers["X-SerialId"] = DUCAHEAT_SERIAL_ID
         return headers

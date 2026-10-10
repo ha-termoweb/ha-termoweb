@@ -37,7 +37,7 @@ class TermoWebBackend(Backend):
         dev_id: str,
         coordinator: Any,
         *,
-        inventory: Inventory | None = None,
+        inventory: Inventory,
     ) -> WsClientProto:
         """Instantiate the unified websocket client for TermoWeb."""
 
