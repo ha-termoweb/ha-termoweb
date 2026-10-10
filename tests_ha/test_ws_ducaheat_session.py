@@ -268,6 +268,32 @@ async def test_repeated_parse_errors_force_reconnect(
     await _stop(client)
 
 
+async def test_backoff_resets_after_idle_escalation_of_healthy_session(
+    env: Env,
+) -> None:
+    """A session that delivered payloads resets backoff even after idle escalation."""
+    # The first attempt never acks the probe, which advances the backoff.
+    session = _session(lambda index: ["unexpected"] if index == 0 else ["3probe"])
+    client = env.client(session)
+    client.start()
+    ws = await _join(env, session, 1)
+    ws.feed(_event("dev_data", SNAPSHOT))
+    await until(lambda: env.status() == "healthy", "healthy")
+
+    # Silence until idle recovery gives up and reconnects.
+    await env.advance_until(lambda: ws.closed, limit=600)
+    assert ws.close_calls[0] == (
+        aiohttp.WSCloseCode.GOING_AWAY,
+        b"idle_recovery_failed",
+    )
+    closed_at = env.clock.now
+    await env.advance_until(lambda: len(session.sockets) == 3)
+    assert env.clock.now - closed_at == pytest.approx(5)  # reset, not the 2nd step
+
+    await _join(env, session, 2)
+    await _stop(client)
+
+
 async def test_empty_namespace_events_are_parse_errors(
     env: Env, caplog: pytest.LogCaptureFixture
 ) -> None:

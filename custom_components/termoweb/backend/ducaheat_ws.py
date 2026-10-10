@@ -159,6 +159,8 @@ class DucaheatWSClient(_WSCommon):
         self._healthy_since: float | None = None
         self._last_event_at: float | None = None
         self._last_update_event_at: float | None = None
+        # Last payload of a torn-down session, kept for the backoff decision.
+        self._closed_session_payload_at: float | None = None
         self._parse_error_window: deque[float] = deque(maxlen=_PARSE_ERROR_THRESHOLD)
         self._default_payload_window = _PAYLOAD_WINDOW_DEFAULT
         self._payload_stale_after = self._default_payload_window
@@ -332,10 +334,12 @@ class DucaheatWSClient(_WSCommon):
                 except Exception as exc:
                     _LOGGER.debug("WS: error %s", exc, exc_info=True)
                 finally:
-                    healthy_session = self._session_received_payload(session_started)
                     await self._disconnect("loop")
                     self._update_status("disconnected")
-                if healthy_session:
+                # Disconnects clear the tracker, so read the payload time
+                # they kept (an idle escalation may have disconnected first).
+                last_payload = self._closed_session_payload_at
+                if last_payload is not None and last_payload >= session_started:
                     self._reset_backoff()
                 await asyncio.sleep(self._next_backoff())
         finally:
@@ -1395,6 +1399,8 @@ class DucaheatWSClient(_WSCommon):
         self._ping_interval = None
         self._reset_payload_window(source="disconnect")
         tracker = self._ws_health_tracker()
+        if tracker.last_payload_at is not None:
+            self._closed_session_payload_at = tracker.last_payload_at
         tracker.last_payload_at = None
         tracker.last_heartbeat_at = None
         tracker.healthy_since = None
