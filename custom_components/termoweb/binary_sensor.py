@@ -13,10 +13,9 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from custom_components.termoweb.backend.sanitize import mask_identifier
 from custom_components.termoweb.boost import supports_boost
 from custom_components.termoweb.coordinator import StateCoordinator
-from custom_components.termoweb.domain import DomainStateView, GatewayConnectionState
+from custom_components.termoweb.domain import GatewayConnectionState
 from custom_components.termoweb.domain.ids import HEATER_NODE_TYPES
 from custom_components.termoweb.entity import (
     BoostState,
@@ -52,14 +51,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     gateway = GatewayOnlineBinarySensor(coord, entry.entry_id, dev_id)
 
     inventory = runtime.inventory
-    if not isinstance(inventory, Inventory):
-        _LOGGER.error(
-            "TermoWeb heater setup missing inventory for device %s",
-            mask_identifier(dev_id),
-        )
-        raise ValueError(  # noqa: TRY004
-            "TermoWeb inventory unavailable for heater platform"
-        )
 
     boost_entities: list[BinarySensorEntity] = []
     for node_type, addr_str, base_name in _iter_boostable_inventory_nodes(inventory):
@@ -121,10 +112,7 @@ class GatewayOnlineBinarySensor(
     def _gateway_connection_state(self) -> GatewayConnectionState:
         """Return the gateway connection state for this device."""
 
-        domain_view = getattr(self.coordinator, "domain_view", None)
-        if isinstance(domain_view, DomainStateView):
-            return domain_view.get_gateway_connection_state()
-        return GatewayConnectionState()
+        return self.coordinator.domain_view.get_gateway_connection_state()
 
     @property
     def is_on(self) -> bool:
@@ -184,9 +172,6 @@ class HeaterBoostActiveBinarySensor(
         super().__init__(coordinator)
         canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
         canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
-        if not canonical_type or not canonical_addr:
-            msg = "node_type and addr must be provided"
-            raise ValueError(msg)
 
         self._entry_id = entry_id
         self._dev_id = str(dev_id)
@@ -231,14 +216,13 @@ class HeaterBoostActiveBinarySensor(
     def device_info(self) -> DeviceInfo:
         """Expose Home Assistant device metadata for the heater."""
 
-        model = "Accumulator" if self._node_type == "acm" else "Heater"
         return build_node_device_info(
             self.hass,
             self._entry_id,
             self._dev_id,
             self._addr,
             name=self._device_name,
-            model=model,
+            node_type=self._node_type,
         )
 
     def boost_state(self) -> BoostState:
@@ -257,14 +241,4 @@ def _iter_boostable_inventory_nodes(
     for metadata in inventory.iter_nodes_metadata(node_types=HEATER_NODE_TYPES):
         if not supports_boost(metadata.node):
             continue
-        canonical_type = normalize_node_type(
-            metadata.node_type,
-            use_default_when_falsey=True,
-        )
-        canonical_addr = normalize_node_addr(
-            metadata.addr,
-            use_default_when_falsey=True,
-        )
-        if not canonical_type or not canonical_addr:
-            continue
-        yield (canonical_type, canonical_addr, metadata.name)
+        yield (metadata.node_type, metadata.addr, metadata.name)

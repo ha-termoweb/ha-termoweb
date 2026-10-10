@@ -200,6 +200,10 @@ def build_power_monitor_device_info(
     return apply_entry_device_overrides(info, entry_data)
 
 
+# Device model shown for each heating node type; heaters are the default.
+_NODE_MODELS: dict[str, str] = {"acm": "Accumulator", "thm": "Thermostat"}
+
+
 def build_node_device_info(
     hass: HomeAssistant | None,
     entry_id: str | None,
@@ -207,7 +211,7 @@ def build_node_device_info(
     addr: str,
     *,
     name: str,
-    model: str,
+    node_type: str,
 ) -> DeviceInfo:
     """Return ``DeviceInfo`` for a heater, accumulator or thermostat node."""
 
@@ -215,10 +219,11 @@ def build_node_device_info(
         identifiers={(DOMAIN, str(dev_id), str(addr))},
         name=name,
         manufacturer="TermoWeb",
-        model=model,
+        model=_NODE_MODELS.get(node_type, "Heater"),
     )
     _link_via_device(info, hass, entry_id, (DOMAIN, str(dev_id)))
-    return translate_default_device_name(info, str(addr))
+    translate_default_device_name(info, str(addr))
+    return apply_entry_device_overrides(info, _entry_gateway_record(hass, entry_id))
 
 
 # English default node names; keys match the ``device`` section of strings.json.

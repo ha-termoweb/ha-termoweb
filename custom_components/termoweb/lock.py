@@ -41,12 +41,6 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     dev_id = runtime.dev_id
 
     inventory = runtime.inventory
-    if not isinstance(inventory, Inventory):
-        _LOGGER.error(
-            "TermoWeb lock setup missing inventory for device %s",
-            mask_identifier(dev_id),
-        )
-        raise TypeError("TermoWeb inventory unavailable for lock platform")
 
     entities: list[LockEntity] = []
     for node_type, addr_str, base_name in _iter_lockable_inventory_nodes(inventory):
@@ -110,9 +104,6 @@ class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
         super().__init__(coordinator)
         canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
         canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
-        if not canonical_type or not canonical_addr:
-            msg = "node_type and addr must be provided"
-            raise ValueError(msg)
 
         self._entry_id = entry_id
         self._dev_id = str(dev_id)
@@ -164,14 +155,13 @@ class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
     def device_info(self) -> DeviceInfo:
         """Expose Home Assistant device metadata for the node."""
 
-        model = "Accumulator" if self._node_type == "acm" else "Heater"
         return build_node_device_info(
             self.hass,
             self._entry_id,
             self._dev_id,
             self._addr,
             name=self._device_name,
-            model=model,
+            node_type=self._node_type,
         )
 
     async def async_lock(self, **kwargs: Any) -> None:
@@ -230,14 +220,4 @@ def _iter_lockable_inventory_nodes(
     """Yield htr and acm node metadata from ``inventory``."""
 
     for metadata in inventory.iter_nodes_metadata(node_types=HEATING_NODE_TYPES):
-        canonical_type = normalize_node_type(
-            metadata.node_type,
-            use_default_when_falsey=True,
-        )
-        canonical_addr = normalize_node_addr(
-            metadata.addr,
-            use_default_when_falsey=True,
-        )
-        if not canonical_type or not canonical_addr:
-            continue
-        yield (canonical_type, canonical_addr, metadata.name)
+        yield (metadata.node_type, metadata.addr, metadata.name)

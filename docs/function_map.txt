@@ -1216,8 +1216,6 @@ custom_components/termoweb/button.py :: _create_boost_button_entities
     Return boost helper buttons described by shared metadata.
 custom_components/termoweb/button.py :: _build_boost_button
     Instantiate a boost helper button for ``metadata``.
-custom_components/termoweb/climate.py :: _is_cancelled_error
-    Return ``True`` when ``err`` represents a cancellation.
 custom_components/termoweb/climate.py :: async_setup_entry
     Discover heater nodes and create climate entities.
 custom_components/termoweb/climate.py :: async_setup_entry.default_name_simple
@@ -1242,8 +1240,6 @@ custom_components/termoweb/climate.py :: HeaterClimateEntity._slot_label
     Translate a program slot integer into a label.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._current_prog_slot
     Return the active program slot index for the heater.
-custom_components/termoweb/climate.py :: HeaterClimateEntity._shared_inventory
-    Return the shared immutable inventory for this coordinator.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._optimistic_update
     Apply ``mutator`` to cached state and write the entity state.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._async_write_settings
@@ -1288,10 +1284,6 @@ custom_components/termoweb/climate.py :: HeaterClimateEntity.async_set_temperatu
     Set target temperature; server requires manual+stemp together (stemp string handled by API).
 custom_components/termoweb/climate.py :: HeaterClimateEntity._default_mode_for_setpoint
     Return the mode enforced when sending a bare setpoint.
-custom_components/termoweb/climate.py :: HeaterClimateEntity._requires_setpoint_with_mode
-    Return whether the backend needs a target temperature for the mode.
-custom_components/termoweb/climate.py :: HeaterClimateEntity._allows_setpoint_in_mode
-    Return whether a mode already supports standalone setpoint writes.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._hvac_mode_to_backend
     Translate an HA HVAC mode to the backend string representation.
 custom_components/termoweb/climate.py :: HeaterClimateEntity.async_set_hvac_mode
@@ -1306,10 +1298,6 @@ custom_components/termoweb/climate.py :: AccumulatorClimateEntity.__init__
     Initialise the accumulator climate entity.
 custom_components/termoweb/climate.py :: AccumulatorClimateEntity._default_mode_for_setpoint
     Accumulators keep their current mode when updating setpoints.
-custom_components/termoweb/climate.py :: AccumulatorClimateEntity._requires_setpoint_with_mode
-    Boost does not rely on manual setpoint semantics.
-custom_components/termoweb/climate.py :: AccumulatorClimateEntity._allows_setpoint_in_mode
-    Accumulators accept setpoints without forcing a manual mode.
 custom_components/termoweb/climate.py :: AccumulatorClimateEntity._preferred_boost_minutes
     Return the configured boost duration in minutes.
 custom_components/termoweb/climate.py :: AccumulatorClimateEntity.hvac_modes
@@ -1334,14 +1322,10 @@ custom_components/termoweb/climate.py :: AccumulatorClimateEntity.async_cancel_b
     Cancel the active accumulator boost session.
 custom_components/termoweb/entity.py :: _build_boost_button_metadata
     Return the configured metadata describing boost helper buttons.
-custom_components/termoweb/entity.py :: HeaterPlatformDetails.nodes_by_type
-    Return nodes grouped by type from the immutable inventory.
 custom_components/termoweb/entity.py :: HeaterPlatformDetails.addrs_by_type
     Return heater addresses grouped by node type.
 custom_components/termoweb/entity.py :: HeaterPlatformDetails.addresses_for
     Return immutable heater addresses for ``node_type``.
-custom_components/termoweb/entity.py :: HeaterPlatformDetails.resolve_name
-    Resolve the friendly name for ``(node_type, addr)``.
 custom_components/termoweb/entity.py :: HeaterPlatformDetails.iter_metadata
     Yield heater metadata derived from the inventory.
 custom_components/termoweb/entity.py :: resolve_boost_runtime_minutes
@@ -1386,38 +1370,20 @@ custom_components/termoweb/entity.py :: heater_platform_details_for_entry
     Return heater platform metadata derived from ``runtime``.
 custom_components/termoweb/entity.py :: HeaterNodeBase.__init__
     Initialise a heater entity tied to a TermoWeb device.
-custom_components/termoweb/entity.py :: HeaterNodeBase.async_added_to_hass
-    Register coordinator listeners once the entity is added to hass.
-custom_components/termoweb/entity.py :: HeaterNodeBase.async_will_remove_from_hass
-    Detach coordinator listeners before the entity is removed.
 custom_components/termoweb/entity.py :: HeaterNodeBase.should_poll
     Home Assistant should not poll heater entities.
 custom_components/termoweb/entity.py :: HeaterNodeBase.available
     Return True when the last update succeeded and the node is in inventory.
 custom_components/termoweb/entity.py :: HeaterNodeBase._device_available
     Return True when the immutable inventory exposes this node.
-custom_components/termoweb/entity.py :: HeaterNodeBase._domain_state_view
-    Return the domain state view exposed by the coordinator.
 custom_components/termoweb/entity.py :: HeaterNodeBase._heater_state
     Return the current cached domain state.
 custom_components/termoweb/entity.py :: HeaterNodeBase.heater_state
     Return the typed heater state for this entity.
 custom_components/termoweb/entity.py :: HeaterNodeBase.accumulator_state
     Return the accumulator state when present.
-custom_components/termoweb/entity.py :: HeaterNodeBase.thermostat_state
-    Return the thermostat state when present.
-custom_components/termoweb/entity.py :: HeaterNodeBase.power_monitor_state
-    Return the power monitor state when present.
-custom_components/termoweb/entity.py :: HeaterNodeBase._resolve_inventory
-    Return the cached inventory for this entity, if available.
-custom_components/termoweb/entity.py :: HeaterNodeBase._heater_section
-    Return the heater-specific metadata cached for this entity.
 custom_components/termoweb/entity.py :: HeaterNodeBase._hass_for_runtime
     Return the best-effort Home Assistant instance for runtime access.
-custom_components/termoweb/entity.py :: HeaterNodeBase.hass
-    Return the Home Assistant instance, falling back to the coordinator.
-custom_components/termoweb/entity.py :: HeaterNodeBase.hass
-    Store the Home Assistant reference for runtime access.
 custom_components/termoweb/entity.py :: HeaterNodeBase.boost_state
     Return derived boost metadata for this heater.
 custom_components/termoweb/entity.py :: HeaterNodeBase._client
@@ -1454,10 +1420,8 @@ custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber._initial_
     Return the bootstrap value sourced from cached settings.
 custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber._apply_minutes
     Update the fallback minutes shown until the device reports boost_time.
-custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber._validate_minutes
-    Return a supported minute value, falling back to the default.
 custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber._hours_to_minutes
-    Translate a slider value in hours into whole minutes.
+    Return the supported boost minutes for ``value`` hours, else None.
 custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber.__init__
     Initialise the boost temperature slider for an accumulator.
 custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber.async_added_to_hass
@@ -1486,10 +1450,6 @@ custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber._apply
     Update the fallback temperature shown until the device reports one.
 custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber._validate_temperature
     Return a valid boost temperature within supported limits.
-custom_components/termoweb/sensor.py :: _looks_like_integer_string
-    Return True if the string looks like an integer number.
-custom_components/termoweb/sensor.py :: _normalise_energy_value
-    Try to coerce a raw energy reading into kWh.
 custom_components/termoweb/sensor.py :: _power_monitor_display_name
     Return the display name for a power monitor address.
 custom_components/termoweb/sensor.py :: async_setup_entry
@@ -1514,8 +1474,6 @@ custom_components/termoweb/sensor.py :: ThermostatBatterySensor.extra_state_attr
     Return additional thermostat battery metadata.
 custom_components/termoweb/sensor.py :: AccumulatorChargeSensorBase._raw_value
     Return the raw setting backing this accumulator charge sensor.
-custom_components/termoweb/sensor.py :: AccumulatorChargeSensorBase._coerce_value
-    Convert a raw accumulator charge setting into a Home Assistant state.
 custom_components/termoweb/sensor.py :: AccumulatorChargeSensorBase.native_value
     Return the processed accumulator charge metric.
 custom_components/termoweb/sensor.py :: AccumulatorChargeSensorBase.extra_state_attributes
@@ -1536,8 +1494,6 @@ custom_components/termoweb/sensor.py :: HeaterEnergyBase.native_value
     Return the processed metric value for Home Assistant.
 custom_components/termoweb/sensor.py :: HeaterEnergyBase.extra_state_attributes
     Return identifiers that locate the heater metric.
-custom_components/termoweb/sensor.py :: HeaterEnergyTotalSensor._coerce_native_value
-    Normalise the raw energy metric into kWh.
 custom_components/termoweb/sensor.py :: HeaterBoostMinutesRemainingSensor.__init__
     Initialise the boost duration helper sensor.
 custom_components/termoweb/sensor.py :: HeaterBoostMinutesRemainingSensor.native_value
@@ -1548,8 +1504,6 @@ custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.__init__
     Initialise the boost end timestamp sensor.
 custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.native_value
     Return the boost end timestamp.
-custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.state
-    Return the Home Assistant state value for the boost end sensor.
 custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.extra_state_attributes
     Return metadata about the boost session.
 custom_components/termoweb/sensor.py :: _create_heater_sensors
@@ -1558,8 +1512,6 @@ custom_components/termoweb/sensor.py :: _create_boost_sensors
     Create the boost-related sensors for a heater node.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase.__init__
     Initialise the power monitor sensor base entity.
-custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._resolve_inventory
-    Return the immutable inventory backing this sensor.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._metric_entry
     Return the energy metrics for this power monitor from the domain view.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._coerce_native_value
@@ -1574,8 +1526,6 @@ custom_components/termoweb/sensor.py :: PowerMonitorSensorBase.extra_state_attri
     Return identifiers for the power monitor metric.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase.device_info
     Return the Home Assistant device metadata for the power monitor.
-custom_components/termoweb/sensor.py :: PowerMonitorEnergySensor._coerce_native_value
-    Normalise the raw energy metric into kWh.
 custom_components/termoweb/sensor.py :: InstallationTotalEnergySensor.__init__
     Initialise the installation-wide energy sensor.
 custom_components/termoweb/sensor.py :: InstallationTotalEnergySensor.device_info
@@ -1616,8 +1566,6 @@ custom_components/termoweb/identifiers.py :: is_canonical_unique_id
     Return True when ``unique_id`` has the shape of the one scheme above.
 custom_components/termoweb/identifiers.py :: migrate_unique_id
     Return the canonical ID for an older ``domain`` entity ID, else None.
-custom_components/termoweb/identifiers.py :: thermostat_fallback_name
-    Return the fallback friendly name for a thermostat node.
 custom_components/termoweb/identifiers.py :: build_cloud_unique_id
     Return a cloud entry's unique ID: the case-folded account, backend-scoped.
 custom_components/termoweb/inventory.py :: _default_heater_name

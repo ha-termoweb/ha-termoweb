@@ -1,4 +1,4 @@
-# ruff: noqa: D100,BLE001
+# ruff: noqa: D100
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .backend.base import BoostContext
-from .backend.sanitize import mask_identifier, redact_text
+from .backend.sanitize import redact_text
 from .boost import (
     ALLOWED_BOOST_MINUTES,
     ALLOWED_BOOST_MINUTES_MESSAGE,
@@ -44,26 +44,14 @@ from .entity import (
     resolve_acm_boost_setpoint,
     resolve_boost_runtime_minutes,
 )
-from .identifiers import build_heater_unique_id, thermostat_fallback_name
+from .identifiers import build_heater_unique_id
 from .inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
 from .runtime import require_runtime
 
 _LOGGER = logging.getLogger(__name__)
-_CANCELLED_ERROR = asyncio.CancelledError
 
 # Shared boost-duration validator: 60-600 minutes in steps of 60.
 BOOST_MINUTES_VALIDATOR = vol.All(vol.Coerce(int), vol.In(ALLOWED_BOOST_MINUTES))
-
-
-def _is_cancelled_error(err: BaseException) -> bool:
-    """Return ``True`` when ``err`` represents a cancellation."""
-
-    if isinstance(err, _CANCELLED_ERROR):
-        return True
-    cancelled_type = asyncio.CancelledError
-    if cancelled_type is not ValueError and isinstance(err, cancelled_type):
-        return True
-    return False
 
 
 # Small debounce so multiple UI events coalesce
@@ -77,12 +65,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     dev_id = runtime.dev_id
 
     inventory = runtime.inventory
-    if not isinstance(inventory, Inventory):
-        _LOGGER.error(
-            "TermoWeb climate setup missing inventory for device %s",
-            mask_identifier(dev_id),
-        )
-        raise TypeError("TermoWeb inventory unavailable for climate platform")
 
     def default_name_simple(addr: str) -> str:
         """Return fallback name for heater nodes."""
@@ -115,12 +97,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
             default=fallback_addr,
             use_default_when_falsey=True,
         )
-        if not canonical_type or not addr:
-            continue
-        if canonical_type == "thm":
-            heater_fallback = default_name_simple(addr)
-            if base_name == heater_fallback:
-                base_name = thermostat_fallback_name(addr)
         unique_id = build_heater_unique_id(
             dev_id,
             canonical_type,
@@ -371,58 +347,13 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         if not isinstance(prog, list) or len(prog) < 168:
             return None
         now = dt_util.now()
-        idx = now.weekday() * 24 + now.hour
-        try:
-            return int(prog[idx])
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            return None
+        return int(prog[now.weekday() * 24 + now.hour])
 
-    def _shared_inventory(self) -> Inventory | None:
-        """Return the shared immutable inventory for this coordinator."""
-
-        coordinator = getattr(self, "coordinator", None)
-        if coordinator is None:
-            return None
-        for attr in ("inventory", "_inventory"):
-            candidate = getattr(coordinator, attr, None)
-            if isinstance(candidate, Inventory):
-                return candidate
-        return None
-
-    def _optimistic_update(self, mutator: Callable[[DomainState], None]) -> bool:
+    def _optimistic_update(self, mutator: Callable[[DomainState], None]) -> None:
         """Apply ``mutator`` to cached state and write the entity state."""
 
-        try:
-            coordinator = getattr(self, "coordinator", None)
-            apply_patch = getattr(coordinator, "apply_entity_patch", None)
-            updated = False
-            if callable(apply_patch):
-                updated = bool(apply_patch(self._node_type, self._addr, mutator))
-            if updated:
-                self.async_write_ha_state()
-            data_obj = getattr(self.coordinator, "data", None)
-            if not isinstance(data_obj, dict):
-                _LOGGER.debug(
-                    "Optimistic update failed type=%s addr=%s: unexpected coordinator data %s",
-                    self._node_type,
-                    self._addr,
-                    type(data_obj).__name__,
-                )
-                return False
-        except BaseException as err:  # pragma: no cover - defensive
-            if _is_cancelled_error(err):
-                raise
-            _LOGGER.debug(
-                "Optimistic update failed type=%s addr=%s: %s",
-                self._node_type,
-                self._addr,
-                err,
-            )
-            return False
-        else:
-            return updated
+        if self.coordinator.apply_entity_patch(self._node_type, self._addr, mutator):
+            self.async_write_ha_state()
 
     async def _async_write_settings(
         self,
@@ -597,13 +528,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             label = self._slot_label(slot)
             attrs["program_slot"] = label
             ptemp = getattr(state, "ptemp", None)
-            try:
-                if isinstance(ptemp, (list, tuple)) and 0 <= slot < len(ptemp):
-                    attrs["program_setpoint"] = as_float(ptemp[slot])
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                pass
+            if isinstance(ptemp, (list, tuple)) and 0 <= slot < len(ptemp):
+                attrs["program_setpoint"] = as_float(ptemp[slot])
 
         return attrs
 
@@ -614,7 +540,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         log_context: str,
         write_kwargs: Mapping[str, typing.Any],
         apply_fn: Callable[[DomainState], None],
-        success_details: Mapping[str, typing.Any] | None = None,
+        success_details: Mapping[str, typing.Any],
     ) -> None:
         """Submit a heater write, update cached state, and schedule fallback."""
         await self._async_write_settings(
@@ -622,18 +548,12 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             **dict(write_kwargs),
         )
 
-        detail_suffix = ""
-        if success_details:
-            parts = [f"{key}={value}" for key, value in success_details.items()]
-            if parts:
-                detail_suffix = f" ({', '.join(parts)})"
-
         _LOGGER.debug(
-            "%s OK type=%s addr=%s%s",
+            "%s OK type=%s addr=%s (%s)",
             log_context,
             self._node_type,
             self._addr,
-            detail_suffix,
+            ", ".join(f"{key}={value}" for key, value in success_details.items()),
         )
 
         self._optimistic_update(apply_fn)
@@ -652,8 +572,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             raise ServiceValidationError("prog values must be 0, 1 or 2")
 
         def _apply(cur: DomainState) -> None:
-            if hasattr(cur, "prog"):
-                cur.prog = list(prog2)
+            cur.prog = list(prog2)
 
         await self._commit_write(
             log_context="Schedule write",
@@ -692,8 +611,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             raise ServiceValidationError(f"Invalid preset temperatures: {err}") from err
 
         def _apply(cur: DomainState) -> None:
-            if hasattr(cur, "ptemp"):
-                cur.ptemp = [f"{t:.1f}" if isinstance(t, float) else t for t in p2]
+            cur.ptemp = [f"{t:.1f}" for t in p2]
 
         await self._commit_write(
             log_context="Preset write",
@@ -735,16 +653,6 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
         return HVACMode.HEAT
 
-    def _requires_setpoint_with_mode(self, hvac_mode: HVACMode | str) -> bool:
-        """Return whether the backend needs a target temperature for the mode."""
-
-        return hvac_mode == HVACMode.HEAT
-
-    def _allows_setpoint_in_mode(self, hvac_mode: HVACMode | str) -> bool:
-        """Return whether a mode already supports standalone setpoint writes."""
-
-        return hvac_mode in {HVACMode.HEAT, "modified_auto"}
-
     def _hvac_mode_to_backend(self, hvac_mode: HVACMode | str) -> str:
         """Translate an HA HVAC mode to the backend string representation."""
 
@@ -767,6 +675,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             if self.hvac_mode in self._resume_modes:
                 self._resume_mode = self.hvac_mode
             self._pending_mode = HVACMode.OFF
+            # The latest choice wins: drop a setpoint still waiting in the batch.
+            self._pending_stemp = None
             _LOGGER.debug(
                 "Queue write: addr=%s mode=%s (batching %.1fs)",
                 self._addr,
@@ -778,6 +688,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
         if hvac_mode_norm == HVACMode.AUTO:
             self._pending_mode = HVACMode.AUTO
+            self._pending_stemp = None
             _LOGGER.debug(
                 "Queue write: addr=%s mode=%s (batching %.1fs)",
                 self._addr,
@@ -829,29 +740,9 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         self._pending_mode = None
         self._pending_stemp = None
 
-        # Normalize to backend rules using subclass hooks so accumulators can
-        # avoid forcing an unsupported manual mode.
-        if stemp is not None:
-            if mode is None:
-                default_mode = self._default_mode_for_setpoint()
-                if default_mode is not None:
-                    mode = default_mode
-            elif not self._allows_setpoint_in_mode(mode):
-                fallback_mode = self._default_mode_for_setpoint()
-                if fallback_mode is not None:
-                    mode = fallback_mode
-        if (
-            mode is not None
-            and stemp is None
-            and self._requires_setpoint_with_mode(mode)
-        ):
-            current = self.target_temperature
-            if current is not None:
-                stemp = float(current)
-
-        if mode is None and stemp is None:
-            return
-
+        # The service handlers queue a consistent pair: a setpoint comes with
+        # Heat/modified_auto on heaters and keeps the mode on accumulators,
+        # Heat brings the current setpoint, and Off/Auto drop a queued one.
         mode_api = None
         if mode is not None:
             mode_api = self._hvac_mode_to_backend(mode)
@@ -875,38 +766,18 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             _LOGGER.error("%s", redact_text(str(err)))
             return
 
-        register_pending = getattr(self.coordinator, "register_pending_setting", None)
-        if callable(register_pending):
-            try:
-                register_pending(
-                    self._node_type,
-                    self._addr,
-                    mode=mode_api,
-                    stemp=as_float(stemp),
-                )
-            except Exception as err:  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "Failed to register pending settings type=%s addr=%s: %s",
-                    self._node_type,
-                    self._addr,
-                    err,
-                    exc_info=err,
-                )
+        self.coordinator.register_pending_setting(
+            self._node_type,
+            self._addr,
+            mode=mode_api,
+            stemp=stemp,
+        )
 
         def _apply(cur: DomainState) -> None:
-            if mode_api is not None and hasattr(cur, "mode"):
+            if mode_api is not None:
                 cur.mode = mode_api
-            if stemp is not None and hasattr(cur, "stemp"):
-                stemp_str: Any = stemp
-                try:
-                    stemp_float = float(stemp)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    pass
-                else:
-                    stemp_str = f"{stemp_float:.1f}"
-                cur.stemp = stemp_str
+            if stemp is not None:
+                cur.stemp = f"{stemp:.1f}"
 
         self._optimistic_update(_apply)
         _LOGGER.debug(
@@ -958,16 +829,6 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         """Accumulators keep their current mode when updating setpoints."""
 
         return None
-
-    def _requires_setpoint_with_mode(self, hvac_mode: HVACMode | str) -> bool:
-        """Boost does not rely on manual setpoint semantics."""
-
-        return False
-
-    def _allows_setpoint_in_mode(self, hvac_mode: HVACMode | str) -> bool:
-        """Accumulators accept setpoints without forcing a manual mode."""
-
-        return True
 
     def _preferred_boost_minutes(self) -> int:
         """Return the configured boost duration in minutes."""
@@ -1064,10 +925,8 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         attrs["preferred_boost_minutes"] = self._preferred_boost_minutes()
 
         charging = getattr(state, "charging", None)
-        if isinstance(charging, bool):
+        if charging is not None:
             attrs["charging"] = charging
-        elif charging is not None:
-            attrs["charging"] = bool(charging)
 
         for key in ("current_charge_per", "target_charge_per"):
             value = getattr(state, key, None) if state is not None else None
@@ -1128,10 +987,10 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         await self._async_client_call(log_context="Boost preset write", call=_call)
 
         def _apply(cur: DomainState) -> None:
-            if validated_minutes is not None and hasattr(cur, "boost_time"):
+            if validated_minutes is not None:
                 cur.boost_time = validated_minutes
-            if temp_value is not None and hasattr(cur, "boost_temp"):
-                cur.boost_temp = f"{float(temp_value):.1f}"
+            if temp_value is not None:
+                cur.boost_temp = f"{temp_value:.1f}"
 
         self._optimistic_update(_apply)
         detail_parts = []
@@ -1174,12 +1033,9 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         await self._async_client_call(log_context="Boost start", call=_call)
 
         def _apply(cur: DomainState) -> None:
-            if hasattr(cur, "boost_active"):
-                cur.boost_active = True
-            if hasattr(cur, "boost_remaining"):
-                cur.boost_remaining = validated_minutes
-            if hasattr(cur, "mode"):
-                cur.mode = "boost"
+            cur.boost_active = True
+            cur.boost_remaining = validated_minutes
+            cur.mode = "boost"
 
         self._optimistic_update(_apply)
         _LOGGER.debug(
@@ -1199,15 +1055,11 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         await self._async_client_call(log_context="Boost cancel", call=_call)
 
         def _apply(cur: DomainState) -> None:
-            if hasattr(cur, "boost_active"):
-                cur.boost_active = False
-            if hasattr(cur, "boost_remaining"):
-                cur.boost_remaining = None
-            if hasattr(cur, "boost_end_day"):
-                cur.boost_end_day = None
-            if hasattr(cur, "boost_end_min"):
-                cur.boost_end_min = None
-            if getattr(cur, "mode", None) == "boost":
+            cur.boost_active = False
+            cur.boost_remaining = None
+            cur.boost_end_day = None
+            cur.boost_end_min = None
+            if cur.mode == "boost":
                 cur.mode = "auto"
 
         self._optimistic_update(_apply)
@@ -1228,32 +1080,10 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         ptemp: list[float] | None,
         units: str,
     ) -> None:
-        boost_context: BoostContext | None = None
-
-        if self._node_type == "acm":
-            boost_state = None
-            try:
-                boost_state = self.boost_state()
-            except Exception as err:  # defensive
-                _LOGGER.debug(
-                    "Failed to derive boost state for cancel heuristic addr=%s: %s",
-                    self._addr,
-                    err,
-                    exc_info=err,
-                )
-            state = self.accumulator_state()
-            mode_value: str | None = None
-            if state is not None:
-                boost_flag = getattr(state, "boost_active", None)
-                if not isinstance(boost_flag, bool):
-                    boost_flag = None
-                mode_value = getattr(state, "mode", None)
-                if not isinstance(mode_value, str):
-                    mode_value = None
-            boost_context = BoostContext(
-                active=boost_state.active if boost_state is not None else None,
-                mode=mode_value,
-            )
+        boost_context = BoostContext(
+            active=self.boost_state().active,
+            mode=getattr(self.accumulator_state(), "mode", None),
+        )
 
         await backend.set_node_settings(
             self._dev_id,
