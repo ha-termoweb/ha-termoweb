@@ -373,6 +373,9 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Clean up pending tasks when the entity is removed."""
+        if self._write_task:
+            self._write_task.cancel()
+            self._write_task = None
         if self._refresh_fallback:
             self._refresh_fallback.cancel()
             self._refresh_fallback = None
@@ -882,14 +885,21 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         """Schedule a debounced write task if one is not running."""
         if self._write_task and not self._write_task.done():
             return
-        self._write_task = asyncio.create_task(
+        self._write_task = self.hass.async_create_background_task(
             self._write_after_debounce(),
-            name=f"termoweb-write-{self._dev_id}-{self._addr}",
+            f"termoweb-write-{self._dev_id}-{self._addr}",
         )
 
     async def _write_after_debounce(self) -> None:
-        """Batch pending mode/setpoint writes after the debounce interval."""
-        await asyncio.sleep(_WRITE_DEBOUNCE)
+        """Flush pending writes after the debounce, repeating while new ones queue."""
+        while True:
+            await asyncio.sleep(_WRITE_DEBOUNCE)
+            await self._async_flush_pending_write()
+            if self._pending_mode is None and self._pending_stemp is None:
+                return
+
+    async def _async_flush_pending_write(self) -> None:
+        """Send the currently pending mode/setpoint as one backend write."""
         mode = self._pending_mode
         stemp = self._pending_stemp
         self._pending_mode = None

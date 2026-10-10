@@ -1401,7 +1401,9 @@ custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.async_set_
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._ensure_write_task
     Schedule a debounced write task if one is not running.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._write_after_debounce
-    Batch pending mode/setpoint writes after the debounce interval.
+    Flush pending writes after the debounce, repeating while new ones queue.
+custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._async_flush_pending_write
+    Send the currently pending mode/setpoint as one backend write.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._schedule_refresh_fallback
     Schedule a refresh if the websocket echo does not arrive.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._schedule_refresh_fallback._fallback
