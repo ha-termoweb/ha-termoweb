@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 from .dialect import Dialect, Frame, build_frame, decode
+from .survey import RawBurst, parse_run_tokens
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +36,9 @@ MIN_COMMAND_GAP_S = 0.04
 RETRY_COUNT = 3
 RETRY_INTERVAL_S = 0.16
 DEFAULT_REPLY_TIMEOUT_S = 0.3
+SURVEY_OFF = "# survey off"
+SURVEY_GRACE_S = 10.0  # extra wait for the gateway's "survey off" line
+MAX_SURVEY_S = 3600
 
 OpenConnection = Callable[..., Awaitable[tuple[Any, Any]]]
 Sleep = Callable[[float], Awaitable[Any]]
@@ -174,6 +178,9 @@ class RadioLink:
         self._sleep = sleep
         self._open_connection = open_connection
         self._on_disconnect = on_disconnect
+        self._survey: dict[int, tuple[float | None, list[tuple[int, int]]]] | None = (
+            None
+        )
         self._missed_confirms = 0
         self._reader: Any = None
         self._writer: Any = None
@@ -467,9 +474,49 @@ class RadioLink:
             except Exception:
                 _LOGGER.exception("Radio disconnect callback failed")
 
+    async def survey(self, seconds: int) -> list[RawBurst]:
+        """Run the gateway's raw survey (``R<seconds>``) and return every burst heard.
+
+        The gateway switches its radio to raw capture, reports each RF burst as
+        ``RAWB``/``RAW``/``RAWE`` lines and then returns to normal reception. A
+        burst without its ``RAWE`` line (lost in transit) is still returned.
+        """
+        if not 1 <= seconds <= MAX_SURVEY_S:
+            raise ValueError(f"survey length must be 1-{MAX_SURVEY_S} s")
+        self._survey = {}
+        done = self._add_line_waiter(lambda line: line.startswith(SURVEY_OFF))
+        try:
+            await self._send_command(f"R{int(seconds)}")
+            if await self._wait(done, seconds + SURVEY_GRACE_S) is None:
+                _LOGGER.debug("Radio survey ended without a 'survey off' line")
+            collected = self._survey
+        finally:
+            self._survey = None
+            self._drop_waiter(done)
+        return [
+            RawBurst(rssi, tuple(runs))
+            for _number, (rssi, runs) in sorted(collected.items())
+        ]
+
+    def _collect_survey(self, line: str) -> None:
+        """Add one ``RAWB``/``RAW``/``RAWE`` line to the running survey."""
+        survey = self._survey
+        parts = line.split()
+        if survey is None or len(parts) < 2 or not parts[1].isdigit():
+            return
+        number = int(parts[1])
+        if parts[0] == "RAWB":
+            rssi = _float_or_none(parts[2]) if len(parts) > 2 else None
+            survey[number] = (rssi, [])
+        elif parts[0] == "RAW":
+            survey.setdefault(number, (None, []))[1].extend(parse_run_tokens(parts[2:]))
+
     def _dispatch(self, line: str) -> None:
         """Route one gateway line to waiters and listeners."""
         _LOGGER.debug("Gateway -> %s", line)
+        if line.startswith(("RAWB ", "RAW ", "RAWE ")):
+            self._collect_survey(line)  # raw survey data never reaches RX handling
+            return
         if line.startswith("RX "):
             parsed = parse_rx_line(line)
             if parsed is None:

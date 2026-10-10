@@ -96,6 +96,7 @@ class FakeGateway:
         self.opened: list[tuple[str, int]] = []
         self.open_error: Exception | None = None
         self.micros = 1000
+        self.survey_lines: list[str] = []  # fed in answer to an R<seconds> command
         self.silent = False  # True: T lines get no TX confirmation (powered off)
 
     async def open_connection(self, host: str, port: int):
@@ -119,6 +120,9 @@ class FakeGateway:
                 self.feed(self.q_line)
             elif line[:1] in ("Y", "N"):
                 self.feed(f"# {line} ok")
+            elif line[:1] == "R" and line[1:].isdigit():
+                for survey_line in self.survey_lines:
+                    self.feed(survey_line)
             elif line.startswith("T"):
                 if self.silent:
                     continue

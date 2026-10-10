@@ -1911,6 +1911,60 @@ custom_components/termoweb/backend/radio/dialect.py :: _network_id
     Return a validated two-byte network id, defaulting to the dialect's own.
 custom_components/termoweb/backend/radio/dialect.py :: detect_dialect
     Return the first dialect under which ``air`` has a valid length and CRC.
+custom_components/termoweb/backend/radio/survey.py :: CrcSpec.register_after
+    Return the register after each prefix of ``data`` (index = bytes fed).
+custom_components/termoweb/backend/radio/survey.py :: CrcSpec.finish
+    Return the CRC value for a register state.
+custom_components/termoweb/backend/radio/survey.py :: CrcSpec.compute
+    Return the CRC of ``data``.
+custom_components/termoweb/backend/radio/survey.py :: _reflect16
+    Return ``value`` with its 16 bits in reverse order.
+custom_components/termoweb/backend/radio/survey.py :: _make_table
+    Return the byte-wise lookup table for a CRC-16 polynomial.
+custom_components/termoweb/backend/radio/survey.py :: _spec
+    Return a CRC spec with its lookup table built.
+custom_components/termoweb/backend/radio/survey.py :: merge_runs
+    Join consecutive runs of the same level and drop empty ones.
+custom_components/termoweb/backend/radio/survey.py :: find_preambles
+    Return every stretch of one-bit runs with steady pair sums, longest first.
+custom_components/termoweb/backend/radio/survey.py :: find_preamble
+    Return the longest preamble-like stretch, or None.
+custom_components/termoweb/backend/radio/survey.py :: _preamble
+    Return the timing a preamble window implies.
+custom_components/termoweb/backend/radio/survey.py :: runs_to_bits
+    Return the bits from the preamble on, stopping at the first idle gap.
+custom_components/termoweb/backend/radio/survey.py :: bits_to_bytes
+    Pack whole bytes MSB first, at most ``limit`` of them.
+custom_components/termoweb/backend/radio/survey.py :: _invert
+    Return ``bits`` with every bit flipped.
+custom_components/termoweb/backend/radio/survey.py :: _sync_bits
+    Return a sync word as a bit string.
+custom_components/termoweb/backend/radio/survey.py :: preamble_break
+    Return the index of the first bit equal to its predecessor (preamble end).
+custom_components/termoweb/backend/radio/survey.py :: _decode_known
+    Return (dialect, inverted, logical frame, sync end) for a known dialect.
+custom_components/termoweb/backend/radio/survey.py :: _search
+    Return every framing whose CRC validates on this bit stream.
+custom_components/termoweb/backend/radio/survey.py :: analyse_burst
+    Decode one burst with the known dialects, else search its framing.
+custom_components/termoweb/backend/radio/survey.py :: Candidate.suggestion
+    Return a ``Dialect(...)`` definition to paste into dialect.py.
+custom_components/termoweb/backend/radio/survey.py :: SurveyReport.as_dict
+    Return the report as JSON-able data.
+custom_components/termoweb/backend/radio/survey.py :: _network_id
+    Return bytes 1-2 of a logical frame as hex (the shared layout's network id).
+custom_components/termoweb/backend/radio/survey.py :: analyse
+    Analyse a survey: known dialects first, then framings bursts agree on.
+custom_components/termoweb/backend/radio/survey.py :: _with_framing
+    Return ``result`` decoded with ``framing`` when that framing fits it.
+custom_components/termoweb/backend/radio/survey.py :: _frame_for
+    Re-extract the logical frame bytes a framing found.
+custom_components/termoweb/backend/radio/survey.py :: redact
+    Mask network ids and drop identity-reply payloads before sharing a report.
+custom_components/termoweb/backend/radio/survey.py :: _mask
+    Zero the network id bytes and cut an identity reply's payload.
+custom_components/termoweb/backend/radio/survey.py :: parse_run_tokens
+    Parse ``+118 -92`` run tokens into ``(level, micros)``; skip bad tokens.
 custom_components/termoweb/backend/radio/protocol.py :: _half_degrees
     Return ``celsius`` in half degrees, the wire unit for temperatures.
 custom_components/termoweb/backend/radio/protocol.py :: _check_setpoint
@@ -2025,6 +2079,10 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink._send_command
     Write one command line, keeping at least MIN_COMMAND_GAP_S between commands.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._read_loop
     Read gateway lines until EOF or error, dispatching each one.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.survey
+    Run the gateway's raw survey (``R<seconds>``) and return every burst heard.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._collect_survey
+    Add one ``RAWB``/``RAW``/``RAWE`` line to the running survey.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._dispatch
     Route one gateway line to waiters and listeners.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._resolve
