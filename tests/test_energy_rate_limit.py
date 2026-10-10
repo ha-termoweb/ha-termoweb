@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import types
 
 import pytest
 
@@ -14,8 +13,10 @@ from custom_components.termoweb.throttle import (
 )
 
 
-def test_default_samples_rate_limit_state_round_trip() -> None:
-    """Shared rate limiter should reuse the same lock and manage timestamps."""
+def test_default_samples_rate_limit_state_round_trip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shared rate limiter is reused, throttles calls and can be reset."""
 
     current = 0.4
 
@@ -29,61 +30,25 @@ def test_default_samples_rate_limit_state_round_trip() -> None:
         sleep_calls.append(delay)
         current += delay
 
-    time_module = types.SimpleNamespace(monotonic=fake_monotonic)
-
-    reset_samples_rate_limit_state(time_module=time_module, sleep=fake_sleep)
-
     limiter = default_samples_rate_limit_state()
     assert isinstance(limiter, MonotonicRateLimiter)
     assert isinstance(limiter.lock, asyncio.Lock)
+    assert default_samples_rate_limit_state() is limiter
 
-    same_limiter = default_samples_rate_limit_state()
-    assert limiter is same_limiter
+    monkeypatch.setattr(limiter, "monotonic", fake_monotonic)
+    monkeypatch.setattr(limiter, "sleep", fake_sleep)
+    reset_samples_rate_limit_state()
 
     asyncio.run(limiter.async_throttle())
     assert sleep_calls == [pytest.approx(0.6)]
-    assert limiter.last_timestamp() == pytest.approx(1.0)
 
     current = 1.8
     asyncio.run(limiter.async_throttle())
     assert sleep_calls == [pytest.approx(0.6), pytest.approx(0.2)]
-    assert limiter.last_timestamp() == pytest.approx(2.0)
 
     reset_samples_rate_limit_state()
-    assert limiter.last_timestamp() == 0.0
-
-
-def test_default_samples_rate_limit_state_overrides_time_and_sleep() -> None:
-    """Existing limiter should accept new monotonic and sleep callables."""
-
-    limiter = default_samples_rate_limit_state()
-
-    current = 3.2
-    monotonic_calls: list[float] = []
-
-    def new_monotonic() -> float:
-        monotonic_calls.append(current)
-        return current
-
-    sleep_calls: list[float] = []
-
-    async def new_sleep(delay: float) -> None:
-        sleep_calls.append(delay)
-
-    new_time = types.SimpleNamespace(monotonic=new_monotonic)
-
-    reset_samples_rate_limit_state(time_module=new_time, sleep=new_sleep)
-
-    updated = default_samples_rate_limit_state(time_module=new_time, sleep=new_sleep)
-
-    assert updated is limiter
-    assert updated.monotonic is new_monotonic
-    assert updated.sleep is new_sleep
-
-    asyncio.run(updated.async_throttle())
-
-    assert monotonic_calls == [pytest.approx(current)]
-    assert not sleep_calls
+    asyncio.run(limiter.async_throttle())
+    assert sleep_calls == [pytest.approx(0.6), pytest.approx(0.2)]
 
     reset_samples_rate_limit_state()
 
@@ -118,31 +83,3 @@ def test_async_throttle_invokes_on_wait_callback() -> None:
     assert result == pytest.approx(0.8)
     assert on_wait_calls == [pytest.approx(0.8)]
     assert sleep_calls == [pytest.approx(0.8)]
-
-
-def test_set_last_timestamp_short_circuits_future_sleep() -> None:
-    """Future timestamp override should bypass sleeping and update state."""
-
-    def fake_monotonic() -> float:
-        return 15.0
-
-    sleep_calls: list[float] = []
-
-    async def fake_sleep(delay: float) -> None:
-        sleep_calls.append(delay)
-
-    limiter = MonotonicRateLimiter(
-        lock=asyncio.Lock(),
-        monotonic=fake_monotonic,
-        sleep=fake_sleep,
-        min_interval=1.0,
-    )
-
-    limiter.set_last_timestamp(10.0)
-    assert limiter.last_timestamp() == pytest.approx(10.0)
-
-    result = asyncio.run(limiter.async_throttle())
-
-    assert result == pytest.approx(0.0)
-    assert not sleep_calls
-    assert limiter.last_timestamp() == pytest.approx(15.0)

@@ -43,58 +43,26 @@ class MonotonicRateLimiter:
 
         self._last_monotonic = 0.0
 
-    def last_timestamp(self) -> float:
-        """Return the timestamp of the most recent throttled call."""
-
-        return self._last_monotonic
-
-    def set_last_timestamp(self, value: float) -> None:
-        """Update the stored timestamp for the last throttled call."""
-
-        self._last_monotonic = value
-
 
 _SAMPLES_RATE_LIMITER: MonotonicRateLimiter | None = None
 _SAMPLES_INTERVAL = 1.0
 
 
-def _new_samples_rate_limiter(
-    *, time_module: Any | None = None, sleep: SleepCallable | None = None
-) -> MonotonicRateLimiter:
-    """Return a freshly constructed rate limiter for heater samples."""
-
-    time_mod = time_module or time
-    return MonotonicRateLimiter(
-        lock=asyncio.Lock(),
-        monotonic=time_mod.monotonic,
-        sleep=sleep or asyncio.sleep,
-        min_interval=_SAMPLES_INTERVAL,
-    )
-
-
-def default_samples_rate_limit_state(
-    *, time_module: Any | None = None, sleep: SleepCallable | None = None
-) -> MonotonicRateLimiter:
+def default_samples_rate_limit_state() -> MonotonicRateLimiter:
     """Return the shared rate limiter for heater samples requests."""
 
     global _SAMPLES_RATE_LIMITER  # noqa: PLW0603
     if _SAMPLES_RATE_LIMITER is None:
-        _SAMPLES_RATE_LIMITER = _new_samples_rate_limiter(
-            time_module=time_module,
-            sleep=sleep,
+        _SAMPLES_RATE_LIMITER = MonotonicRateLimiter(
+            lock=asyncio.Lock(),
+            monotonic=time.monotonic,
+            sleep=asyncio.sleep,
+            min_interval=_SAMPLES_INTERVAL,
         )
-    else:
-        if time_module is not None:
-            _SAMPLES_RATE_LIMITER.monotonic = time_module.monotonic
-        if sleep is not None:
-            _SAMPLES_RATE_LIMITER.sleep = sleep
     return _SAMPLES_RATE_LIMITER
 
 
-def reset_samples_rate_limit_state(
-    *, time_module: Any | None = None, sleep: SleepCallable | None = None
-) -> None:
+def reset_samples_rate_limit_state() -> None:
     """Reset the shared samples rate limiter to its initial state."""
 
-    limiter = default_samples_rate_limit_state(time_module=time_module, sleep=sleep)
-    limiter.reset()
+    default_samples_rate_limit_state().reset()

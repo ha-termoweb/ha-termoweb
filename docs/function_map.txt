@@ -122,10 +122,6 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_
     Return a normalised thermostat settings mapping.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_thm_settings._to_float
     Return ``value`` coerced to float when possible.
-custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_prog
-    Convert vendor programme payloads into a 168-slot list.
-custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_prog._coerce_slots
-    Convert a day's slots into a 24-value list.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_prog_temps
     Convert preset temperature payloads into stringified list.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._set_acm_settings
@@ -152,8 +148,6 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._serialise_
     Serialise the 168-slot programme back to API structure.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._serialise_prog_temps
     Serialise preset temperatures into the API schema.
-custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._safe_temperature
-    Defensively format inbound temperature values.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend._should_cancel_boost
     Return True when accumulator updates should cancel boost.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.set_node_settings
@@ -316,14 +310,8 @@ custom_components/termoweb/backend/rest_client.py :: RESTClient._request
     Perform an HTTP request.
 custom_components/termoweb/backend/rest_client.py :: RESTClient._ensure_token
     Ensure a bearer token is present; fetch if missing.
-custom_components/termoweb/backend/rest_client.py :: RESTClient.user_agent
-    Return the configured User-Agent string.
-custom_components/termoweb/backend/rest_client.py :: RESTClient.requested_with
-    Return the configured X-Requested-With header.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.authed_headers
     Return HTTP headers including a valid bearer token.
-custom_components/termoweb/backend/rest_client.py :: RESTClient.refresh_token
-    Refresh the cached bearer token immediately.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.list_devices
     Return normalized device list: [{'dev_id', ...}, ...].
 custom_components/termoweb/backend/rest_client.py :: RESTClient.get_nodes
@@ -652,8 +640,6 @@ custom_components/termoweb/codecs/ducaheat_codec.py :: encode_boost_command
     Encode accumulator boost commands for the boost endpoint.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_lock_command
     Encode a SetLock command for the lock endpoint.
-custom_components/termoweb/codecs/ducaheat_codec.py :: infer_status_endpoint
-    Return the segmented endpoint name for a status-like command.
 custom_components/termoweb/codecs/ducaheat_models.py :: _validate_prog_slots
     Validate a daily program segment containing 24 integers.
 custom_components/termoweb/codecs/ducaheat_models.py :: _normalise_prog
@@ -958,8 +944,6 @@ custom_components/termoweb/const.py :: get_brand_user_agent
     Return the preferred User-Agent string for the brand.
 custom_components/termoweb/const.py :: get_brand_requested_with
     Return the X-Requested-With header value for the brand.
-custom_components/termoweb/const.py :: get_brand_socketio_path
-    Return the Socket.IO path for the selected brand.
 custom_components/termoweb/const.py :: uses_ducaheat_backend
     Return True when the brand maps to the Ducaheat backend.
 custom_components/termoweb/const.py :: signal_ws_status
@@ -1970,12 +1954,6 @@ custom_components/termoweb/throttle.py :: MonotonicRateLimiter.async_throttle
     Sleep if required to honour ``min_interval`` seconds between calls.
 custom_components/termoweb/throttle.py :: MonotonicRateLimiter.reset
     Reset the stored timestamp so the next call executes immediately.
-custom_components/termoweb/throttle.py :: MonotonicRateLimiter.last_timestamp
-    Return the timestamp of the most recent throttled call.
-custom_components/termoweb/throttle.py :: MonotonicRateLimiter.set_last_timestamp
-    Update the stored timestamp for the last throttled call.
-custom_components/termoweb/throttle.py :: _new_samples_rate_limiter
-    Return a freshly constructed rate limiter for heater samples.
 custom_components/termoweb/throttle.py :: default_samples_rate_limit_state
     Return the shared rate limiter for heater samples requests.
 custom_components/termoweb/throttle.py :: reset_samples_rate_limit_state

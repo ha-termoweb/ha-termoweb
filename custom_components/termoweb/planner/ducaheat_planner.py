@@ -38,10 +38,8 @@ from custom_components.termoweb.domain.ids import NodeId, NodeType
 class PlannedHttpCall:
     """HTTP call blueprint for segmented Ducaheat writes."""
 
-    method: str
     path: str
     json: dict[str, Any] | None
-    requires_token: bool = True
 
 
 def plan_command(
@@ -116,7 +114,7 @@ def _build_write_call(
         msg = f"Unsupported command type: {type(command).__name__}"
         raise TypeError(msg)
 
-    return PlannedHttpCall("POST", path, payload)
+    return PlannedHttpCall(path, payload)
 
 
 def _ensure_accumulator(*, node_id: NodeId, command: AccumulatorCommand) -> None:

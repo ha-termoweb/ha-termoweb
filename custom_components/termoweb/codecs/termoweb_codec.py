@@ -27,7 +27,6 @@ from custom_components.termoweb.domain.commands import (
 from .termoweb_models import (
     AcmBoostWritePayload,
     AcmExtraOptionsWritePayload,
-    DevListResponse,
     DevSummary,
     HeaterSettingsPayload,
     NodeSettingsWritePayload,
@@ -82,12 +81,9 @@ def _normalise_mode(mode: str) -> str:
     return mode_str
 
 
-def build_settings_payload(
-    node_type: str, commands: list[BaseCommand]
-) -> dict[str, Any]:
+def build_settings_payload(commands: list[BaseCommand]) -> dict[str, Any]:
     """Encode node setting commands into a TermoWeb payload."""
 
-    _ = node_type  # reserved for future branching on node type
     mode: str | None = None
     stemp: str | None = None
     prog: list[int] | None = None
@@ -189,16 +185,6 @@ def decode_devs_payload(raw: Any) -> list[dict[str, Any]]:
                     ]
                 except ValidationError:
                     return filtered
-
-        try:
-            model = DevListResponse.model_validate(raw)
-        except ValidationError:
-            return []
-
-        for field in ("devs", "devices"):
-            value = getattr(model, field)
-            if isinstance(value, list):
-                return [item.model_dump(exclude_none=True) for item in value]
 
     return []
 

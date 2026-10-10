@@ -245,16 +245,6 @@ class Backend(ABC):
 
         await self.client.set_node_priority(dev_id, node, priority=priority)
 
-    async def get_power_limit(self, dev_id: str) -> int | None:
-        """Return the installation-wide power limit."""
-
-        return await self.client.get_power_limit(dev_id)
-
-    async def set_power_limit(self, dev_id: str, *, power_limit: int) -> Any:
-        """Set the installation-wide power limit."""
-
-        return await self.client.set_power_limit(dev_id, power_limit=power_limit)
-
     @abstractmethod
     def create_ws_client(
         self,

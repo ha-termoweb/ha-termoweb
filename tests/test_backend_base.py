@@ -286,29 +286,6 @@ async def test_backend_set_node_priority() -> None:
     assert client.calls[0][0] == "set_node_priority"
 
 
-@pytest.mark.asyncio
-async def test_backend_get_power_limit() -> None:
-    """get_power_limit delegates to client and returns result."""
-
-    client = FullClient()
-    backend = ExampleBackend(brand="termoweb", client=client)
-    result = await backend.get_power_limit("dev-1")
-
-    assert result == 3000
-    assert client.calls[0][0] == "get_power_limit"
-
-
-@pytest.mark.asyncio
-async def test_backend_set_power_limit() -> None:
-    """set_power_limit delegates to client."""
-
-    client = FullClient()
-    backend = ExampleBackend(brand="termoweb", client=client)
-    await backend.set_power_limit("dev-1", power_limit=2500)
-
-    assert client.calls[0][0] == "set_power_limit"
-
-
 # ---------------------------------------------------------------------------
 # _resolve_node_descriptor
 # ---------------------------------------------------------------------------

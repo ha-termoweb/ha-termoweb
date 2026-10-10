@@ -28,6 +28,14 @@ def test_encode_setpoint_formats_temperature_and_units() -> None:
     assert payload == {"stemp": "21.2", "units": "F"}
 
 
+def test_encode_setpoint_includes_boost_time() -> None:
+    """A boost duration rides along with the setpoint write."""
+
+    payload = encode_setpoint_command(SetSetpoint(22.0), mode="boost", boost_time=60)
+
+    assert payload == {"stemp": "22.0", "mode": "boost", "boost_time": 60}
+
+
 def test_encode_preset_temps_requires_three_values() -> None:
     """Reject preset payloads that are not full triplets."""
 
@@ -74,7 +82,6 @@ from custom_components.termoweb.codecs.ducaheat_codec import (
     encode_mode_command,
     encode_priority_command,
     encode_units_command,
-    infer_status_endpoint,
 )
 from custom_components.termoweb.domain.commands import (
     SetLock,
@@ -151,21 +158,6 @@ def test_encode_mode_command_basic() -> None:
 # encode_setpoint_command edge cases
 # ---------------------------------------------------------------------------
 
-def test_encode_setpoint_with_boost_context() -> None:
-    """Setpoint encoding includes boost flag and boost_time when provided."""
-
-    payload = encode_setpoint_command(
-        SetSetpoint(21.5),
-        boost=True,
-        boost_time=120,
-        mode="manual",
-    )
-    assert payload["stemp"] == "21.5"
-    assert payload["boost"] is True
-    assert payload["boost_time"] == 120
-    assert payload["mode"] == "manual"
-
-
 # ---------------------------------------------------------------------------
 # encode_units_command
 # ---------------------------------------------------------------------------
@@ -222,56 +214,6 @@ def test_encode_priority_command() -> None:
 
     payload = encode_priority_command(SetPriority(priority=3))
     assert payload == {"priority": 3}
-
-
-# ---------------------------------------------------------------------------
-# infer_status_endpoint routing
-# ---------------------------------------------------------------------------
-
-def test_infer_status_endpoint_prog() -> None:
-    assert infer_status_endpoint(NodeType.HEATER, SetProgram([0] * 168)) == "prog"
-
-
-def test_infer_status_endpoint_mode() -> None:
-    assert infer_status_endpoint(NodeType.HEATER, SetMode("auto")) == "mode"
-
-
-def test_infer_status_endpoint_setpoint() -> None:
-    assert infer_status_endpoint(NodeType.HEATER, SetSetpoint(21.0)) == "status"
-
-
-def test_infer_status_endpoint_preset_temps() -> None:
-    assert infer_status_endpoint(NodeType.HEATER, SetPresetTemps([15, 18, 21])) == "status"
-
-
-def test_infer_status_endpoint_units() -> None:
-    assert infer_status_endpoint(NodeType.HEATER, SetUnits("C")) == "status"
-
-
-def test_infer_status_endpoint_extra_options() -> None:
-    assert infer_status_endpoint(NodeType.ACCUMULATOR, SetExtraOptions(boost_time=120)) == "setup"
-
-
-def test_infer_status_endpoint_boost_start() -> None:
-    assert infer_status_endpoint(NodeType.ACCUMULATOR, StartBoost()) == "boost"
-
-
-def test_infer_status_endpoint_boost_stop() -> None:
-    assert infer_status_endpoint(NodeType.ACCUMULATOR, StopBoost()) == "boost"
-
-
-def test_infer_status_endpoint_lock() -> None:
-    assert infer_status_endpoint(NodeType.HEATER, SetLock(lock=True)) == "lock"
-
-
-def test_infer_status_endpoint_priority() -> None:
-    assert infer_status_endpoint(NodeType.HEATER, SetPriority(priority=1)) == "setup"
-
-
-def test_infer_status_endpoint_unsupported_raises() -> None:
-    from custom_components.termoweb.domain.commands import BaseCommand
-    with pytest.raises(TypeError, match="Unsupported command type"):
-        infer_status_endpoint(NodeType.HEATER, BaseCommand())
 
 
 def test_encode_preset_temps_with_units() -> None:
