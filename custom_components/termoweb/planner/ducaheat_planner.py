@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,6 +49,7 @@ def plan_command(
     command: BaseCommand,
     *,
     units: str | None = None,
+    current_prog: Mapping[str, list[int]] | None = None,
 ) -> list[PlannedHttpCall]:
     """Return the segmented write call plan for a single command."""
 
@@ -57,6 +59,7 @@ def plan_command(
         node_id=node_id,
         command=command,
         units=units,
+        current_prog=current_prog,
     )
 
     return [write_call]
@@ -68,6 +71,7 @@ def _build_write_call(
     node_id: NodeId,
     command: BaseCommand,
     units: str | None,
+    current_prog: Mapping[str, list[int]] | None = None,
 ) -> PlannedHttpCall:
     """Build the primary write call for the supplied command."""
 
@@ -93,9 +97,9 @@ def _build_write_call(
         path = f"{base_path}/status"
     elif isinstance(command, SetPresetTemps):
         payload = encode_preset_temps_command(command, units=units)
-        path = f"{base_path}/prog_temps"
+        path = f"{base_path}/status"
     elif isinstance(command, SetProgram):
-        payload = encode_program_command(command)
+        payload = encode_program_command(command, current=current_prog)
         path = f"{base_path}/prog"
     elif isinstance(command, SetExtraOptions):
         payload = encode_extra_options_command(command)

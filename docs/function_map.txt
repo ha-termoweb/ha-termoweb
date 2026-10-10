@@ -98,8 +98,10 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_sa
     Return node samples (seconds timestamps); thermostats have none.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._execute_segmented_commands
     Apply one or more segmented commands and return merged segment responses.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._get_prog_days
+    GET the node's weekly program so a write can echo its slot resolution.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_node_settings
-    Write heater settings using the segmented endpoints.
+    Write heater settings; units are only written alone when passed explicitly.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_node_lock
     Toggle child lock via the segmented lock endpoint.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.normalise_ws_nodes
@@ -136,8 +138,6 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._format_tem
     Format temperatures using one decimal precision.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._ensure_units
     Validate and normalise temperature units.
-custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._serialise_prog
-    Serialise the 168-slot programme back to API structure.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._serialise_prog_temps
     Serialise preset temperatures into the API schema.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend._should_cancel_boost
@@ -547,9 +547,11 @@ custom_components/termoweb/codecs/ducaheat_codec.py :: encode_setpoint_command
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_units_command
     Encode a SetUnits command for the status endpoint.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_preset_temps_command
-    Encode preset temperature updates for the status endpoint.
+    Encode preset temperatures as ``ice_temp``/``eco_temp``/``comf_temp`` for /status.
+custom_components/termoweb/codecs/ducaheat_codec.py :: extract_prog_days
+    Return the ``"0"``..``"6"`` day slot lists from a GET ``prog`` section.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_program_command
-    Encode a SetProgram command for the prog endpoint.
+    Encode a 168-slot program, echoing the slot resolution of ``current`` days.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_extra_options_command
     Encode an extra options command for the setup endpoint.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_boost_command
@@ -599,9 +601,11 @@ custom_components/termoweb/codecs/ducaheat_read_models.py :: _safe_temperature
 custom_components/termoweb/codecs/ducaheat_read_models.py :: _normalise_prog
     Convert vendor programme payloads into a 168-slot list.
 custom_components/termoweb/codecs/ducaheat_read_models.py :: _normalise_prog._coerce_slots
-    Convert a day's slots into a 24-value list.
+    Convert a day's 24 or 48 slots into 24 hourly values (pairs folded by max).
+custom_components/termoweb/codecs/ducaheat_read_models.py :: _first_present
+    Return the first value in ``data`` for ``keys`` that is not ``None``.
 custom_components/termoweb/codecs/ducaheat_read_models.py :: _normalise_prog_temps
-    Convert preset temperature payloads into stringified list.
+    Return [ice, eco, comfort] preset strings, or None unless all three parse.
 custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._normalise_mode
     Lowercase mode strings when provided.
 custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._normalise_state

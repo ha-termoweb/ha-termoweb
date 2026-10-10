@@ -21,11 +21,6 @@ async def test_set_node_settings_units_only(monkeypatch: pytest.MonkeyPatch) -> 
 
         return {"Authorization": "Bearer token"}
 
-    def fake_ensure_units(units: str) -> str:
-        """Return a predictable units marker."""
-
-        return f"unit:{units}"
-
     post_calls: list[dict[str, Any]] = []
 
     async def fake_post_segmented(
@@ -52,7 +47,6 @@ async def test_set_node_settings_units_only(monkeypatch: pytest.MonkeyPatch) -> 
         return {"ok": "yes"}
 
     monkeypatch.setattr(client, "authed_headers", fake_headers)
-    monkeypatch.setattr(client, "_ensure_units", fake_ensure_units)
     monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
 
     responses = await client.set_node_settings("dev", ("htr", 1), units="F")
@@ -62,7 +56,7 @@ async def test_set_node_settings_units_only(monkeypatch: pytest.MonkeyPatch) -> 
         {
             "path": "/api/v2/devs/dev/htr/1/status",
             "headers": {"Authorization": "Bearer token"},
-            "payload": {"units": "unit:F"},
+            "payload": {"units": "F"},
             "dev_id": "dev",
             "addr": "1",
             "node_type": "htr",

@@ -190,14 +190,10 @@ class TestNormaliseProg:
         assert result is not None
         assert len(result) == 168
 
-    def test_mapping_missing_day_fills_zeros(self) -> None:
-        # Only 'mon' present, rest should be filled with zeros
+    def test_mapping_missing_day_is_rejected(self) -> None:
+        # A missing day must not be fabricated as "cold" (0) slots.
         data = {"days": {"mon": [1] * 24}}
-        result = _normalise_prog(data)
-        assert result is not None
-        assert len(result) == 168
-        assert result[:24] == [1] * 24
-        assert result[24:48] == [0] * 24
+        assert _normalise_prog(data) is None
 
     def test_mapping_with_nested_slots(self) -> None:
         day_data = {"slots": [0] * 24}
@@ -220,21 +216,12 @@ class TestNormaliseProg:
         assert result is not None
         assert len(result) == 168
 
-    def test_mapping_short_day_padded(self) -> None:
-        # < 24 slots should be padded with zeros
-        day_data = [1] * 10
+    @pytest.mark.parametrize("length", [10, 30])
+    def test_mapping_day_not_24_or_48_slots_rejected(self, length: int) -> None:
+        # Short days are not padded with "cold"; odd lengths are not truncated.
+        day_data = [1] * length
         data = {"days": {day: day_data for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")}}
-        result = _normalise_prog(data)
-        assert result is not None
-        assert len(result) == 168
-        assert result[10:24] == [0] * 14  # padded portion
-
-    def test_mapping_long_day_truncated(self) -> None:
-        day_data = [1] * 30
-        data = {"days": {day: day_data for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")}}
-        result = _normalise_prog(data)
-        assert result is not None
-        assert len(result) == 168
+        assert _normalise_prog(data) is None
 
     def test_mapping_none_slot_entry(self) -> None:
         day_data = {"slots": None, "values": None}
@@ -276,12 +263,14 @@ class TestNormaliseProgTemps:
         assert result is not None
         assert result[0] == "5.0"
 
-    def test_none_values_produce_empty_strings(self) -> None:
+    def test_missing_values_reject_presets(self) -> None:
         data = {"antifrost": None, "eco": 16, "comfort": None}
-        result = _normalise_prog_temps(data)
-        assert result is not None
-        assert result[0] == ""
-        assert result[2] == ""
+        assert _normalise_prog_temps(data) is None
+
+    def test_zero_preset_is_not_treated_as_missing(self) -> None:
+        # F4: 0 / 0.0 used to fall through ``or`` to the alias key.
+        data = {"antifrost": 0, "cold": 9, "eco": 0.0, "comfort": 21}
+        assert _normalise_prog_temps(data) == ["0.0", "0.0", "21.0"]
 
     def test_invalid_temp_falls_back_to_str(self) -> None:
         data = {"antifrost": "warm", "eco": 16, "comfort": 21}
