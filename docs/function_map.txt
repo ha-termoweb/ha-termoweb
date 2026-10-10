@@ -1225,13 +1225,17 @@ custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._async_cli
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._async_submit_settings
     Send settings for this heater to the backend.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.hvac_mode
-    Return the HA HVAC mode derived from heater settings.
+    Return the HA HVAC mode, or None when the device mode is unknown.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.preset_mode
-    Return heater preset mode based on temporary override state.
+    Return the preset: temporary_override while an Auto override is active.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.async_set_preset_mode
-    Log unsupported heater preset mode write attempts.
+    Select preset ``none``: end a temporary override by resuming Auto.
+custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.async_turn_on
+    Turn on, restoring the mode used before the last turn off (else Auto).
+custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.async_turn_off
+    Turn the heater off.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.hvac_action
-    Return the current HVAC action reported by the heater.
+    Return the HVAC action, or None when the device state is unknown.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.current_temperature
     Return the measured ambient temperature.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.target_temperature
@@ -1284,12 +1288,14 @@ custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity._allo
     Accumulators accept setpoints without forcing a manual mode.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity._preferred_boost_minutes
     Return the configured boost duration in minutes.
+custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.hvac_modes
+    Return Off/Auto, plus Heat while the device reports manual mode.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.hvac_mode
     Return the current accumulator HVAC mode.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.async_set_hvac_mode
     Handle accumulator HVAC modes, delegating boost to presets.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.preset_mode
-    Return the active preset mode.
+    Return the active preset mode, or None when the mode is unknown.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.async_set_preset_mode
     Set the accumulator preset mode.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.extra_state_attributes

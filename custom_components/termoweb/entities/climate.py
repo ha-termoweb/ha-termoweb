@@ -284,10 +284,18 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     """HA climate entity representing a single TermoWeb heater."""
 
     _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
+        ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.PRESET_MODE
+        | ClimateEntityFeature.TURN_ON
+        | ClimateEntityFeature.TURN_OFF
     )
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
-    _attr_preset_modes = ["none", "temporary_override"]
+    # ``temporary_override`` (backend ``modified_auto``) is reported as the
+    # current preset but cannot be selected: changing the target temperature
+    # while in Auto starts it.
+    _attr_preset_modes = ["none"]
+    # Modes that turn_on may restore after a turn_off.
+    _resume_modes: tuple[HVACMode, ...] = (HVACMode.HEAT, HVACMode.AUTO)
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
 
     def __init__(
@@ -341,6 +349,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         self._pending_mode: HVACMode | str | None = None
         self._pending_stemp: float | None = None
         self._write_task: asyncio.Task | None = None
+        self._resume_mode: HVACMode | None = None
 
     async def async_added_to_hass(self) -> None:
         """Register the entity ID for cross-platform helpers."""
@@ -541,8 +550,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         )
 
     @property
-    def hvac_mode(self) -> HVACMode:
-        """Return the HA HVAC mode derived from heater settings."""
+    def hvac_mode(self) -> HVACMode | None:
+        """Return the HA HVAC mode, or None when the device mode is unknown."""
 
         state = self.heater_state()
         mode = (getattr(state, "mode", None) or "").lower()
@@ -552,39 +561,49 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             return HVACMode.AUTO
         if mode == "manual":
             return HVACMode.HEAT
-        return HVACMode.HEAT
+        return None
 
     @property
-    def preset_mode(self) -> str:
-        """Return heater preset mode based on temporary override state."""
+    def preset_mode(self) -> str | None:
+        """Return the preset: temporary_override while an Auto override is active."""
 
         state = self.heater_state()
         mode = (getattr(state, "mode", None) or "").lower()
+        if not mode:
+            return None
         if mode == "modified_auto":
             return "temporary_override"
         return "none"
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Log unsupported heater preset mode write attempts."""
+        """Select preset ``none``: end a temporary override by resuming Auto."""
 
-        _LOGGER.info(
-            "Ignoring preset_mode write for heater type=%s addr=%s preset_mode=%s",
-            self._node_type,
-            self._addr,
-            preset_mode,
-        )
+        if self.preset_mode == "temporary_override":
+            await self.async_set_hvac_mode(HVACMode.AUTO)
+
+    async def async_turn_on(self) -> None:
+        """Turn on, restoring the mode used before the last turn off (else Auto)."""
+
+        if self.hvac_mode not in (None, HVACMode.OFF):
+            return
+        await self.async_set_hvac_mode(self._resume_mode or HVACMode.AUTO)
+
+    async def async_turn_off(self) -> None:
+        """Turn the heater off."""
+
+        await self.async_set_hvac_mode(HVACMode.OFF)
 
     @property
     def hvac_action(self) -> HVACAction | None:
-        """Return the current HVAC action reported by the heater."""
+        """Return the HVAC action, or None when the device state is unknown."""
 
         state = self.heater_state()
         heater_state = (getattr(state, "state", None) or "").lower()
-        if not heater_state:
-            return None
         if heater_state in ("off", "idle", "standby"):
             return HVACAction.IDLE if self.hvac_mode != HVACMode.OFF else HVACAction.OFF
-        return HVACAction.HEATING
+        if heater_state in ("on", "heating"):
+            return HVACAction.HEATING
+        return None
 
     @property
     def current_temperature(self) -> float | None:
@@ -827,6 +846,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         hvac_mode_norm = hvac_mode_value.lower()
 
         if hvac_mode_norm == HVACMode.OFF:
+            if self.hvac_mode in self._resume_modes:
+                self._resume_mode = self.hvac_mode
             self._pending_mode = HVACMode.OFF
             _LOGGER.info(
                 "Queue write: addr=%s mode=%s (batching %.1fs)",
@@ -1054,10 +1075,8 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
     """HA climate entity for TermoWeb accumulator nodes."""
 
     _attr_hvac_modes: list[HVACMode] = [HVACMode.OFF, HVACMode.AUTO]
-    _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
-    )
     _attr_preset_modes = ["none", "boost"]
+    _resume_modes = (HVACMode.AUTO,)
 
     def __init__(
         self,
@@ -1114,6 +1133,14 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         )
 
     @property
+    def hvac_modes(self) -> list[HVACMode]:
+        """Return Off/Auto, plus Heat while the device reports manual mode."""
+
+        if self.hvac_mode == HVACMode.HEAT:
+            return [*self._attr_hvac_modes, HVACMode.HEAT]
+        return self._attr_hvac_modes
+
+    @property
     def hvac_mode(self) -> HVACMode | None:
         """Return the current accumulator HVAC mode."""
 
@@ -1125,8 +1152,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             return HVACMode.AUTO
         if mode == "boost":
             return HVACMode.AUTO
-        fallback = super().hvac_mode
-        return fallback if fallback is not None else None
+        return super().hvac_mode
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode | str) -> None:
         """Handle accumulator HVAC modes, delegating boost to presets."""
@@ -1147,11 +1173,14 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         await super().async_set_hvac_mode(hvac_mode)
 
     @property
-    def preset_mode(self) -> str:
-        """Return the active preset mode."""
+    def preset_mode(self) -> str | None:
+        """Return the active preset mode, or None when the mode is unknown."""
 
         state = self.accumulator_state()
-        if (getattr(state, "mode", None) or "").lower() == "boost":
+        mode = (getattr(state, "mode", None) or "").lower()
+        if not mode:
+            return None
+        if mode == "boost":
             return "boost"
         return "none"
 
