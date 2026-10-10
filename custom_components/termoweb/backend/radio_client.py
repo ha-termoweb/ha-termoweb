@@ -171,6 +171,7 @@ class RadioClient:
         self._disconnect_callbacks: list[Callable[[], None]] = []
         self._programs: dict[int, tuple[float, list[int] | None]] = {}
         self._locks: dict[int, bool] = {}  # last lock written, for records without it
+        self._manual_setpoints: dict[int, float] = {}  # last manual target seen
         self.power = power or PowerManager()
         self.energy = EnergyEstimator(self.power.rated_power)
 
@@ -318,14 +319,30 @@ class RadioClient:
         stemp: float | None = None,
         ptemp: list[float] | None = None,
         prog: list[int] | None = None,
+        manual_stemp: float | None = None,
     ) -> None:
-        """Give a freshly paired heater its clock, then presets, mode and program back."""
+        """Give a freshly paired heater its clock, then presets, mode and program back.
+
+        ``manual_stemp`` restores the manual target of a heater that is not in
+        manual mode (a reset sets it to 19.0 C): it is written with mode manual
+        first, then the real mode follows.
+        """
 
         # Right after pairing the heater takes the clock but may not answer 53.
         clock = protocol.sync_clock(_local_now(), True, self._dialect)
         await self.async_send(addr, clock)
+        if manual_stemp is not None and mode != "manual":
+            await self._write_settings(
+                addr, mode="manual", stemp=manual_stemp, ptemp=ptemp
+            )
+            ptemp = None  # already written with the manual target
         await self._write_settings(addr, mode=mode, stemp=stemp, ptemp=ptemp, prog=prog)
         _LOGGER.info("Heater %s settings restored", addr)
+
+    def manual_setpoint(self, addr: int) -> float | None:
+        """Return the heater's last manual target seen or written, if any."""
+
+        return self._manual_setpoints.get(addr)
 
     def _forget(self, addr: int) -> None:
         """Drop what this client remembers about a heater's program and lock."""
@@ -595,6 +612,8 @@ class RadioClient:
         if "max_power" not in settings and rated is not None:
             settings["max_power"] = rated
         settings["priority"] = self.power.priority(addr)
+        if settings.get("mode") == "manual" and "stemp" in settings:
+            self._manual_setpoints[addr] = float(settings["stemp"])
         return settings
 
     async def set_node_settings(
@@ -620,6 +639,8 @@ class RadioClient:
         )
         if mode is not None or stemp is not None:
             self.power.clear_shed(addr)  # the user's choice wins over a shed
+        if stemp is not None and mode in (None, "manual", "heat"):
+            self._manual_setpoints[addr] = float(stemp)
         _LOGGER.info("Radio settings written to heater %s", addr)
 
     async def _write_settings(

@@ -855,3 +855,47 @@ async def test_restore_syncs_the_clock_then_writes_settings() -> None:
     assert payloads[1] == bytes([0xB8])
     assert payloads[2] == bytes.fromhex("B60E222802" + "2B")
     assert payloads[3][0] == 0xB2 and len(payloads[3]) == 43
+
+
+@pytest.mark.asyncio
+async def test_manual_target_is_remembered_from_reads_and_writes() -> None:
+    """A manual read or write keeps the target; an override write does not."""
+
+    client, _links, _ = make_client()
+    assert client.manual_setpoint(HEATER) is None
+    await client.get_node_settings("dev", ("htr", str(HEATER)))  # mode 02, BD 2C
+    assert client.manual_setpoint(HEATER) == 22.0
+    await client.set_node_settings("dev", ("htr", str(HEATER)), stemp=20.5)
+    assert client.manual_setpoint(HEATER) == 20.5
+    await client.set_node_settings(
+        "dev", ("htr", str(HEATER)), mode="modified_auto", stemp=24.0
+    )
+    assert client.manual_setpoint(HEATER) == 20.5
+
+
+@pytest.mark.asyncio
+async def test_restore_writes_the_manual_target_before_another_mode() -> None:
+    """``B6 .. 02 <target>`` first, then ``B6 .. <mode>`` and the program."""
+
+    client, links, _ = make_client()
+    await client.async_connect()
+    await client.async_restore(
+        HEATER,
+        mode="auto",
+        ptemp=[16.5, 18.5, 21.0],
+        prog=[1] * 168,
+        manual_stemp=20.0,
+    )
+    payloads = links[0].payloads()
+    assert payloads[1:] == [
+        bytes([0xB8]),
+        bytes.fromhex("B621252A0228"),
+        bytes([0xB8]),
+        bytes.fromhex("B621252A01"),
+        payloads[5],
+    ]
+    assert payloads[5][0] == 0xB2
+
+    links[0].sent.clear()
+    await client.async_restore(HEATER, mode="manual", stemp=21.0, manual_stemp=20.0)
+    assert links[0].payloads()[1:] == [bytes([0xB8]), bytes.fromhex("B621252A022A")]

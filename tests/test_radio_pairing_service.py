@@ -326,3 +326,25 @@ async def test_pairing_failures(paired, match) -> None:
     with pytest.raises(HomeAssistantError, match=match):
         await pair(ServiceCall({"entry_id": ENTRY_ID}))
     assert rig.hass.config_entries.scheduled_reloads == []
+
+
+@pytest.mark.asyncio
+async def test_manual_target_is_saved_and_restored_outside_manual_mode() -> None:
+    """A heater in program mode still gets its last manual target back."""
+
+    rig = Rig()
+    rig.states["6"] = HeaterState(mode="auto", stemp="18.5", ptemp=["7", "17", "20"])
+    rig.client._manual_setpoints[6] = 20.0  # noqa: SLF001
+    reset = await rig.handler(service.SERVICE_RADIO_FACTORY_RESET)
+    await reset(ServiceCall({"entry_id": ENTRY_ID, "heater": 6}))
+    saved = {"mode": "auto", "ptemp": [7.0, 17.0, 20.0], "manual_stemp": 20.0}
+    assert rp.saved_snapshot(rig.entry, 6) == saved
+
+    rig.entry.options = {}  # no saved snapshot: built from the state again
+    pair = await rig.handler(service.SERVICE_RADIO_PAIR)
+    await pair(ServiceCall({"entry_id": ENTRY_ID, "heater": 6}))
+    assert rig.calls[-1] == ("restore", (6, saved))
+
+    rig.states["6"] = STATE  # manual mode: its own setpoint is the target
+    await pair(ServiceCall({"entry_id": ENTRY_ID, "heater": 6}))
+    assert rig.calls[-1] == ("restore", (6, SNAPSHOT))

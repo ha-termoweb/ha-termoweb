@@ -82,6 +82,17 @@ def _require_node(runtime: EntryRuntime, addr: int) -> None:
         )
 
 
+def _with_manual_target(
+    snapshot: dict[str, Any] | None, client: RadioClient, addr: int
+) -> dict[str, Any] | None:
+    """Add the last manual target the client saw when the mode was not manual."""
+
+    manual = client.manual_setpoint(addr)
+    if snapshot is None or "stemp" in snapshot or manual is None:
+        return snapshot
+    return {**snapshot, "manual_stemp": manual}
+
+
 async def async_register_radio_pairing_services(hass: HomeAssistant) -> None:
     """Register the radio_factory_reset and radio_pair services once."""
 
@@ -94,7 +105,7 @@ async def async_register_radio_pairing_services(hass: HomeAssistant) -> None:
         entry_id, addr = call.data["entry_id"], int(call.data["heater"])
         runtime, client = _radio_runtime(hass, entry_id)
         _require_node(runtime, addr)
-        snapshot = heater_snapshot(runtime, addr)
+        snapshot = _with_manual_target(heater_snapshot(runtime, addr), client, addr)
         try:
             await client.async_factory_reset(addr)
         except RadioUnsupportedError as err:
@@ -117,7 +128,9 @@ async def async_register_radio_pairing_services(hass: HomeAssistant) -> None:
         if addr is not None:
             addr = int(addr)
             _require_node(runtime, addr)
-            snapshot = saved_snapshot(entry, addr) or heater_snapshot(runtime, addr)
+            snapshot = saved_snapshot(entry, addr) or _with_manual_target(
+                heater_snapshot(runtime, addr), client, addr
+            )
         _LOGGER.info("Radio pairing for %s: waiting up to %d s", entry_id, timeout)
         try:
             paired = await client.async_pair(timeout, wanted_id=addr, max_heaters=1)

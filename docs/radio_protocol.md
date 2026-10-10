@@ -114,7 +114,7 @@ A reply's first payload byte is the request opcode + 1. A two-byte
 | `C2` → `C3 55` | request / reply | meaning unknown | A | B (ack only) |
 | `D0` → `EC`-class reply | request / reply | capability, meaning unknown | A | B (ack only) |
 | `C6` → `C7 ..` | request / reply | meaning unknown | A | B (`C7 55`) |
-| `C8 <p> <v>` | station → heater | write parameter, reply `C9 55`. `C8 01 D0` is the factory reset (section 8); no other value is used | ? | B |
+| `C8 <p> <v>` | station → heater | write parameter: exactly two argument bytes, reply `C9 55` (`C9 56` for any other length). `C8 01 D0` is the factory reset (section 8); no other value is used | ? | B |
 | `50` | heater → station | registration; the station answers with a `51` clock sync | A | B |
 | `56 B9 ..` | heater → station | status report (E5, 15 bytes; E3, 17 bytes with boost tail) | A | ? |
 | `56 DB ..` | heater → station | advanced record report (E2) | A | ? |
@@ -407,7 +407,12 @@ derived one.
   - with `heater` (a stored node): the heater gets that id back, then its
     settings are restored: the clock (ack only), then `B6 af eco comfort
     mode [setpoint]` (`B7 55`) and the `B2` program (`B3 55`), through the
-    normal settings write. The settings come from the snapshot saved by
+    normal settings write. A reset sets the manual target to 19.0 °C, so a
+    heater that was not in manual mode first gets its last manual target
+    with `B6 af eco comfort 02 <target>` (for example `B6 21 25 2A 02 28`
+    = 20.0 °C; the `BD` setpoint byte reads it back), then its real mode.
+    The client remembers the manual target from every read or write in
+    manual mode; the snapshot keeps it as `manual_stemp`. The settings come from the snapshot saved by
     `radio_factory_reset`, else from Home Assistant's current state. A
     temporary override is restored as program mode. The heater is then
     refreshed.
@@ -419,14 +424,18 @@ derived one.
 ## 8. Factory reset
 
 Dialect B: `C8 01 D0` → `C9 55`. Within 3 s the heater goes silent. All
-settings, the clock, the program and the radio pairing are wiped (mode off,
-presets 5.0 / 17.0 / 19.0 °C, default program). It stays silent until its
-owner puts it into pairing mode; the pairing above brings it back. Proven
-twice on 2026-10-10, each time followed by a pairing and a restore whose
-read-back matched.
+settings, the clock, the program and the radio pairing are wiped: mode byte
+`04` (off), presets 5.0 / 17.0 / 19.0 °C, manual target 19.0 °C, default
+program. It stays silent until its owner puts it into pairing mode; the
+pairing above brings it back. On 2026-10-10 the reset → pair → restore
+sequence (assignment, clock sync without a `53` reply, `B6`, `B2`) ran four
+times; each restore finished about 6 s after the pairing press and read back
+correctly.
 
-`C8` with two argument bytes writes a parameter. Other values are accepted
-and not yet understood; the integration sends no other value.
+`C8 <param> <value>` writes a parameter: it takes exactly two argument bytes
+(`C9 56` for any other length). `C8 01 D1` and `C8 01 D2` also reset the
+heater. Other parameters are accepted and not yet understood. The
+integration sends only `C8 01 D0` and exposes no other parameter write.
 
 Dialect A: no reset is known. `protocol.factory_reset(DIALECT_A)` raises
 `ValueError`; `RadioClient.async_factory_reset` raises
