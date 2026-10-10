@@ -185,6 +185,7 @@ One client at a time. Each new connection resets the gateway session
 | `TXERR empty or bad hex` | the `T` line arrived garbled; the client resends once |
 | `TXERR <other>` | transmit failed; the client raises |
 | `ACK <micros> <HEX>` | the firmware sent an auto-ack |
+| `RAWB <n> <rssi_dbm>` / `RAW <n> <runs…>` / `RAWE <n> <count>` | survey burst `n`: start, run lengths (`+µs` high, `-µs` low, demodulator output), end |
 | `# ...` | any other status line |
 
 ### Client → gateway
@@ -199,6 +200,7 @@ One client at a time. Each new connection resets the gateway session
 | `X` | toggle raw mode (appends 2 status bytes to RX lines) | `# raw=on|off` |
 | `D` | chip state dump | `# marcstate=..` |
 | `F<kHz>` | retune the carrier | `# freq=..` or `# F? expected kHz` |
+| `R<seconds>` | raw survey: capture every RF burst without sync, length or CRC rules, then return to normal reception | `# survey on secs=N`, survey lines, `# survey off` |
 | **`Y<0|1>`** (new) | select the dialect framing: sync word, length rule and ack format. `0` = dialect A, `1` = dialect B | `# ...` |
 | **`N<hex4>`** (new) | network id the firmware writes into its auto-acks, e.g. `N1234` | `# ...` |
 
@@ -221,3 +223,62 @@ characters as new commands, so `N` followed by a network id that contains
 - `send_frame` waits for `TX`, then for the heater's ack (flags `80`, from the
   destination, to this station). No ack within 160 ms: resend, up to 3 times.
 - `TXERR empty or bad hex`: wait 50 ms and resend the same line once.
+
+## 6. Surveying an unknown dialect
+
+Two dialects are known, and there may be more. A heater that speaks another
+one stays invisible in packet mode: the radio drops every frame whose sync
+word does not match. The gateway's survey (`R<seconds>`) switches the CC1101
+to asynchronous serial mode and reports each burst above its carrier
+threshold as demodulator run lengths, which assume no sync word, framing or
+bit rate. `RadioLink.survey(seconds)` collects them as `RawBurst`s; a burst
+whose `RAWE` line was lost is still kept.
+
+`survey.analyse(bursts)` then, for every burst:
+
+1. merges runs of the same level and folds glitches shorter than 30 µs into
+   their neighbours;
+2. finds candidate bit timings: stretches of single-bit runs with steady pair
+   sums (a few bad pairs, from flipped bits or glitches, are tolerated) give
+   the bit period (median half pair sum) and the demodulator's high/low
+   stretch. When no stretch is clean, 104 µs ± 10 % and the 4.8, 19.2 and
+   38.4 kbps periods are tried as well;
+3. for each timing, folds glitches shorter than 0.35 bit, refines the period
+   over the whole burst (total time / total bits: 2 % off is enough to miscount
+   a run of eleven equal bits), and samples the runs with a phase-tracking bit
+   clock that is pulled half-way to mid-bit at every transition, so one
+   jittered edge does not shift the bits after it. Idle gaps split segments;
+4. slides each known dialect's sync word over every bit offset, in both
+   polarities, accepting up to 2 bit errors, and decodes with
+   `dialect.decode`: one CRC-valid frame is enough for a known dialect;
+5. otherwise takes the longest bit-level preamble (at least 16 bits; a lone
+   error is skipped when 8 alternating bits follow it) and searches the
+   framing after it: frame start 8–40 bits after the preamble's end (the 16
+   bits before it are the sync word), polarity, whitening (none or PN9), the
+   length rule (total = byte 0 + k, k = −4…+4), 14 CRC-16 parameter sets (the
+   two known ones plus the usual CCITT, ARC, MODBUS, USB, MAXIM, CMS, DNP…
+   variants), the CRC covering byte 0 or byte 1 onwards, and big- or
+   little-endian CRC bytes;
+6. counts, per framing, the bursts whose CRC validates. A single match can be
+   chance (about 16 000 trials per burst), so a framing becomes a candidate
+   only when at least two bursts agree on it, sync word included.
+
+On synthetic dialect-B bursts with ±15 % edge jitter, 3 glitches and 3 % bit
+errors in the preamble and sync, 38 of 40 decode. A bit error inside the
+frame breaks its CRC, so with errors everywhere only the frames without one
+can decode (about 30 % at 1 %).
+
+`analyse(bursts, keep_runs=True)` keeps every burst's raw runs in the report
+(`raw_runs`) so a survey can be replayed after a decoder change.
+
+The `SurveyReport` verdict is `known` (with the network ids heard), `candidate`
+(with a ready-to-paste `Dialect(...)` suggestion and what the codec would
+still need, such as a little-endian CRC), `undecodable` (the bits of each
+burst are kept for a human) or `silent`.
+
+Before a report is shared, `survey.redact(report)` zeroes the network id
+bytes (1–2) of every decoded frame and cuts identity replies (`5B`) after
+their opcode, and drops kept raw runs. Undecodable bursts keep their raw bits,
+which may still contain the network id: `contains_raw_bits` in the report
+says so.
+

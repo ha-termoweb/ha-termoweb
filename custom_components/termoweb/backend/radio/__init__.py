@@ -47,6 +47,7 @@ from .protocol import (
     decode_program,
     decode_status,
 )
+from .survey import RawBurst, SurveyReport, analyse, redact
 
 __all__ = [
     "DIALECTS",
@@ -68,10 +69,13 @@ __all__ = [
     "ProgramRecord",
     "RadioLink",
     "RadioLinkError",
+    "RawBurst",
     "ReceivedFrame",
     "StatusRecord",
+    "SurveyReport",
     "Unsolicited",
     "UnsupportedDialectError",
+    "analyse",
     "build_ack",
     "build_frame",
     "classify_unsolicited",
@@ -85,4 +89,5 @@ __all__ = [
     "detect_dialect",
     "encode",
     "frame_total_length",
+    "redact",
 ]
