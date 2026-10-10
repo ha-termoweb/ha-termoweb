@@ -30,6 +30,7 @@ from .backend import Backend, backend_capabilities, create_backend, create_entry
 from .backend.radio import RadioLinkError
 from .backend.radio_client import RadioError
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
+from .backend.sanitize import mask_identifier
 from .const import (
     BRAND_DUCAHEAT as BRAND_DUCAHEAT,
     BRAND_TEVOLVE as BRAND_TEVOLVE,
@@ -204,9 +205,9 @@ async def async_setup_entry(  # noqa: C901
                 "This account has %d gateways; only the first (%s) is set up. "
                 "Ignored: %s",
                 len(usable),
-                dev.get("name") or dev_id,
+                dev.get("name") or mask_identifier(dev_id),
                 ", ".join(
-                    str(ignored.get("name") or ignored_id)
+                    str(ignored.get("name") or mask_identifier(ignored_id))
                     for ignored_id, ignored in usable[1:]
                 ),
             )
@@ -257,7 +258,7 @@ async def async_setup_entry(  # noqa: C901
         )
     else:
         summary = "none"
-    _LOGGER.info("%s: discovered node types: %s", dev_id, summary)
+    _LOGGER.info("%s: discovered node types: %s", mask_identifier(dev_id), summary)
 
     coordinator = StateCoordinator(
         hass,
@@ -332,7 +333,7 @@ async def async_setup_entry(  # noqa: C901
             clients[dev_id] = ws_client
         task = ws_client.start()
         tasks[dev_id] = task
-        _LOGGER.info("WS: started read-only client for %s", dev_id)
+        _LOGGER.info("WS: started read-only client for %s", mask_identifier(dev_id))
 
     def _recalc_poll_interval() -> None:
         """Suspend REST polling when websocket trackers are healthy and fresh."""
@@ -454,6 +455,7 @@ async def async_setup_entry(  # noqa: C901
 
     runtime.recalc_poll = _recalc_poll_interval
 
+    @callback
     def _on_ws_status(payload: dict[str, Any]) -> None:
         """Recalculate polling intervals when websocket state changes."""
 
@@ -545,7 +547,9 @@ async def _shutdown_ws_tasks(ws_tasks: Mapping[str, typing.Any]) -> None:
             try:
                 cancel()
             except Exception:  # pragma: no cover - defensive logging
-                _LOGGER.exception("WS task for %s raised during cancel", dev_id)
+                _LOGGER.exception(
+                    "WS task for %s raised during cancel", mask_identifier(dev_id)
+                )
                 continue
         if hasattr(task, "__await__"):
             try:
@@ -553,7 +557,9 @@ async def _shutdown_ws_tasks(ws_tasks: Mapping[str, typing.Any]) -> None:
             except asyncio.CancelledError:
                 pass
             except Exception:  # pragma: no cover - defensive logging
-                _LOGGER.exception("WS task for %s failed to cancel cleanly", dev_id)
+                _LOGGER.exception(
+                    "WS task for %s failed to cancel cleanly", mask_identifier(dev_id)
+                )
 
 
 async def _shutdown_ws_clients(ws_clients: Mapping[str, typing.Any]) -> None:
@@ -566,7 +572,9 @@ async def _shutdown_ws_clients(ws_clients: Mapping[str, typing.Any]) -> None:
         try:
             await stop()
         except Exception:  # pragma: no cover - defensive logging
-            _LOGGER.exception("WS client for %s failed to stop", dev_id)
+            _LOGGER.exception(
+                "WS client for %s failed to stop", mask_identifier(dev_id)
+            )
 
 
 def _shutdown_runtime_callback(

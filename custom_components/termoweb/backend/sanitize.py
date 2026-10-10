@@ -7,10 +7,11 @@ import re
 _BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]+=*", re.IGNORECASE)
 _TOKEN_QUERY_RE = re.compile(r"(?i)(token|refresh_token|access_token)=([^&\s]+)")
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_DEV_PATH_RE = re.compile(r"(/devs/)([^/?#\s'\"]+)")
 
 
 def redact_text(value: str | None) -> str:
-    """Return ``value`` with bearer tokens, emails and query tokens removed."""
+    """Return ``value`` with bearer tokens, emails, query tokens and dev ids masked."""
 
     if not value:
         return ""
@@ -20,6 +21,9 @@ def redact_text(value: str | None) -> str:
     redacted = _BEARER_RE.sub("Bearer ***", text)
     redacted = _TOKEN_QUERY_RE.sub(lambda match: f"{match.group(1)}=***", redacted)
     redacted = _EMAIL_RE.sub("***@***", redacted)
+    redacted = _DEV_PATH_RE.sub(
+        lambda match: f"{match.group(1)}{mask_identifier(match.group(2))}", redacted
+    )
     return redacted.replace("authorization", "auth").replace("Authorization", "Auth")
 
 

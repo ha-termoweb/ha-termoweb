@@ -194,7 +194,7 @@ async def test_setup_uses_first_gateway_and_warns(
 
     assert config_entry.runtime_data.dev_id == DEV_ID
     assert "3 gateways; only the first (Home) is set up" in caplog.text
-    assert "Ignored: Cabin, 00112233445566ff" in caplog.text
+    assert "Ignored: Cabin, 001122...66ff" in caplog.text
 
 
 async def test_setup_retries_when_no_devices(

@@ -853,12 +853,12 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
         )
 
         caplog.clear()
-        with caplog.at_level("ERROR"):
+        with caplog.at_level("WARNING"):
             await coord.async_refresh_heater(("htr", "A"))
         assert "Timeout refreshing heater settings" in caplog.text
 
         caplog.clear()
-        with caplog.at_level("ERROR"):
+        with caplog.at_level("WARNING"):
             await coord.async_refresh_heater(("htr", "A"))
         assert "Failed to refresh heater settings" in caplog.text
         assert updates == []

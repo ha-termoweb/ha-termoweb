@@ -31,6 +31,7 @@ from custom_components.termoweb.inventory import Inventory
 from .radio import protocol
 from .radio.link import RadioLinkError, ReceivedFrame
 from .radio_client import RadioClient, RadioCommandError, radio_addr
+from .sanitize import mask_identifier
 from .ws_client import _WSStatusMixin, forward_ws_sample_updates
 
 _LOGGER = logging.getLogger(__name__)
@@ -85,7 +86,7 @@ class RadioListener(_WSStatusMixin):
 
         if self._task is not None and not self._task.done():
             return self._task
-        _LOGGER.info("Radio listener starting for %s", self.dev_id)
+        _LOGGER.info("Radio listener starting for %s", mask_identifier(self.dev_id))
         self._task = asyncio.get_running_loop().create_task(
             self._run(), name=f"{DOMAIN}-radio-{self.dev_id}"
         )
@@ -106,7 +107,7 @@ class RadioListener(_WSStatusMixin):
         self._detach()
         await self._client.async_close()
         self._update_status("stopped")
-        _LOGGER.info("Radio listener stopped for %s", self.dev_id)
+        _LOGGER.info("Radio listener stopped for %s", mask_identifier(self.dev_id))
 
     def _status_should_reset_health(self, status: str) -> bool:
         """Clear healthy tracking whenever the gateway is not connected."""

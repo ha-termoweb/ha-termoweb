@@ -39,7 +39,7 @@ This guide shows a non-technical end‑user how to capture **startup and runtime
 - The **Termoweb diagnostics JSON** file.
 - Optionally, screenshots of any visible errors in **Settings → System → Logs** filtered by `custom_components.termoweb`.
 
-> Tip: The TermoWeb integration makes an effort to redact sensitive and identifying info such as the gateeway ID and session tokens. However, many other components in HA do not, so you should review the log before posting it to avoid revealing information that is private.
+> Tip: The TermoWeb integration hides session tokens and shortens the gateway ID (for example `012345...cdef`) in its normal log lines. Debug logging can show more detail, and many other components in Home Assistant do not hide private information, so please read the log before you post it.
 
 ---
 

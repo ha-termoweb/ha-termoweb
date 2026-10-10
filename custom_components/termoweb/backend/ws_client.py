@@ -44,6 +44,7 @@ from custom_components.termoweb.inventory import (
 )
 from custom_components.termoweb.runtime import require_runtime
 
+from .sanitize import mask_identifier
 from .ws_health import WsHealthTracker
 
 _LOGGER = logging.getLogger(__name__)
@@ -685,6 +686,7 @@ class _WSCommon(_WSStatusMixin):
         self._subscription_refresh_lock = asyncio.Lock()
         self._subscription_refresh_failed = False
         self._backoff_idx = 0
+        self._unknown_nodes_logged: set[tuple[str, str]] = set()
 
     def _prepare_start(self) -> None:
         """Reset per-run state before the runner task is created."""
@@ -792,7 +794,7 @@ class _WSCommon(_WSStatusMixin):
         if inventory is None:
             _LOGGER.error(
                 "WS: missing inventory for nodes list translation on %s",
-                self.dev_id,
+                mask_identifier(self.dev_id),
             )
             return None
 
@@ -837,9 +839,9 @@ class _WSCommon(_WSStatusMixin):
 
         resolved_inventory = inventory if isinstance(inventory, Inventory) else None
         if resolved_inventory is None:
-            _LOGGER.warning(
+            _LOGGER.error(
                 "WS: missing inventory for node delta translation on %s",
-                self.dev_id,
+                mask_identifier(self.dev_id),
             )
             return []
 
@@ -882,12 +884,16 @@ class _WSCommon(_WSStatusMixin):
                 if not resolved_inventory.has_node(
                     node_id.node_type.value, node_id.addr
                 ):
-                    _LOGGER.warning(
-                        "WS: ignoring update for unknown node_type=%s addr=%s on %s",
-                        node_type.value,
-                        addr,
-                        self.dev_id,
-                    )
+                    # Inventory is immutable, so a node unknown once stays unknown:
+                    # log it a single time instead of on every frame.
+                    key = (node_type.value, addr)
+                    if key not in self._unknown_nodes_logged:
+                        self._unknown_nodes_logged.add(key)
+                        _LOGGER.debug(
+                            "WS: ignoring updates for unknown node_type=%s addr=%s",
+                            node_type.value,
+                            addr,
+                        )
                     continue
                 deltas.append(NodeSettingsDelta(node_id=node_id, changes=payload))
 

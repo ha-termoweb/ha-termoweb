@@ -17,6 +17,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
+from custom_components.termoweb.backend.sanitize import mask_identifier, redact_text
 from custom_components.termoweb.boost import (
     ALLOWED_BOOST_MINUTES_SET,
     coerce_boost_minutes,
@@ -189,7 +190,9 @@ class NodeRefreshFallback:
         try:
             await coordinator.async_refresh_heater(self._node)
         except Exception as err:  # noqa: BLE001 - a failed refresh must not crash
-            _LOGGER.error("Refresh fallback failed node=%s: %s", self._node, err)
+            _LOGGER.error(
+                "Refresh fallback failed node=%s: %s", self._node, redact_text(str(err))
+            )
 
 
 async def async_backend_write(description: str, write: Awaitable[Any]) -> Any:
@@ -494,12 +497,12 @@ def heater_platform_details_for_entry(
         ):
             _LOGGER.error(
                 "TermoWeb heater setup missing inventory for device %s",
-                dev_id,
+                mask_identifier(dev_id),
             )
             raise ValueError("TermoWeb inventory unavailable for heater platform")
         _LOGGER.error(
             "TermoWeb heater setup using non-standard inventory instance for device %s",
-            dev_id,
+            mask_identifier(dev_id),
         )
 
     return HeaterPlatformDetails(
@@ -689,7 +692,10 @@ class HeaterNodeBase(CoordinatorEntity):
             return coordinator_inventory  # type: ignore[return-value]
 
         unique_id = getattr(self, "_attr_unique_id", None) or self._dev_id
-        _LOGGER.error("TermoWeb heater %s missing immutable inventory cache", unique_id)
+        _LOGGER.error(
+            "TermoWeb heater %s missing immutable inventory cache",
+            mask_identifier(unique_id),
+        )
         raise ValueError("TermoWeb heater inventory unavailable")
 
     def _heater_section(self) -> dict[str, Any]:

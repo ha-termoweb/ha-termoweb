@@ -13,6 +13,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from custom_components.termoweb.backend.sanitize import mask_identifier
 from custom_components.termoweb.boost import supports_boost
 from custom_components.termoweb.coordinator import StateCoordinator
 from custom_components.termoweb.domain import DomainStateView, GatewayConnectionState
@@ -52,7 +53,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     inventory = runtime.inventory
     if not isinstance(inventory, Inventory):
-        _LOGGER.error("TermoWeb heater setup missing inventory for device %s", dev_id)
+        _LOGGER.error(
+            "TermoWeb heater setup missing inventory for device %s",
+            mask_identifier(dev_id),
+        )
         raise ValueError(  # noqa: TRY004
             "TermoWeb inventory unavailable for heater platform"
         )

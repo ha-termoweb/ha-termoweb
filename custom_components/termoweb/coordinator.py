@@ -21,7 +21,7 @@ from homeassistant.util import dt as dt_util
 
 from .backend.factory import backend_capabilities
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
-from .backend.sanitize import mask_identifier
+from .backend.sanitize import mask_identifier, redact_text
 from .boost import resolve_boost_end_from_fields
 from .coerce import as_float, as_int
 from .const import BRAND_TERMOWEB, MIN_POLL_INTERVAL
@@ -757,7 +757,7 @@ class StateCoordinator(
         resolved_type = normalize_node_type(raw_type, use_default_when_falsey=True)
         addr = normalize_node_addr(raw_addr, use_default_when_falsey=True)
 
-        _LOGGER.info(
+        _LOGGER.debug(
             "Refreshing heater settings node_type=%s addr=%s",
             resolved_type,
             addr,
@@ -811,22 +811,21 @@ class StateCoordinator(
             success = True
 
         except TimeoutError as err:
-            _LOGGER.error(
-                "Timeout refreshing heater settings for node_type=%s addr=%s",
+            _LOGGER.warning(
+                "Timeout refreshing heater settings for node_type=%s addr=%s: %s",
                 resolved_type,
                 addr,
-                exc_info=err,
+                err or "timed out",
             )
         except (ClientError, BackendRateLimitError, BackendAuthError) as err:
-            _LOGGER.error(
+            _LOGGER.warning(
                 "Failed to refresh heater settings for node_type=%s addr=%s: %s",
                 resolved_type,
                 addr,
-                err,
-                exc_info=err,
+                redact_text(str(err)),
             )
         finally:
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Finished heater settings refresh for node_type=%s "
                 "addr=%s (success=%s)",
                 resolved_type,

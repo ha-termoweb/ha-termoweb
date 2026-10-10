@@ -19,6 +19,7 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb.backend.rest_client import RESTClient
+from custom_components.termoweb.backend.sanitize import mask_identifier
 from custom_components.termoweb.const import API_BASE, BRAND_TERMOWEB, WS_NAMESPACE
 from custom_components.termoweb.domain import NodeSettingsDelta
 from custom_components.termoweb.inventory import Inventory
@@ -190,7 +191,7 @@ class TermoWebWSClient(_WSCommon):
         if not isinstance(inventory, Inventory):
             _LOGGER.error(
                 "WS: missing inventory for node payload on %s",
-                self.dev_id,
+                mask_identifier(self.dev_id),
             )
             return
 
@@ -284,7 +285,7 @@ class TermoWebWSClient(_WSCommon):
             _LOGGER.error(
                 "WS: missing inventory for heater sample subscriptions (entry=%s dev_id=%s)",
                 self.entry_id,
-                self.dev_id,
+                mask_identifier(self.dev_id),
             )
             return ()
 
@@ -327,7 +328,7 @@ class TermoWebWSClient(_WSCommon):
         self._idle_restart_pending = True
         self._ws_state_bucket()["idle_restart_pending"] = True
         self._sync_gateway_connection_state(now=time.time())
-        _LOGGER.warning(
+        _LOGGER.info(
             "WS: no payloads for %.0f s (%s heartbeat); restarting", idle_for, source
         )
 
@@ -441,11 +442,10 @@ class TermoWebWSClient(_WSCommon):
         idle_for = time.time() - last_payload
         if idle_for < self._payload_idle_window:
             return
-        if _LOGGER.isEnabledFor(logging.INFO):
-            _LOGGER.info(
-                "WS: write acknowledged after %.0f s without payloads; restarting",
-                idle_for,
-            )
+        _LOGGER.debug(
+            "WS: write acknowledged after %.0f s without payloads; restarting",
+            idle_for,
+        )
         self._schedule_idle_restart(idle_for=idle_for, source="write notification")
 
     async def stop(self) -> None:
@@ -549,7 +549,7 @@ class TermoWebWSClient(_WSCommon):
                 self._hs_fail_count += 1
                 if self._hs_fail_count == 1:
                     self._hs_fail_start = time.time()
-                _LOGGER.info(
+                _LOGGER.debug(
                     "WS: connection error (%s: %s); will retry", type(err).__name__, err
                 )
                 if self._hs_fail_count >= self._hs_fail_threshold:
@@ -567,7 +567,7 @@ class TermoWebWSClient(_WSCommon):
                     err.response_snippet,
                 )
             except Exception as err:
-                _LOGGER.info(
+                _LOGGER.debug(
                     "WS: connection error (%s: %s); will retry", type(err).__name__, err
                 )
                 _LOGGER.debug("WS: connection error details", exc_info=True)
@@ -616,7 +616,7 @@ class TermoWebWSClient(_WSCommon):
                 ) as resp:
                     body = await resp.text()
                     if resp.status == 401:
-                        _LOGGER.info("WS: handshake 401; refreshing token")
+                        _LOGGER.debug("WS: handshake 401; refreshing token")
                         await self._force_refresh_token()
                         raise HandshakeError(
                             resp.status,
@@ -655,7 +655,7 @@ class TermoWebWSClient(_WSCommon):
             f"{self._socket_base()}/socket.io/1/websocket/{sid}"
             f"?token={token}&dev_id={self.dev_id}"
         )
-        _LOGGER.info("WS: connecting to %s", self._sanitise_url(ws_url))
+        _LOGGER.debug("WS: connecting to %s", self._sanitise_url(ws_url))
         headers = self._brand_headers(origin="https://localhost")
         self._ws = await self._open_websocket(ws_url, headers)
 
@@ -826,7 +826,7 @@ class TermoWebWSClient(_WSCommon):
             ws = self._ws
             if ws is None or getattr(ws, "closed", False):
                 raise RuntimeError("websocket not connected")
-            _LOGGER.info("WS: refreshing websocket lease (%s)", reason)
+            _LOGGER.debug("WS: refreshing websocket lease (%s)", reason)
             try:
                 await self._send_snapshot_request()
                 await self._subscribe_session_metadata()
@@ -835,7 +835,7 @@ class TermoWebWSClient(_WSCommon):
                 raise
             except Exception as err:
                 self._subscription_refresh_failed = True
-                _LOGGER.warning(
+                _LOGGER.info(
                     "WS: legacy lease refresh failed (%s: %s)",
                     type(err).__name__,
                     err,
@@ -896,13 +896,12 @@ class TermoWebWSClient(_WSCommon):
                 reason = repr(raw_reason)
         elif raw_reason is not None:
             reason = str(raw_reason)
-        if _LOGGER.isEnabledFor(logging.INFO):
-            _LOGGER.info(
-                "WS: %s payload stream ended code=%s reason=%s",
-                context,
-                code,
-                reason,
-            )
+        _LOGGER.debug(
+            "WS: %s payload stream ended code=%s reason=%s",
+            context,
+            code,
+            reason,
+        )
         raise RuntimeError(f"{context} closed")
 
     def _record_heartbeat(self, *, source: str) -> None:
@@ -935,7 +934,7 @@ class TermoWebWSClient(_WSCommon):
                 idle_for = now - last_payload
                 self._refresh_ws_payload_state(now=now, reason="idle_monitor")
                 if idle_for >= self._payload_idle_window:
-                    _LOGGER.info(
+                    _LOGGER.debug(
                         "WS: no payloads for %.0f s; scheduling websocket restart",
                         idle_for,
                     )
