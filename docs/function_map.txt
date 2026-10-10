@@ -578,6 +578,8 @@ custom_components/termoweb/backend/ws_client.py :: _WSCommon.__init__
     Initialise shared websocket state.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon._throttle_connection_attempt
     Apply a defensive rate limit before dialing the backend.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._session_received_payload
+    Return True when a payload arrived since ``started_at``.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon._ensure_type_bucket
     Return the node bucket for ``node_type`` without cloning metadata.
 custom_components/termoweb/backend/ws_client.py :: WebSocketClient.__init__

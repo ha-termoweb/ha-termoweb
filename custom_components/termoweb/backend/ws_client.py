@@ -750,6 +750,12 @@ class _WSCommon(_WSStatusMixin):
 
         await self._connect_limiter.wait_for_slot()
 
+    def _session_received_payload(self, started_at: float) -> bool:
+        """Return True when a payload arrived since ``started_at``."""
+
+        last_payload = self._ws_health_tracker().last_payload_at
+        return last_payload is not None and last_payload >= started_at
+
     def _ensure_type_bucket(
         self,
         nodes_by_type: Mapping[str, typing.Any] | MutableMapping[str, typing.Any],

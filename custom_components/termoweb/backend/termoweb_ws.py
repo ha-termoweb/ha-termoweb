@@ -1360,6 +1360,7 @@ class TermoWebWSClient(WebSocketClient):
 
         while not self._closing:
             should_retry = True
+            session_started = time.time()
             try:
                 await self._throttle_connection_attempt()
                 _LOGGER.debug("WS: initiating Socket.IO 0.9 handshake")
@@ -1452,6 +1453,8 @@ class TermoWebWSClient(WebSocketClient):
                 self._update_status("disconnected")
             if self._closing or not should_retry:
                 break
+            if self._session_received_payload(session_started):
+                self._backoff_idx = 0
             delay = self._backoff_seq[
                 min(self._backoff_idx, len(self._backoff_seq) - 1)
             ]
