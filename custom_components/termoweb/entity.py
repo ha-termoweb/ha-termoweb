@@ -4,32 +4,29 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
 import typing
-from typing import Any, Final, cast
+from typing import Any, Final
 
 from homeassistant.const import UnitOfTemperature
-from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from custom_components.termoweb.backend.sanitize import mask_identifier, redact_text
+from custom_components.termoweb.backend.sanitize import redact_text
 from custom_components.termoweb.boost import (
     ALLOWED_BOOST_MINUTES_SET,
     coerce_boost_minutes,
     supports_boost,
 )
 from custom_components.termoweb.coerce import as_bool, as_float
-from custom_components.termoweb.domain import DomainStateView
 from custom_components.termoweb.domain.state import (
     AccumulatorState,
     DomainState,
     HeaterState,
-    PowerMonitorState,
     ThermostatState,
 )
 from custom_components.termoweb.identifiers import build_heater_unique_id
@@ -52,7 +49,6 @@ DEFAULT_BOOST_TEMPERATURE: Final = 20.0  # degrees Celsius
 # Setpoint range the devices accept, in degrees Celsius.
 SETPOINT_MIN_C: Final = 5.0
 SETPOINT_MAX_C: Final = 30.0
-_HASS_UNSET: Final[HomeAssistant | None] = cast(HomeAssistant | None, object())
 # Seconds to wait for the WebSocket echo of a write before reading the node by REST.
 WS_ECHO_FALLBACK_REFRESH: Final = 4.0
 
@@ -102,26 +98,11 @@ class HeaterPlatformDetails:
     default_name_simple: Callable[[str], str]
 
     @property
-    def nodes_by_type(self) -> dict[str, list[Node]]:
-        """Return nodes grouped by type from the immutable inventory."""
-
-        return self.inventory.nodes_by_type
-
-    @property
     def addrs_by_type(self) -> dict[str, list[str]]:
         """Return heater addresses grouped by node type."""
 
         forward_map, _ = self.inventory.heater_address_map
         return forward_map
-
-    def resolve_name(self, node_type: str, addr: str) -> str:
-        """Resolve the friendly name for ``(node_type, addr)``."""
-
-        return self.inventory.resolve_heater_name(
-            node_type,
-            addr,
-            default_factory=self.default_name_simple,
-        )
 
     def iter_metadata(self) -> Iterator[tuple[str, Node, str, str]]:
         """Yield heater metadata derived from the inventory."""
@@ -261,28 +242,11 @@ async def async_cancel_acm_boost(backend: Any, dev_id: str, addr: str) -> None:
 def iter_boostable_heater_nodes(
     details: HeaterPlatformDetails,
     *,
-    node_types: Iterable[str] | None = None,
     accumulators_only: bool = False,
 ) -> Iterator[tuple[str, Node, str, str]]:
     """Yield heater nodes that expose boost functionality."""
 
-    metadata_iter = details.iter_metadata()
-
-    if node_types is None:
-        filter_types: set[str] | None = None
-    elif isinstance(node_types, (str, bytes)):
-        normalized = normalize_node_type(node_types, use_default_when_falsey=True)
-        filter_types = {normalized} if normalized else set()
-    else:
-        filter_types = {
-            normalize_node_type(candidate, use_default_when_falsey=True)
-            for candidate in node_types
-        }
-        filter_types.discard("")
-
-    for node_type, node, addr_str, base_name in metadata_iter:
-        if filter_types is not None and node_type not in filter_types:
-            continue
+    for node_type, node, addr_str, base_name in details.iter_metadata():
         if accumulators_only and node_type != "acm":
             continue
         if supports_boost(node):
@@ -300,7 +264,6 @@ class BoostState:
     end_label: str | None
 
 
-# ruff: noqa: C901
 def _derive_boost_state(
     source: Any,
     coordinator: Any,
@@ -337,21 +300,20 @@ def _derive_boost_state(
 
     boost_minutes: int | None = coerce_boost_minutes(_get_field("boost_minutes_delta"))
     resolver = getattr(coordinator, "resolve_boost_end", None)
+    # The coordinator stores the derived end time and minutes as a pair, so
+    # resolve both from the raw day/minute fields only when neither is cached.
     if (
         callable(resolver)
         and boost_day is not None
         and boost_minute is not None
-        and (boost_end_dt is None or boost_minutes is None)
+        and boost_end_dt is None
+        and boost_minutes is None
     ):
         try:
-            resolved_dt, resolved_minutes = resolver(boost_day, boost_minute)
+            boost_end_dt, boost_minutes = resolver(boost_day, boost_minute)
         except Exception:  # noqa: BLE001 - defensive
-            resolved_dt = None
-            resolved_minutes = None
-        if boost_end_dt is None:
-            boost_end_dt = resolved_dt
-        if boost_minutes is None:
-            boost_minutes = resolved_minutes
+            boost_end_dt = None
+            boost_minutes = None
 
     if boost_minutes is None:
         boost_minutes = coerce_boost_minutes(_get_field("boost_remaining"))
@@ -363,30 +325,9 @@ def _derive_boost_state(
     if boost_minutes is not None and boost_minutes <= 0:
         boost_minutes = None
 
-    boost_end_iso: str | None = None
-    if boost_end_dt is not None:
-        try:
-            boost_end_iso = boost_end_dt.isoformat()
-        except Exception:  # noqa: BLE001 - defensive
-            try:
-                boost_end_iso = datetime.fromtimestamp(
-                    boost_end_dt.timestamp(),
-                    tz=boost_end_dt.tzinfo,
-                ).isoformat()
-            except Exception:  # noqa: BLE001 - defensive
-                boost_end_iso = None
-    elif boost_minutes is not None:
-        try:
-            boost_end_dt = dt_util.now() + timedelta(minutes=boost_minutes)
-            boost_end_iso = boost_end_dt.isoformat()
-        except Exception:  # noqa: BLE001 - defensive
-            boost_end_dt = None
-            boost_end_iso = None
-
-    if boost_end_dt is None and isinstance(boost_end_iso, str):
-        parsed = _parse_iso_timestamp(boost_end_iso)
-        if parsed is not None:
-            boost_end_dt = parsed
+    if boost_end_dt is None and boost_minutes is not None:
+        boost_end_dt = dt_util.now() + timedelta(minutes=boost_minutes)
+    boost_end_iso = boost_end_dt.isoformat() if boost_end_dt is not None else None
 
     placeholder_iso = boost_end_iso.strip() if isinstance(boost_end_iso, str) else None
     placeholder_detected = False
@@ -434,7 +375,7 @@ def derive_boost_state_from_domain(
 
 def log_skipped_nodes(
     platform_name: str,
-    inventory: Inventory | HeaterPlatformDetails | None,
+    inventory: Inventory | HeaterPlatformDetails,
     *,
     logger: logging.Logger | None = None,
     skipped_types: Iterable[str] = ("pmo",),
@@ -442,37 +383,19 @@ def log_skipped_nodes(
     """Log skipped TermoWeb nodes for a given platform."""
 
     log = logger or _LOGGER
-    platform = str(platform_name or "").strip()
-    if platform and not platform.lower().endswith("platform"):
-        platform = f"{platform} platform"
-    elif not platform:
-        platform = "platform"
-
     if isinstance(inventory, HeaterPlatformDetails):
-        resolved_inventory = inventory.inventory
-    elif isinstance(inventory, Inventory):
-        resolved_inventory = inventory
-    else:
-        resolved_inventory = None
-
-    if resolved_inventory is None:
-        return
-
-    addresses_by_type = resolved_inventory.addresses_by_type
+        inventory = inventory.inventory
+    addresses_by_type = inventory.addresses_by_type
 
     for node_type in skipped_types:
-        canonical = normalize_node_type(node_type, use_default_when_falsey=True)
-        if not canonical:
-            continue
-        addresses = addresses_by_type.get(canonical, [])
+        addresses = addresses_by_type.get(node_type, [])
         if not addresses:
             continue
-        addrs = ", ".join(sorted(addresses))
         log.debug(
-            "Skipping TermoWeb %s nodes for %s: %s",
-            canonical,
-            platform,
-            addrs or "<no-addr>",
+            "Skipping TermoWeb %s nodes for %s platform: %s",
+            node_type,
+            platform_name,
+            ", ".join(sorted(addresses)),
         )
 
 
@@ -483,30 +406,8 @@ def heater_platform_details_for_entry(
 ) -> HeaterPlatformDetails:
     """Return heater platform metadata derived from ``runtime``."""
 
-    inventory = runtime.inventory
-    dev_id = runtime.dev_id
-    if not isinstance(inventory, Inventory):
-        required_attrs = (
-            "nodes_by_type",
-            "heater_address_map",
-            "resolve_heater_name",
-            "iter_heater_platform_metadata",
-        )
-        if not inventory or not all(
-            hasattr(inventory, attr) for attr in required_attrs
-        ):
-            _LOGGER.error(
-                "TermoWeb heater setup missing inventory for device %s",
-                mask_identifier(dev_id),
-            )
-            raise ValueError("TermoWeb inventory unavailable for heater platform")
-        _LOGGER.error(
-            "TermoWeb heater setup using non-standard inventory instance for device %s",
-            mask_identifier(dev_id),
-        )
-
     return HeaterPlatformDetails(
-        inventory=cast(Inventory, inventory),
+        inventory=runtime.inventory,
         default_name_simple=default_name_simple,
     )
 
@@ -548,10 +449,7 @@ def build_settings_resolver(
     """Return callable resolving the domain state for a node."""
 
     def _resolver() -> DomainState | None:
-        view = getattr(coordinator, "domain_view", None)
-        if isinstance(view, DomainStateView):
-            return view.get_heater_state(node_type, addr)
-        return None
+        return coordinator.domain_view.get_heater_state(node_type, addr)
 
     return _resolver
 
@@ -570,11 +468,10 @@ class HeaterNodeBase(CoordinatorEntity):
         *,
         device_name: str | None = None,
         node_type: str | None = None,
-        inventory: Inventory | None = None,
+        inventory: Inventory,
     ) -> None:
         """Initialise a heater entity tied to a TermoWeb device."""
         super().__init__(coordinator)
-        self._hass: HomeAssistant | None = cast(HomeAssistant | None, _HASS_UNSET)
         self._entry_id = entry_id
         self._dev_id = dev_id
         self._addr = normalize_node_addr(addr)
@@ -593,28 +490,7 @@ class HeaterNodeBase(CoordinatorEntity):
             dev_id, resolved_type, self._addr
         )
         self._device_name = device_name or name
-        self._inventory: Inventory | None = inventory
-
-    async def async_added_to_hass(self) -> None:
-        """Register coordinator listeners once the entity is added to hass."""
-        coordinator = getattr(self, "coordinator", None)
-        if hasattr(coordinator, "async_add_listener"):
-            await super().async_added_to_hass()
-        else:
-            setattr(self, "_async_unsub_coordinator_update", None)
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Detach coordinator listeners before the entity is removed."""
-        coordinator = getattr(self, "coordinator", None)
-        if hasattr(coordinator, "async_add_listener"):
-            await super().async_will_remove_from_hass()
-        else:
-            unsub = getattr(self, "_async_unsub_coordinator_update", None)
-            if callable(unsub):
-                try:
-                    unsub()
-                finally:
-                    setattr(self, "_async_unsub_coordinator_update", None)
+        self._inventory = inventory
 
     @property
     def should_poll(self) -> bool:
@@ -629,27 +505,14 @@ class HeaterNodeBase(CoordinatorEntity):
     def _device_available(self) -> bool:
         """Return True when the immutable inventory exposes this node."""
 
-        try:
-            inventory = self._resolve_inventory()
-        except ValueError:
-            return False
-
-        node_type = getattr(self, "_node_type", "htr")
-        return inventory.has_node(node_type, self._addr)
-
-    def _domain_state_view(self) -> DomainStateView | None:
-        """Return the domain state view exposed by the coordinator."""
-
-        view = getattr(self.coordinator, "domain_view", None)
-        return view if isinstance(view, DomainStateView) else None
+        return self._inventory.has_node(self._node_type, self._addr)
 
     def _heater_state(self) -> DomainState | None:
         """Return the current cached domain state."""
 
-        view = self._domain_state_view()
-        if view is None:
-            return None
-        return view.get_heater_state(self._node_type, self._addr)
+        return self.coordinator.domain_view.get_heater_state(
+            self._node_type, self._addr
+        )
 
     def heater_state(self) -> HeaterState | AccumulatorState | ThermostatState | None:
         """Return the typed heater state for this entity."""
@@ -665,100 +528,6 @@ class HeaterNodeBase(CoordinatorEntity):
         state = self.heater_state()
         return state if isinstance(state, AccumulatorState) else None
 
-    def thermostat_state(self) -> ThermostatState | None:
-        """Return the thermostat state when present."""
-
-        state = self.heater_state()
-        return state if isinstance(state, ThermostatState) else None
-
-    def power_monitor_state(self) -> PowerMonitorState | None:
-        """Return the power monitor state when present."""
-
-        view = self._domain_state_view()
-        return view.get_power_monitor_state(self._addr) if view is not None else None
-
-    def _resolve_inventory(self) -> Inventory:
-        """Return the cached inventory for this entity, if available."""
-
-        inventory = getattr(self, "_inventory", None)
-        if isinstance(inventory, Inventory) or hasattr(inventory, "has_node"):
-            return inventory  # type: ignore[return-value]
-
-        coordinator_inventory = getattr(self.coordinator, "inventory", None)
-        if isinstance(coordinator_inventory, Inventory) or hasattr(
-            coordinator_inventory, "has_node"
-        ):
-            self._inventory = coordinator_inventory
-            return coordinator_inventory  # type: ignore[return-value]
-
-        unique_id = getattr(self, "_attr_unique_id", None) or self._dev_id
-        _LOGGER.error(
-            "TermoWeb heater %s missing immutable inventory cache",
-            mask_identifier(unique_id),
-        )
-        raise ValueError("TermoWeb heater inventory unavailable")
-
-    def _heater_section(self) -> dict[str, Any]:
-        """Return the heater-specific metadata cached for this entity."""
-
-        node_type = getattr(self, "_node_type", "htr")
-        try:
-            inventory = self._resolve_inventory()
-        except ValueError:
-            inventory = None
-
-        settings: dict[str, Any] = {}
-        state = self.heater_state()
-        if state is not None:
-            state_payload: dict[str, Any] = {}
-            for field in fields(state):
-                value = getattr(state, field.name)
-                if value is not None:
-                    state_payload[field.name] = value
-            settings = {self._addr: state_payload}
-
-        section: dict[str, Any] = {"settings": settings}
-
-        if isinstance(inventory, Inventory) and inventory.has_node(
-            node_type, self._addr
-        ):
-            device_name = getattr(self, "_device_name", None)
-
-            def _default_name(addr: str) -> str:
-                if isinstance(device_name, str) and device_name.strip():
-                    return device_name
-                attr_name = getattr(self, "_attr_name", None)
-                if isinstance(attr_name, str) and attr_name.strip():
-                    return attr_name
-                return f"Heater {addr}"
-
-            section["name"] = inventory.resolve_heater_name(
-                node_type,
-                self._addr,
-                default_factory=_default_name,
-            )
-
-        return section
-
-    @property
-    def hass(self) -> HomeAssistant | None:
-        """Return the Home Assistant instance, falling back to the coordinator."""
-
-        hass_attr = getattr(self, "_hass", _HASS_UNSET)
-        if hass_attr is not _HASS_UNSET:
-            return hass_attr
-        coordinator_hass = getattr(self.coordinator, "hass", None)
-        return cast(HomeAssistant | None, coordinator_hass)
-
-    @hass.setter
-    def hass(self, value: HomeAssistant | None) -> None:
-        """Store the Home Assistant reference for runtime access."""
-
-        if value is None:
-            self._hass = None
-            return
-        self._hass = value
-
     def boost_state(self) -> BoostState:
         """Return derived boost metadata for this heater."""
 
@@ -766,16 +535,10 @@ class HeaterNodeBase(CoordinatorEntity):
 
     def _client(self) -> Any:
         """Return the backend used for write operations."""
-        hass = self.hass
-        if hass is None:
-            return None
-        if not isinstance(getattr(hass, "data", None), Mapping):
-            return None
         try:
-            runtime = require_runtime(hass, self._entry_id)
+            return require_runtime(self.hass, self._entry_id).backend
         except LookupError:
             return None
-        return runtime.backend
 
     def _units(self) -> str:
         """Return the configured temperature units for this heater."""
@@ -798,12 +561,11 @@ class HeaterNodeBase(CoordinatorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Expose Home Assistant device metadata for the heater."""
-        model = "Accumulator" if self._node_type == "acm" else "Heater"
         return build_node_device_info(
             self.hass,
             self._entry_id,
             self._dev_id,
             self._addr,
             name=self._device_name,
-            model=model,
+            node_type=self._node_type,
         )

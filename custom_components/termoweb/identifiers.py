@@ -156,15 +156,6 @@ def migrate_unique_id(domain: str, unique_id: str) -> str | None:
     return None
 
 
-def thermostat_fallback_name(addr: Any) -> str:
-    """Return the fallback friendly name for a thermostat node."""
-
-    address = normalize_node_addr(addr, use_default_when_falsey=True)
-    if not address:
-        return "Thermostat"
-    return f"Thermostat {address}"
-
-
 def build_cloud_unique_id(brand: str, username: str) -> str:
     """Return a cloud entry's unique ID: the case-folded account, backend-scoped."""
 

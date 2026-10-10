@@ -203,7 +203,8 @@ async def test_boost_sensors_show_remaining_time_and_end(
     assert hass.states.get("sensor.store_boost_minutes_remaining").state == (
         STATE_UNKNOWN
     )
-    assert hass.states.get("sensor.store_boost_end").state == "Never"
+    # A timestamp sensor has no end time to show while no boost runs.
+    assert hass.states.get("sensor.store_boost_end").state == STATE_UNKNOWN
 
     served[("acm", "2")].update(
         mode="boost", boost_active=True, boost_end_day=3, boost_end_min=600
