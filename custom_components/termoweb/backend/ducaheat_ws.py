@@ -6,12 +6,9 @@ import asyncio
 from collections import deque
 from collections.abc import Collection, Iterable, Mapping
 import contextlib
-import gzip
 import json
 import logging
 import math
-import random
-import string
 import time
 import typing
 from typing import Any
@@ -20,6 +17,14 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 import aiohttp
 from homeassistant.core import HomeAssistant
 
+from custom_components.termoweb.backend.ducaheat_engineio import (
+    SocketIOParseError,
+    decode_polling_packets,
+    decode_socketio_event,
+    encode_polling_packet,
+    encode_socketio_event,
+    rand_t,
+)
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.backend.ws_client import (
     HandshakeError,
@@ -50,61 +55,6 @@ _PROBE_ACK_TIMEOUT = 5.0
 _UPGRADE_DRAIN_TIMEOUT = 1.0
 _PARSE_ERROR_WINDOW_S = 30.0
 _PARSE_ERROR_THRESHOLD = 3
-
-
-def _rand_t() -> str:
-    """Return a pseudo-random token string for polling requests."""
-
-    return "P" + "".join(
-        random.choice(string.ascii_letters + string.digits) for _ in range(7)
-    )
-
-
-def _encode_polling_packet(pkt: str) -> bytes:
-    """Encode Engine.IO polling payloads."""
-
-    data = pkt.encode("utf-8")
-    return f"{len(data)}:".encode("ascii") + data
-
-
-def _decode_polling_packets(body: bytes) -> list[str]:
-    """Decode Engine.IO v3 binary polling frames."""
-
-    buf = body
-    if len(buf) >= 2 and buf[:2] == b"\x1f\x8b":
-        with contextlib.suppress(Exception):
-            buf = gzip.decompress(buf)
-    out: list[str] = []
-    i, n = 0, len(buf)
-    while i < n:
-        if i + 4 > n:
-            break
-        _typ = buf[i]
-        i += 1
-        length = 0
-        had_digit = False
-        while i < n and buf[i] != 0xFF:
-            d = buf[i]
-            i += 1
-            if d > 9:
-                return out
-            had_digit = True
-            length = length * 10 + d
-        if not had_digit or i >= n or buf[i] != 0xFF:
-            return out
-        i += 1
-        end = i + length
-        if end > n:
-            return out
-        payload = buf[i:end]
-        i = end
-        try:
-            pkt = payload.decode("utf-8", errors="ignore")
-        except UnicodeDecodeError, ValueError:
-            pkt = ""
-        if pkt:
-            out.append(pkt)
-    return out
 
 
 class DucaheatWSClient(_WSCommon):
@@ -265,23 +215,13 @@ class DucaheatWSClient(_WSCommon):
     def _decode_socketio_event(
         self, payload: str, *, now: float
     ) -> tuple[str, list[Any]] | None:
-        """Decode a Socket.IO ``42`` payload safely."""
+        """Decode a Socket.IO ``42`` payload, recording parse errors."""
 
-        content = payload
-        if content.startswith("/"):
-            _namespace, sep, content = content.partition(",")
-            if sep != ",":
-                self._record_parse_error(now=now, reason="namespace")
-                return None
         try:
-            arr = json.loads(content)
-        except json.JSONDecodeError:
-            self._record_parse_error(now=now, reason="json")
+            return decode_socketio_event(payload)
+        except SocketIOParseError as err:
+            self._record_parse_error(now=now, reason=err.reason)
             return None
-        if not isinstance(arr, list) or not arr:
-            self._record_parse_error(now=now, reason="shape")
-            return None
-        return arr[0], arr[1:]
 
     def _update_status_from_heartbeat(self, *, now: float) -> None:
         """Report healthy only while payloads are fresh, otherwise connected."""
@@ -355,7 +295,7 @@ class DucaheatWSClient(_WSCommon):
             "dev_id": self.dev_id,
             "EIO": "3",
             "transport": "polling",
-            "t": _rand_t(),
+            "t": rand_t(),
         }
         open_url = self._build_handshake_url(open_params)
         async with asyncio.timeout(15):
@@ -363,7 +303,7 @@ class DucaheatWSClient(_WSCommon):
                 body = await resp.read()
                 if resp.status != 200:
                     raise HandshakeError(resp.status, open_url, "open GET")
-        packets = _decode_polling_packets(body)
+        packets = decode_polling_packets(body)
         open_pkt = next((pkt for pkt in packets if pkt and pkt[0] == "0"), None)
         if not open_pkt:
             _LOGGER.debug("WS: open raw first 120 bytes: %r", body[:120])
@@ -390,11 +330,11 @@ class DucaheatWSClient(_WSCommon):
             "dev_id": self.dev_id,
             "EIO": "3",
             "transport": "polling",
-            "t": _rand_t(),
+            "t": rand_t(),
             "sid": sid,
         }
         post_url = self._build_handshake_url(post_params)
-        payload = _encode_polling_packet(f"40{self._namespace}")
+        payload = encode_polling_packet(f"40{self._namespace}")
         async with asyncio.timeout(15):
             async with self._session.post(
                 post_url,
@@ -406,7 +346,7 @@ class DucaheatWSClient(_WSCommon):
                     raise HandshakeError(resp.status, post_url, "POST 40/ns")
 
         drain_params = dict(post_params)
-        drain_params["t"] = _rand_t()
+        drain_params["t"] = rand_t()
         drain_url = self._build_handshake_url(drain_params)
         async with asyncio.timeout(15):
             async with self._session.get(drain_url, headers=headers) as resp:
@@ -1059,9 +999,7 @@ class DucaheatWSClient(_WSCommon):
     async def _emit_sio(self, event: str, *args: Any) -> None:
         if not self._ws or self._ws.closed:
             raise RuntimeError("websocket not connected")
-        arr = [event, *args]
-        payload = json.dumps(arr, separators=(",", ":"), default=str)
-        frame = f"42{self._namespace}," + payload
+        frame = encode_socketio_event(self._namespace, event, *args)
         await self._send_str(frame, context=f"sio-{event}", ws=self._ws)
         if _LOGGER.isEnabledFor(logging.DEBUG):
             summary = ""

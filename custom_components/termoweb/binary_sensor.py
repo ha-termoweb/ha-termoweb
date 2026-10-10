@@ -14,7 +14,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.boost import supports_boost
-from custom_components.termoweb.coordinator import StateCoordinator
+from custom_components.termoweb.coordinator.state import StateCoordinator
 from custom_components.termoweb.domain import GatewayConnectionState
 from custom_components.termoweb.domain.ids import HEATER_NODE_TYPES
 from custom_components.termoweb.entity import (

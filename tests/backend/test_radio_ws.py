@@ -23,7 +23,7 @@ from custom_components.termoweb.backend.radio.link import RadioLinkError
 from custom_components.termoweb.backend.radio_client import RadioClient
 from custom_components.termoweb.backend.radio_ws import RadioListener
 from custom_components.termoweb.const import BRAND_RADIO, signal_ws_status
-from custom_components.termoweb.coordinator import StateCoordinator
+from custom_components.termoweb.coordinator.state import StateCoordinator
 from custom_components.termoweb.domain.ids import NodeType
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from custom_components.termoweb.runtime import EntryRuntime

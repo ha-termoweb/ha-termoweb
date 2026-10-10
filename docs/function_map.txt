@@ -164,12 +164,18 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.create_ws_clie
     Instantiate the unified websocket client for Ducaheat.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.fetch_hourly_samples
     Return hourly samples for ``nodes`` using the segmented API.
-custom_components/termoweb/backend/ducaheat_ws.py :: _rand_t
+custom_components/termoweb/backend/ducaheat_engineio.py :: SocketIOParseError.__init__
+    Store the short failure ``reason`` (namespace, json or shape).
+custom_components/termoweb/backend/ducaheat_engineio.py :: rand_t
     Return a pseudo-random token string for polling requests.
-custom_components/termoweb/backend/ducaheat_ws.py :: _encode_polling_packet
+custom_components/termoweb/backend/ducaheat_engineio.py :: encode_polling_packet
     Encode Engine.IO polling payloads.
-custom_components/termoweb/backend/ducaheat_ws.py :: _decode_polling_packets
+custom_components/termoweb/backend/ducaheat_engineio.py :: decode_polling_packets
     Decode Engine.IO v3 binary polling frames.
+custom_components/termoweb/backend/ducaheat_engineio.py :: decode_socketio_event
+    Decode a Socket.IO ``42`` payload into ``(event, args)``.
+custom_components/termoweb/backend/ducaheat_engineio.py :: encode_socketio_event
+    Return a namespaced Socket.IO ``42`` event frame.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.__init__
     Initialise the Ducaheat websocket client.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._ws_health
@@ -187,7 +193,7 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._record_up
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._record_parse_error
     Track JSON parse failures and return True when reconnection is advised.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._decode_socketio_event
-    Decode a Socket.IO ``42`` payload safely.
+    Decode a Socket.IO ``42`` payload, recording parse errors.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._update_status_from_heartbeat
     Report healthy only while payloads are fresh, otherwise connected.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.stop
@@ -878,106 +884,106 @@ custom_components/termoweb/const.py :: signal_ws_status
     Signal name for WS status/health updates.
 custom_components/termoweb/const.py :: signal_radio_frames
     Signal name for the frame count of a listen-only radio entry.
-custom_components/termoweb/coordinator.py :: RaiseUpdateFailedCoordinator.async_refresh
+custom_components/termoweb/coordinator/base.py :: RaiseUpdateFailedCoordinator.async_refresh
     Refresh data and raise ``UpdateFailed`` when polling fails.
-custom_components/termoweb/coordinator.py :: _normalise_device_name
-    Return a trimmed device name or a fallback derived from ``dev_id``.
-custom_components/termoweb/coordinator.py :: _normalise_device_model
-    Return a trimmed model string when present.
-custom_components/termoweb/coordinator.py :: build_device_metadata
-    Return immutable metadata derived from a device payload.
-custom_components/termoweb/coordinator.py :: _device_display_name
-    Return the trimmed device name or a fallback for ``dev_id``.
-custom_components/termoweb/coordinator.py :: StateCoordinator.__init__
-    Initialize the TermoWeb device coordinator.
-custom_components/termoweb/coordinator.py :: StateCoordinator.domain_view
-    Return the read-only domain state view.
-custom_components/termoweb/coordinator.py :: StateCoordinator.device_metadata
-    Return immutable metadata for this gateway.
-custom_components/termoweb/coordinator.py :: StateCoordinator.gateway_name
-    Return the display name for this gateway.
-custom_components/termoweb/coordinator.py :: StateCoordinator.gateway_model
-    Return the display model name for this gateway.
-custom_components/termoweb/coordinator.py :: StateCoordinator.gateway_connected
-    Return True when the coordinator reports the gateway online.
-custom_components/termoweb/coordinator.py :: StateCoordinator.update_gateway_connection
-    Update the gateway connection state in the domain store.
-custom_components/termoweb/coordinator.py :: StateCoordinator.apply_power_limit
-    Store a gateway power limit and notify listeners when it changed.
-custom_components/termoweb/coordinator.py :: StateCoordinator.apply_energy_snapshot
-    Store an energy snapshot in the domain state store.
-custom_components/termoweb/coordinator.py :: StateCoordinator._device_record
-    Return a minimal coordinator payload for this device.
-custom_components/termoweb/coordinator.py :: StateCoordinator._publish_device_record
-    Push the latest device snapshot to coordinator listeners.
-custom_components/termoweb/coordinator.py :: StateCoordinator._async_fetch_settings_to_store
-    Fetch settings for every address and store them in the domain cache.
-custom_components/termoweb/coordinator.py :: StateCoordinator._normalize_mode_value
-    Return a canonical string for backend HVAC modes.
-custom_components/termoweb/coordinator.py :: StateCoordinator._node_key
-    Return the normalised ``(node_type, addr)`` key for per-node caches.
-custom_components/termoweb/coordinator.py :: StateCoordinator._prune_pending_settings
-    Drop expired pending settings entries.
-custom_components/termoweb/coordinator.py :: StateCoordinator.register_pending_setting
-    Record expected heater settings awaiting confirmation.
-custom_components/termoweb/coordinator.py :: StateCoordinator.resolve_boost_end
-    Return boost end metadata derived from cached day/minute fields.
-custom_components/termoweb/coordinator.py :: StateCoordinator._rtc_payload_to_datetime
-    Return a timezone-aware datetime extracted from RTC payload.
-custom_components/termoweb/coordinator.py :: StateCoordinator._device_now_estimate
-    Return the latest hub time reference adjusted by monotonic delta.
-custom_components/termoweb/coordinator.py :: StateCoordinator._async_fetch_rtc_datetime
-    Fetch the hub RTC time and update the cached reference.
-custom_components/termoweb/coordinator.py :: StateCoordinator._requires_boost_resolution
-    Return True when ``payload`` exposes boost day/min metadata.
-custom_components/termoweb/coordinator.py :: StateCoordinator._apply_accumulator_boost_metadata
-    Store derived boost metadata on ``payload``.
-custom_components/termoweb/coordinator.py :: StateCoordinator._should_defer_pending_setting
-    Return True when a pending write should defer payload merging.
-custom_components/termoweb/coordinator.py :: StateCoordinator._node_ids_from_inventory
-    Return domain node identifiers derived from ``inventory``.
-custom_components/termoweb/coordinator.py :: StateCoordinator.handle_ws_deltas
-    Merge websocket-delivered deltas into the domain state store.
-custom_components/termoweb/coordinator.py :: StateCoordinator.apply_entity_patch
-    Apply an optimistic patch through the domain store when available.
-custom_components/termoweb/coordinator.py :: StateCoordinator.async_refresh_heater
-    Refresh settings for a specific node and push the update to listeners.
-custom_components/termoweb/coordinator.py :: StateCoordinator._async_update_data
-    Fetch the latest settings for every known node on each poll.
-custom_components/termoweb/coordinator.py :: StateCoordinator.resume_polling
-    Resume REST polling at ``base_interval`` or the rate-limit backoff.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.__init__
-    Initialize the heater energy coordinator.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._publish_to_state_store
-    Update the canonical state store with ``snapshot``.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.async_set_updated_data
-    Store ``data`` in the domain state before notifying listeners.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._targets_by_type
-    Return the inventory's energy sample addresses grouped by node type.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._prefill_energy_buckets
-    Seed energy and power buckets from cached coordinator state.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._build_snapshot
-    Return an :class:`EnergySnapshot` built from metric buckets.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._poll_recent_samples
-    Fetch recent energy samples for every tracked node; stop on a 429.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._process_energy_sample
-    Update cached energy and derived power for ``addr``.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._async_update_data
-    Fetch recent heater energy samples and derive totals and power.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.async_start_hourly_poll
-    Schedule the HH:05 REST sample poll; return its unsubscribe callback.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._async_hourly_poll
-    Poll REST samples for the past hour unless backing off after a 429.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._should_skip_poll
-    Return True when websocket pushes keep energy data fresh.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._ws_margin_seconds
-    Return the buffer to wait after a positive websocket lease expires.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._extract_sample_point
-    Extract ``(timestamp, counter)`` from websocket sample payloads.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.handle_ws_samples
-    Update cached heater metrics from websocket ``samples`` payloads.
-custom_components/termoweb/coordinator.py :: _wrap_logger
+custom_components/termoweb/coordinator/base.py :: wrap_logger
     Return a logger proxy that exposes ``isEnabledFor`` when missing.
+custom_components/termoweb/coordinator/state.py :: _normalise_device_name
+    Return a trimmed device name or a fallback derived from ``dev_id``.
+custom_components/termoweb/coordinator/state.py :: _normalise_device_model
+    Return a trimmed model string when present.
+custom_components/termoweb/coordinator/state.py :: build_device_metadata
+    Return immutable metadata derived from a device payload.
+custom_components/termoweb/coordinator/state.py :: _device_display_name
+    Return the trimmed device name or a fallback for ``dev_id``.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.__init__
+    Initialize the TermoWeb device coordinator.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.domain_view
+    Return the read-only domain state view.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.device_metadata
+    Return immutable metadata for this gateway.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.gateway_name
+    Return the display name for this gateway.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.gateway_model
+    Return the display model name for this gateway.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.gateway_connected
+    Return True when the coordinator reports the gateway online.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.update_gateway_connection
+    Update the gateway connection state in the domain store.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.apply_power_limit
+    Store a gateway power limit and notify listeners when it changed.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.apply_energy_snapshot
+    Store an energy snapshot in the domain state store.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._device_record
+    Return a minimal coordinator payload for this device.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._publish_device_record
+    Push the latest device snapshot to coordinator listeners.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._async_fetch_settings_to_store
+    Fetch settings for every address and store them in the domain cache.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._normalize_mode_value
+    Return a canonical string for backend HVAC modes.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._node_key
+    Return the normalised ``(node_type, addr)`` key for per-node caches.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._prune_pending_settings
+    Drop expired pending settings entries.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.register_pending_setting
+    Record expected heater settings awaiting confirmation.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.resolve_boost_end
+    Return boost end metadata derived from cached day/minute fields.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._rtc_payload_to_datetime
+    Return a timezone-aware datetime extracted from RTC payload.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._device_now_estimate
+    Return the latest hub time reference adjusted by monotonic delta.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._async_fetch_rtc_datetime
+    Fetch the hub RTC time and update the cached reference.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._requires_boost_resolution
+    Return True when ``payload`` exposes boost day/min metadata.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._apply_accumulator_boost_metadata
+    Store derived boost metadata on ``payload``.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._should_defer_pending_setting
+    Return True when a pending write should defer payload merging.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._node_ids_from_inventory
+    Return domain node identifiers derived from ``inventory``.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.handle_ws_deltas
+    Merge websocket-delivered deltas into the domain state store.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.apply_entity_patch
+    Apply an optimistic patch through the domain store when available.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.async_refresh_heater
+    Refresh settings for a specific node and push the update to listeners.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator._async_update_data
+    Fetch the latest settings for every known node on each poll.
+custom_components/termoweb/coordinator/state.py :: StateCoordinator.resume_polling
+    Resume REST polling at ``base_interval`` or the rate-limit backoff.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator.__init__
+    Initialize the heater energy coordinator.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator._publish_to_state_store
+    Update the canonical state store with ``snapshot``.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator.async_set_updated_data
+    Store ``data`` in the domain state before notifying listeners.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator._targets_by_type
+    Return the inventory's energy sample addresses grouped by node type.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator._prefill_energy_buckets
+    Seed energy and power buckets from cached coordinator state.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator._build_snapshot
+    Return an :class:`EnergySnapshot` built from metric buckets.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator._poll_recent_samples
+    Fetch recent energy samples for every tracked node; stop on a 429.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator._process_energy_sample
+    Update cached energy and derived power for ``addr``.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator._async_update_data
+    Fetch recent heater energy samples and derive totals and power.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator.async_start_hourly_poll
+    Schedule the HH:05 REST sample poll; return its unsubscribe callback.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator._async_hourly_poll
+    Poll REST samples for the past hour unless backing off after a 429.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator._should_skip_poll
+    Return True when websocket pushes keep energy data fresh.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator._ws_margin_seconds
+    Return the buffer to wait after a positive websocket lease expires.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator._extract_sample_point
+    Extract ``(timestamp, counter)`` from websocket sample payloads.
+custom_components/termoweb/coordinator/energy.py :: EnergyStateCoordinator.handle_ws_samples
+    Update cached heater metrics from websocket ``samples`` payloads.
 custom_components/termoweb/diagnostics.py :: _extract_websocket_clients
     Return websocket telemetry entries for diagnostics.
 custom_components/termoweb/diagnostics.py :: _radio_section

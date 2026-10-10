@@ -72,8 +72,17 @@ This map defines responsibilities for each module family in the final design.
   node-type groups (`HEATER_NODE_TYPES`, `HEATING_NODE_TYPES`,
   `ENERGY_NODE_TYPES`) and `NodeType.coerce` (case-insensitive, `None` for
   unknown types); `NodeType(value)` is the strict, raising form.
+- `coordinator/` — `state.py` holds `StateCoordinator` (REST settings polling,
+  pending-write deferral, WebSocket delta merge, gateway device metadata);
+  `energy.py` holds `EnergyStateCoordinator` (HH:05 REST sample polls,
+  WebSocket sample leases, energy/power snapshots); `base.py` holds the shared
+  `RaiseUpdateFailedCoordinator` base and logger wrapper.
 - `backend/` — vendor-specific REST/WS clients (including the REST client
   implementation), protocol details, and brand selection.
+  `backend/ducaheat_engineio.py` holds the pure Engine.IO v3 polling framing
+  and Socket.IO event encode/decode; `backend/ducaheat_ws.py` holds the
+  stateful Ducaheat client (handshake, read loop, subscriptions, health and
+  idle recovery).
 - `coerce.py` — the only lenient value coercers (`as_float`, `as_number`,
   `as_int`, `as_bool`, `as_percentage`); each returns `None` instead of raising
   and has one documented semantics (see the module docstring).
