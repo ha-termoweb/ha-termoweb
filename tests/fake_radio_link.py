@@ -51,6 +51,7 @@ def received(
     dst: int = STATION,
     dialect: Dialect = DIALECT_B,
     tag: int = 0,
+    network_id: bytes | None = None,
 ) -> ReceivedFrame:
     """Return a decoded heater frame as the link would deliver it."""
 
@@ -61,7 +62,7 @@ def received(
         payload,
         tag=tag,
         path=(src, dst, 1, 1, 1),
-        network_id=dialect.network_id or NET,
+        network_id=network_id or dialect.network_id or NET,
     )
     return ReceivedFrame(decode(dialect, air), -60.0, 0, 1000)
 
@@ -195,7 +196,9 @@ class FakeRadioLink:
         queue = self.replies.get(frame.payload[0])
         if queue:
             payload = queue.pop(0) if len(queue) > 1 else queue[0]
-            self.deliver(received(dst, payload, dialect=self.dialect))
+            self.deliver(
+                received(dst, payload, dialect=self.dialect, network_id=self.network_id)
+            )
         return AckResult(True, 1, 100, received_ack(dst))
 
     async def set_network_id(self, network_id: bytes) -> None:

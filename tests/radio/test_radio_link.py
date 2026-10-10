@@ -280,6 +280,27 @@ async def test_send_frame_ack_on_second_attempt_ignores_other_acks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_frames_from_another_network_are_ignored() -> None:
+    """A neighbour's ack or reply with the same ids does not count as ours."""
+    gw, ft, link = await connected()
+    foreign = bytes.fromhex("5678")  # synthetic neighbouring network id
+    gw.responder = heater(DIALECT_B, HEATER, network_id=foreign)
+    air = build_frame(DIALECT_B, 1, HEATER, b"\xb8", network_id=NET)
+    assert not (await link.send_frame(HEATER, air, retries=1)).ok
+
+    own_ack = rx_line(build_ack(DIALECT_B, HEATER, 1, NET))
+    foreign_reply = rx_line(
+        build_frame(DIALECT_B, HEATER, 1, b"\xb9\x21\x25\x2a\x02", network_id=foreign)
+    )
+    gw.responder = lambda air: [own_ack, foreign_reply]
+    reply = await link.request(
+        HEATER, p.request_status(), p.reply_predicate(p.OP_STATUS)
+    )
+    assert reply is None
+    await link.close()
+
+
+@pytest.mark.asyncio
 async def test_send_frame_without_ack_wait() -> None:
     """wait_ack=False returns as soon as the gateway confirms TX."""
     gw, ft, link = await connected()
