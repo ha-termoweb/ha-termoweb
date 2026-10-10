@@ -441,7 +441,7 @@ async def test_write_soon_after_reconnect_keeps_new_session(
     env: Env, hass: HomeAssistant, write_mock: AsyncMock
 ) -> None:
     """A write is judged on the current session, not the previous one's silence."""
-    session = FakeSession(get=_ok_handshake)
+    session = WSFakeSession(get=_ok_handshake)
     client = env.client(session)
     client.start()
     await until(lambda: len(session.sockets) == 1, "socket")
@@ -494,7 +494,7 @@ async def test_write_without_open_session_restarts_nothing(
             await settle()
             await hass.async_block_till_done()
 
-    session = FakeSession(get=_ok_handshake)
+    session = WSFakeSession(get=_ok_handshake)
     client = env.client(session)
     await _set_temperature()  # never connected
     assert session.sockets == []
