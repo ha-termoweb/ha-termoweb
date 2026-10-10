@@ -283,27 +283,6 @@ async def test_connect_once_aborts_when_stopping(
 
 
 @pytest.mark.asyncio
-async def test_debug_probe_handles_logging(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """debug_probe should respect logging configuration and handle emit failures."""
-
-    client, sio, _ = _make_client(monkeypatch)
-
-    monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: False)
-    await client.debug_probe()
-
-    caplog.set_level(logging.DEBUG)
-    monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
-    sio.emit = AsyncMock(return_value=None)
-    await client.debug_probe()
-    assert "debug probe dev_data emitted" in caplog.text
-
-    sio.emit = AsyncMock(side_effect=RuntimeError("boom"))
-    await client.debug_probe()
-
-
-@pytest.mark.asyncio
 async def test_wait_for_events_cancels_pending_tasks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

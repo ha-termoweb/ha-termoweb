@@ -129,3 +129,24 @@ def test_async_step_reconfigure_invalid_brand_defaults(
     assert result["type"] == "form"
     schema = result["data_schema"]
     assert _schema_default(schema, "brand") == config_flow.DEFAULT_BRAND
+
+
+@pytest.mark.parametrize(
+    ("brand", "supported"),
+    [
+        (config_flow.BRAND_TERMOWEB, False),
+        (config_flow.BRAND_DUCAHEAT, False),
+        (config_flow.BRAND_TEVOLVE, False),
+        (config_flow.BRAND_RADIO_MONITOR, False),
+        (config_flow.BRAND_RADIO, True),
+    ],
+)
+def test_options_flow_offered_only_for_radio_entries(
+    brand: str, supported: bool
+) -> None:
+    """Cloud and listen-only entries have no options, so HA must not offer a form."""
+    entry = ConfigEntry("entry-id", data={"brand": brand})
+
+    assert (
+        config_flow.TermoWebConfigFlow.async_supports_options_flow(entry) is supported
+    )

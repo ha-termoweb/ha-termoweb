@@ -227,7 +227,6 @@ reconnects; it does no harm.
 | Energy history import service | ➖ | Not applicable: radio heaters keep no energy history to import. Logs "not supported by this backend". |
 | Hourly samples poller | ➖ | Not needed: the listener pushes the energy estimate live; the poller gets `{}`. |
 | Gateway connectivity binary sensor | ✅ | From the listener's health tracker. |
-| Websocket debug probe service | ➖ | Not applicable. |
 | Geo data / device location | ➖ | Not applicable; the location sensor is not created (`geo_data` capability off). |
 | Gateway RTC | ✅ | Local time. |
 

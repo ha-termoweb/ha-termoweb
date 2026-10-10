@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "TermoWeb Optionen",
-        "description": "Version: {version}",
-        "data": {
-          "debug": "Debug-Hilfsmittel einschalten"
-        }
+        "title": "TermoWeb Optionen"
       }
     }
   },
@@ -187,22 +183,6 @@
         "max_history_retrieval": {
           "name": "Max Geschichte Tage",
           "description": "Anzahl der Tage des abzurufenden Verlaufs. Setzt die konfigurierte Vorgabe nur für diesen Import außer Kraft."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Websocket-Debug-Sonde aussenden",
-      "description": "Fordert eine sofortige ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``-Framegröße an. Aktivieren Sie die Debug-Option in den Integrationseinstellungen, bevor Sie diese Hilfestellung verwenden.",
-      "fields": {
-        "entry_id": {
-          "name": "Konfig-Eintrag ID",
-          "description": "Beschränken Sie die Sonde auf einen einzigen TermoWeb-Konfigurationseintrag.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Geräte-ID",
-          "description": "Beschränken Sie die Sonde auf ein einzelnes Gateway-Gerät.",
-          "example": "0000abcd"
         }
       }
     }

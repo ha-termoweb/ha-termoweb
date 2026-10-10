@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "TermoWeb Opties",
-        "description": "Versie: {version}",
-        "data": {
-          "debug": "Debughelpers inschakelen"
-        }
+        "title": "TermoWeb Opties"
       }
     }
   },
@@ -173,22 +169,6 @@
         "max_history_retrieval": {
           "name": "Max geschiedenis dagen",
           "description": "Aantal dagen geschiedenis om op te halen. Overschrijft de geconfigureerde standaard alleen voor deze import."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Zend websocket debug probe uit",
-      "description": "Vraag een onmiddellijke ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` framematen aan. Schakel de debug-optie in de integratie-instellingen in voordat je deze helper gebruikt.",
-      "fields": {
-        "entry_id": {
-          "name": "Configuratie invoer ID",
-          "description": "Beperk de controleregel tot een enkele TermoWeb configuratie-invoer.",
-          "example": "abcd1234doodbeef"
-        },
-        "dev_id": {
-          "name": "Apparaat-ID",
-          "description": "Beperk de probe tot een enkel gateway-apparaat.",
-          "example": "0000abcd"
         }
       }
     }

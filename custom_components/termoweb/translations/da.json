@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "TermoWeb-indstillinger",
-        "description": "Version: {version}",
-        "data": {
-          "debug": "Aktivér fejlfindingshjælpere"
-        }
+        "title": "TermoWeb-indstillinger"
       }
     }
   },
@@ -173,22 +169,6 @@
         "max_history_retrieval": {
           "name": "Max historie dage",
           "description": "Antal dages historik, der skal hentes. Overstyrer kun den konfigurerede standard for denne import."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Udsend websocket-fejlsøgningsprobe",
-      "description": "Anmod om en øjeblikkelig ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` rammestørrelse. Aktivér debug-indstillingen i integrationsindstillingerne, før du bruger denne hjælper.",
-      "fields": {
-        "entry_id": {
-          "name": "ID for konfigurationspost",
-          "description": "Begræns proben til en enkelt TermoWeb-konfigurationsindgang.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Enheds-ID",
-          "description": "Begræns proben til en enkelt gateway-enhed.",
-          "example": "0000abcd"
         }
       }
     }

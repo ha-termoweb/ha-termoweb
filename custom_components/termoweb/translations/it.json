@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Opzioni TermoWeb",
-        "description": "Versione: {version}",
-        "data": {
-          "debug": "Abilitare gli helper di debug"
-        }
+        "title": "Opzioni TermoWeb"
       }
     }
   },
@@ -187,22 +183,6 @@
         "max_history_retrieval": {
           "name": "Giorni massimi di storia",
           "description": "Numero di giorni di cronologia da recuperare. Sovrascrive il valore predefinito configurato solo per questa importazione."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Emettere una sonda di debug websocket",
-      "description": "Richiedere una dimensione immediata dei fotogrammi ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``. Abilitare l'opzione di debug nelle impostazioni di integrazione prima di usare questo helper.",
-      "fields": {
-        "entry_id": {
-          "name": "ID voce di configurazione",
-          "description": "Limita la sonda a una singola voce di configurazione di TermoWeb.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "ID dispositivo",
-          "description": "Limitare la sonda a un solo dispositivo gateway.",
-          "example": "0000abcd"
         }
       }
     }

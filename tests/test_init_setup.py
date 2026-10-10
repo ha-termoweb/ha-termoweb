@@ -282,147 +282,6 @@ class _StubServices:
         self._handlers[(domain, service)] = handler
 
 
-@pytest.mark.asyncio
-async def test_ws_debug_probe_service_skips_when_registered(
-    termoweb_init: Any,
-) -> None:
-    class TrackingServices(_StubServices):
-        def __init__(self) -> None:
-            super().__init__()
-            self.register_calls: list[
-                tuple[str, str, Callable[[ServiceCall], Any]]
-            ] = []
-
-        def async_register(
-            self,
-            domain: str,
-            service: str,
-            handler: Callable[[ServiceCall], Any],
-        ) -> None:
-            self.register_calls.append((domain, service, handler))
-            super().async_register(domain, service, handler)
-
-    services = TrackingServices()
-    existing_handler = lambda call: None
-    services._handlers[(termoweb_init.DOMAIN, "ws_debug_probe")] = existing_handler
-
-    hass = SimpleNamespace(
-        services=services,
-        data={},
-        loop=asyncio.get_running_loop(),
-    )
-
-    await termoweb_init.async_register_ws_debug_probe_service(hass)
-
-    assert services.register_calls == []
-    assert (
-        services._handlers[(termoweb_init.DOMAIN, "ws_debug_probe")] is existing_handler
-    )
-
-
-@pytest.mark.asyncio
-async def test_ws_debug_probe_service_handles_client_matrix(
-    termoweb_init: Any,
-) -> None:
-    services = _StubServices()
-    hass = SimpleNamespace(
-        services=services,
-        data={},
-        loop=asyncio.get_running_loop(),
-    )
-
-    await termoweb_init.async_register_ws_debug_probe_service(hass)
-    handler = services._handlers[(termoweb_init.DOMAIN, "ws_debug_probe")]
-
-    hass.data[termoweb_init.DOMAIN] = ["invalid"]
-    await handler(ServiceCall({}))
-
-    hass.data[termoweb_init.DOMAIN] = {
-        "other": {"debug": True, "ws_clients": {}},
-    }
-    await handler(ServiceCall({"entry_id": "missing"}))
-
-    class TypeErrorClient:
-        def debug_probe(self, _: str) -> None:
-            return None
-
-    class NonAwaitClient:
-        def debug_probe(self) -> str:
-            return "not-awaitable"
-
-    class AsyncProbeClient:
-        def __init__(self, *, should_fail: bool = False) -> None:
-            self.should_fail = should_fail
-            self.calls = 0
-
-        def debug_probe(self) -> Coroutine[Any, Any, int]:
-            self.calls += 1
-
-            async def _runner() -> int:
-                if self.should_fail:
-                    raise RuntimeError("boom")
-                return self.calls
-
-            return _runner()
-
-    class CancelledProbeClient:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def debug_probe(self) -> Coroutine[Any, Any, None]:
-            self.calls += 1
-
-            async def _runner() -> None:
-                raise asyncio.CancelledError
-
-            return _runner()
-
-    clients = {
-        "missing": None,
-        "no_probe": object(),
-        "type_error": TypeErrorClient(),
-        "nonawait": NonAwaitClient(),
-        "ok": AsyncProbeClient(),
-        "error": AsyncProbeClient(should_fail=True),
-        "cancel": CancelledProbeClient(),
-    }
-
-    hass.data[termoweb_init.DOMAIN] = {}
-    entry1 = build_entry_runtime(
-        hass=hass,
-        entry_id="entry1",
-        dev_id="dev-1",
-    )
-    entry1.debug = False
-    entry1.ws_clients = {}
-    entry2 = build_entry_runtime(
-        hass=hass,
-        entry_id="entry2",
-        dev_id="dev-2",
-    )
-    entry2.debug = True
-    entry2.ws_clients = clients
-    entry3 = build_entry_runtime(
-        hass=hass,
-        entry_id="entry3",
-        dev_id="dev-3",
-    )
-    entry3.debug = True
-    entry3.ws_clients = {}
-
-    await handler(ServiceCall({"entry_id": "entry2", "dev_id": "missing"}))
-
-    with pytest.raises(asyncio.CancelledError):
-        await handler(ServiceCall({}))
-
-    clients["cancel"] = AsyncProbeClient()
-
-    await handler(ServiceCall({}))
-
-    assert clients["ok"].calls == 2
-    assert clients["error"].calls == 2
-
-
 def test_async_setup_entry_happy_path(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -555,43 +414,43 @@ def test_async_setup_entry_sets_supports_diagnostics_boolean_when_enum_missing(
     assert entry.data["supports_diagnostics"] is True
 
 
-def test_async_setup_entry_unknown_node_probe(
+def test_async_setup_entry_logs_unknown_node_types_without_probing(
     termoweb_init: Any,
     stub_hass: HomeAssistant,
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Unknown node types are logged at DEBUG; setup sends no extra probe GETs."""
+
     class ProbeClient(BaseFakeClient):
         instances: list["ProbeClient"] = []
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
-            self.probe_calls: list[
-                tuple[str, Mapping[str, str], Mapping[str, str]]
-            ] = []
-            self._headers = {"Authorization": "Bearer token", "User-Agent": "UA"}
+            self.probe_calls: list[str] = []
             ProbeClient.instances.append(self)
-
-        async def authed_headers(self) -> Mapping[str, str]:
-            return dict(self._headers)
 
         async def list_devices(self) -> list[dict[str, Any]]:
             return [{"dev_id": "dev-1"}]
 
         async def get_nodes(self, dev_id: str) -> dict[str, Any]:
             await super().get_nodes(dev_id)
-            return {"nodes": [{"addr": "9", "type": "foo"}]}
+            return {
+                "nodes": [
+                    {"addr": "9", "type": "foo"},
+                    {"addr": "9", "type": "foo"},
+                    {"addr": "1", "type": "htr"},
+                ]
+            }
 
-        async def debug_probe_get(
-            self,
-            path: str,
-            *,
-            headers: Mapping[str, str] | None = None,
-            params: Mapping[str, Any] | None = None,
-        ) -> None:
-            header_map = dict(headers or {})
-            param_map = {str(k): str(v) for k, v in (params or {}).items()}
-            self.probe_calls.append((path, header_map, param_map))
+        async def authed_headers(self) -> Mapping[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        async def get_node_samples(self, *_args: Any, **_kwargs: Any) -> list[Any]:
+            return []
+
+        async def debug_probe_get(self, path: str, **_kwargs: Any) -> None:
+            self.probe_calls.append(path)
 
     monkeypatch.setattr(backend_factory, "RESTClient", ProbeClient)
 
@@ -608,18 +467,14 @@ def test_async_setup_entry_unknown_node_probe(
     assert asyncio.run(_run()) is True
 
     assert ProbeClient.instances, "REST client was not instantiated"
-    client = ProbeClient.instances[0]
-    assert [call[0] for call in client.probe_calls] == [
-        "/api/v2/devs/dev-1/foo/9",
-        "/api/v2/devs/dev-1/foo/9/settings",
-        "/api/v2/devs/dev-1/foo/9/samples",
-    ]
-    assert client.probe_calls[2][2] == {"end": "0", "start": "0"}
-    assert any(
-        record.message == "Unknown node type found: foo/9"
+    assert ProbeClient.instances[0].probe_calls == []
+    unknown = [
+        record.message
         for record in caplog.records
         if record.name.startswith("custom_components.termoweb")
-    )
+        and record.message.startswith("Unknown node type found")
+    ]
+    assert unknown == ["Unknown node type found: foo/9"]
 
 
 def test_async_setup_entry_backfills_diagnostics_marker(
@@ -2068,21 +1923,6 @@ def test_async_unload_entry_cleans_up(
         (entry, tuple(termoweb_init.PLATFORMS))
     ]
     assert entry.entry_id not in stub_hass.data.get(termoweb_init.DOMAIN, {})
-
-
-def test_async_update_entry_options_recalculates_poll(
-    termoweb_init: Any, stub_hass: HomeAssistant
-) -> None:
-    entry = ConfigEntry("options", data={})
-    stub_hass.config_entries.add(entry)
-    recalc_calls: list[bool] = []
-    record = build_entry_runtime(hass=stub_hass, entry_id=entry.entry_id)
-    record.ws_tasks.clear()
-    record.ws_clients.clear()
-    record.recalc_poll = lambda: recalc_calls.append(True)
-
-    asyncio.run(termoweb_init.async_update_entry_options(stub_hass, entry))
-    assert recalc_calls == [True]
 
 
 def test_async_unload_entry_missing_returns_true(

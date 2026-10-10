@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Opcje TermoWeb",
-        "description": "Wersja: {version}",
-        "data": {
-          "debug": "Włącz pomocników debugowania"
-        }
+        "title": "Opcje TermoWeb"
       }
     }
   },
@@ -187,22 +183,6 @@
         "max_history_retrieval": {
           "name": "Maksymalna liczba dni historii",
           "description": "Liczba dni historii do pobrania. Zastępuje skonfigurowane ustawienia domyślne tylko dla tego importu."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Wysyłanie sondy debugowania websocket",
-      "description": "Żądanie natychmiastowych rozmiarów ramek ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``. Przed użyciem tego pomocnika należy włączyć opcję debugowania w ustawieniach integracji.",
-      "fields": {
-        "entry_id": {
-          "name": "Identyfikator wpisu konfiguracji",
-          "description": "Ograniczenie sondy do pojedynczego wpisu konfiguracji TermoWeb.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Identyfikator urządzenia",
-          "description": "Ograniczenie sondy do jednego urządzenia bramy.",
-          "example": "0000abcd"
         }
       }
     }

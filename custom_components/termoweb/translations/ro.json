@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Opțiuni TermoWeb",
-        "description": "Versiune: {version}",
-        "data": {
-          "debug": "Activați ajutoarele de depanare"
-        }
+        "title": "Opțiuni TermoWeb"
       }
     }
   },
@@ -187,22 +183,6 @@
         "max_history_retrieval": {
           "name": "Max zile de istorie",
           "description": "Numărul de zile de istoric care urmează să fie recuperat. Suprascrie valoarea implicită configurată numai pentru acest import."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Emite sonda de depanare websocket",
-      "description": "Solicită o dimensiune imediată a cadrului ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``. Activați opțiunea de depanare în setările de integrare înainte de a utiliza acest helper.",
-      "fields": {
-        "entry_id": {
-          "name": "ID intrare configurare",
-          "description": "Limitați sonda la o singură intrare de configurare TermoWeb.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "ID dispozitiv",
-          "description": "Limitați sonda la un singur dispozitiv gateway.",
-          "example": "0000abcd"
         }
       }
     }

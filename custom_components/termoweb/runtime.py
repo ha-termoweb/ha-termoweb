@@ -42,7 +42,6 @@ class EntryRuntime:
     ws_trackers: dict[str, Any] = field(default_factory=dict)
     version: str = ""
     brand: str = ""
-    debug: bool = False
     last_energy_import_summary: dict[str, Any] | None = None
     last_radio_survey: dict[str, Any] | None = None
     last_radio_capture: dict[str, Any] | None = None

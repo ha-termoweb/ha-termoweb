@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "TermoWeb lehetőségek",
-        "description": "Változat: {version}",
-        "data": {
-          "debug": "A hibakeresési segédprogramok engedélyezése"
-        }
+        "title": "TermoWeb lehetőségek"
       }
     }
   },
@@ -173,22 +169,6 @@
         "max_history_retrieval": {
           "name": "Max történelem napok",
           "description": "A lekérdezendő előzmények napjainak száma. Csak erre az importra vonatkozóan írja felül a konfigurált alapértelmezett értéket."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Websocket hibakereső szonda küldése",
-      "description": "Azonnali ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` keretméretek kérése. Engedélyezze a debug opciót az integrációs beállításokban, mielőtt ezt a segédprogramot használná.",
-      "fields": {
-        "entry_id": {
-          "name": "Konfigurációs bejegyzés azonosítója",
-          "description": "A szonda korlátozása egyetlen TermoWeb konfigurációs bejegyzésre.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Eszköz azonosítója",
-          "description": "A szonda egyetlen átjáróeszközre való korlátozása.",
-          "example": "0000abcd"
         }
       }
     }

@@ -4,8 +4,8 @@ custom_components/termoweb/__init__.py :: _platforms_for_brand
     Return entity platforms enabled for the configured brand.
 custom_components/termoweb/__init__.py :: _async_import_energy_history
     Delegate to the energy helper with shared rate limiting and filters.
-custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
-    Log discovery probes for node types not yet supported.
+custom_components/termoweb/__init__.py :: _log_unknown_node_types
+    Log node types the integration does not support yet.
 custom_components/termoweb/__init__.py :: async_list_devices
     Call ``list_devices`` logging auth/connection issues consistently.
 custom_components/termoweb/__init__.py :: _create_monitor_client
@@ -40,8 +40,6 @@ custom_components/termoweb/__init__.py :: async_unload_entry
     Unload a config entry for TermoWeb.
 custom_components/termoweb/__init__.py :: async_migrate_entry
     Migrate a config entry; no migrations are needed yet.
-custom_components/termoweb/__init__.py :: async_update_entry_options
-    Handle options updates; recompute interval if needed.
 custom_components/termoweb/backend/base.py :: HttpClientProto.list_devices
     Return the list of devices associated with the account.
 custom_components/termoweb/backend/base.py :: HttpClientProto.get_nodes
@@ -86,8 +84,6 @@ custom_components/termoweb/backend/base.py :: normalise_sample_records
     Return sorted sample dictionaries containing ``ts`` and ``energy_wh``.
 custom_components/termoweb/backend/base.py :: fetch_normalised_hourly_samples
     Return per-node normalised samples for ``nodes`` between ``start`` and ``end``.
-custom_components/termoweb/backend/debug.py :: build_unknown_node_probe_requests
-    Return common REST endpoints to query for an unknown node type.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRequestError.__init__
     Initialise error metadata for logging and diagnostics.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._post_segmented
@@ -326,8 +322,6 @@ custom_components/termoweb/backend/rest_client.py :: RESTClient.set_acm_extra_op
     Write default boost settings for an accumulator.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.set_acm_boost_state
     Start or stop an accumulator boost session.
-custom_components/termoweb/backend/rest_client.py :: RESTClient.debug_probe_get
-    Issue a GET request with verbose logging for discovery probes.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.get_node_samples
     Return heater samples as list of {"t", "counter"} dicts.
 custom_components/termoweb/backend/rest_client.py :: RESTClient._resolve_node_descriptor
@@ -362,8 +356,6 @@ custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.start
     Start the websocket client background task.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.stop
     Cancel tasks and close websocket sessions.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.debug_probe
-    Emit a dev_data probe for debugging purposes.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._runner
     Manage connection attempts with backoff.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._handle_connection_lost
@@ -830,6 +822,8 @@ custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._handle_login_wo
     Handle shared login form validation and error handling.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_get_options_flow
     Return the options flow handler for this config entry.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_supports_options_flow
+    Offer options only for radio gateway entries; cloud entries have none.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_user
     Offer the cloud account or the local radio gateway.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_cloud
@@ -873,13 +867,9 @@ custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_recon
 custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.__init__
     Store the entry being configured.
 custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_init
-    Radio entries choose settings or pairing; others go to the settings form.
-custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow._is_radio
-    Return True for a radio gateway or nanoCUL entry.
+    Let the user choose settings, pairing or rehoming.
 custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_settings
-    Show or save the settings form of a radio entry.
-custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow._settings_step
-    Show or process the options form: debug, plus heater power for radio.
+    Show or save the heater power form of a radio entry.
 custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_pair_heaters
     Explain pairing mode; start pairing into this entry's network on submit.
 custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_pair_run
@@ -1840,10 +1830,6 @@ custom_components/termoweb/services/radio_capture.py :: async_register_radio_cap
     Register the radio_capture service once.
 custom_components/termoweb/services/radio_capture.py :: async_register_radio_capture_service._async_radio_capture
     Record the air, save the frames as JSON and return a short summary.
-custom_components/termoweb/services/ws_debug_probe.py :: async_register_ws_debug_probe_service
-    Register the ws_debug_probe debug helper service.
-custom_components/termoweb/services/ws_debug_probe.py :: async_register_ws_debug_probe_service._async_ws_debug_probe
-    Emit a websocket dev_data probe for debugging.
 custom_components/termoweb/services/radio_survey.py :: async_register_radio_survey_service
     Register the radio_survey service once.
 custom_components/termoweb/services/radio_survey.py :: async_register_radio_survey_service._async_radio_survey

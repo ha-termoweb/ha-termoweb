@@ -103,8 +103,6 @@
     "step": {
       "init": {
         "title": "TermoWeb Options",
-        "description": "Version: {version}\n\n{heaters}",
-        "data": { "debug": "Enable debug helpers" },
         "menu_options": {
           "settings": "Settings",
           "pair_heaters": "Pair a new heater",
@@ -113,8 +111,7 @@
       },
       "settings": {
         "title": "TermoWeb Options",
-        "description": "Version: {version}\n\n{heaters}",
-        "data": { "debug": "Enable debug helpers" }
+        "description": "Version: {version}\n\n{heaters}"
       },
       "pair_heaters": {
         "title": "Pair a new heater",
@@ -274,22 +271,6 @@
         "max_history_retrieval": {
           "name": "Max history days",
           "description": "Number of days of history to retrieve. Overrides the configured default for this import only."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Emit websocket debug probe",
-      "description": "Request an immediate ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` frame sizes. Enable the debug option in the integration settings before using this helper.",
-      "fields": {
-        "entry_id": {
-          "name": "Config entry ID",
-          "description": "Restrict the probe to a single TermoWeb config entry.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Device ID",
-          "description": "Restrict the probe to a single gateway device.",
-          "example": "0000abcd"
         }
       }
     },

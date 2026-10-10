@@ -108,13 +108,6 @@ async def test_listen_only_entry_cannot_be_reconfigured() -> None:
     assert result == {"type": "abort", "reason": "monitor_reconfigure"}
 
 
-@pytest.mark.asyncio
-async def test_listen_only_options_have_no_pairing() -> None:
-    hass = HomeAssistant()
+def test_listen_only_entries_have_no_options() -> None:
     entry = ConfigEntry("monitor", data={"brand": "radio_monitor"})
-    hass.config_entries.add_entry(entry)
-    flow = config_flow.TermoWebOptionsFlow(entry)
-    flow.hass = hass
-    form = await flow.async_step_init()
-    assert form["type"] == "form" and form["step_id"] == "init"
-    assert form["description_placeholders"]["heaters"] == ""
+    assert not config_flow.TermoWebConfigFlow.async_supports_options_flow(entry)

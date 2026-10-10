@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Možnosti TermoWeb",
-        "description": "Različica: {version}",
-        "data": {
-          "debug": "Omogočite pomočnike za odpravljanje napak"
-        }
+        "title": "Možnosti TermoWeb"
       }
     }
   },
@@ -173,22 +169,6 @@
         "max_history_retrieval": {
           "name": "Največ dni zgodovine",
           "description": "Število dni zgodovine, ki jih želite priklicati. Nadomešča nastavljeno privzeto vrednost samo za ta uvoz."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Oddajte sondo za odpravljanje napak v spletnem vtičniku",
-      "description": "Zahtevajte takojšnje ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` velikosti okvirjev. Pred uporabo tega pomočnika v nastavitvah integracije omogočite možnost razhroščevanja.",
-      "fields": {
-        "entry_id": {
-          "name": "ID konfiguracijskega vnosa",
-          "description": "Omejite sondo na en sam vnos konfiguracije TermoWeb.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "ID naprave",
-          "description": "Omejite sondo na eno samo prehodno napravo.",
-          "example": "0000abcd"
         }
       }
     }

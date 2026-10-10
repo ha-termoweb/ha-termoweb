@@ -384,7 +384,7 @@ async def test_radio_options_store_heater_rated_power() -> None:
         "energy_history_progress": {"htr:6": 1_700_000_000},
         "energy_history_imported": True,
     }
-    flow = config_flow.TermoWebOptionsFlow(entry)
+    flow = config_flow.TermoWebConfigFlow.async_get_options_flow(entry)
     flow.hass = hass
 
     menu = await flow.async_step_init()
@@ -396,13 +396,25 @@ async def test_radio_options_store_heater_rated_power() -> None:
     assert (default() if callable(default) else default) == 1200
     assert "rated_power_6 = heater 6" in form["description_placeholders"]["heaters"]
 
-    result = await flow.async_step_settings({"debug": True, "rated_power_6": 1500})
+    result = await flow.async_step_settings({"rated_power_6": 1500})
     assert result["data"] == {
-        "debug": True,
         "radio_power": {"power_limit": 2000, "rated_power": {"6": 1500}},
         "energy_history_progress": {"htr:6": 1_700_000_000},
         "energy_history_imported": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_radio_options_without_heaters_keep_existing_options() -> None:
+    hass = HomeAssistant()
+    entry = _radio_entry(hass)
+    entry.data = {**entry.data, "nodes": []}
+    entry.options = {"energy_history_imported": True}
+    flow = config_flow.TermoWebOptionsFlow(entry)
+    flow.hass = hass
+
+    result = await flow.async_step_settings({})
+    assert result["data"] == {"energy_history_imported": True}
 
 
 def _report(verdict: str, dialect: str | None = None, nets: tuple[str, ...] = ()):

@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "TermoWeb opcijas",
-        "description": "Versija: {version}",
-        "data": {
-          "debug": "Debug palīgrīku iespējošana"
-        }
+        "title": "TermoWeb opcijas"
       }
     }
   },
@@ -173,22 +169,6 @@
         "max_history_retrieval": {
           "name": "Maksimālais vēstures dienu skaits",
           "description": "Atgūstamo vēstures dienu skaits. Aizstāj konfigurēto noklusējuma iestatījumu tikai šim importam."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Emitēt Websocket atkļūdošanas zondi",
-      "description": "Pieprasīt tūlītēju ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` kadru izmēru. Pirms šī palīgrīka izmantošanas integrācijas iestatījumos iespējojiet atkļūdošanas opciju.",
-      "fields": {
-        "entry_id": {
-          "name": "Konfigurācijas ieraksta ID",
-          "description": "Ierobežojiet zondes darbību līdz vienam TermoWeb konfigurācijas ierakstam.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Ierīces ID",
-          "description": "Ierobežojiet zondes darbību tikai uz vienu vārtejas ierīci.",
-          "example": "0000abcd"
         }
       }
     }

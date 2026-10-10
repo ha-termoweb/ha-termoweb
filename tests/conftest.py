@@ -1454,6 +1454,15 @@ def _install_stubs() -> None:
         async def async_set_unique_id(self, unique_id: str) -> None:
             self._unique_id = unique_id
 
+        @staticmethod
+        def async_get_options_flow(config_entry: Any) -> Any:
+            raise NotImplementedError
+
+        @classmethod
+        def async_supports_options_flow(cls, config_entry: Any) -> bool:
+            # Mirrors homeassistant.config_entries.ConfigFlow.
+            return cls.async_get_options_flow is not ConfigFlow.async_get_options_flow
+
         def _abort_if_unique_id_configured(self) -> None:
             return None
 

@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "TermoWebi valikud",
-        "description": "Versioon: {version}",
-        "data": {
-          "debug": "Lubage silumisvahendid sisse lülitada"
-        }
+        "title": "TermoWebi valikud"
       }
     }
   },
@@ -173,22 +169,6 @@
         "max_history_retrieval": {
           "name": "Maksimaalne ajaloopäevad",
           "description": "Ajaloo päevade arv, mis tuleb välja otsida. Kõrvaldab ainult selle impordi puhul seadistatud vaikimisi väärtuse."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Emit websocket debug sond",
-      "description": "Taotle koheselt ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` kaadri suurust. Enne selle abimehe kasutamist lülitage integratsiooni seadetes sisse debugimisvõimalus.",
-      "fields": {
-        "entry_id": {
-          "name": "Config kirje ID",
-          "description": "Piirake sondi kasutamine ühe TermoWebi konfiguratsioonikandega.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Seadme ID",
-          "description": "Piirake sondi kasutamine ühe väravaseadmega.",
-          "example": "0000abcd"
         }
       }
     }

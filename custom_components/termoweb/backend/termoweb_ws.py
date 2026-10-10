@@ -316,17 +316,6 @@ class WebSocketClient(_WSCommon):
         self._update_status("stopped")
         self._cleanup_ws_state()
 
-    async def debug_probe(self, inventory: Inventory | None = None) -> None:
-        """Emit a dev_data probe for debugging purposes."""
-
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
-        try:
-            await self._sio.emit("dev_data", namespace=self._namespace)
-            _LOGGER.debug("WS: debug probe dev_data emitted")
-        except Exception:
-            _LOGGER.debug("WS: debug probe dev_data emit failed", exc_info=True)
-
     # ------------------------------------------------------------------
     # Core loop and protocol dispatch
     # ------------------------------------------------------------------

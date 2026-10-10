@@ -15,17 +15,16 @@ from custom_components.termoweb.backend.rest_client import (
     BackendAuthError,
     BackendRateLimitError,
 )
+from custom_components.termoweb import config_flow  # noqa: F401 (registers handler)
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
+    BRAND_RADIO,
+    BRAND_RADIO_MONITOR,
     BRAND_TERMOWEB,
     BRAND_TEVOLVE,
     CONF_BRAND,
     DEFAULT_BRAND,
     DOMAIN,
-)
-from custom_components.termoweb.energy import (
-    OPTION_ENERGY_HISTORY_IMPORTED,
-    OPTION_ENERGY_HISTORY_PROGRESS,
 )
 
 from .conftest import PASSWORD, USERNAME, VERSION, FakeCloud
@@ -304,36 +303,21 @@ async def test_reconfigure_reloads_loaded_entry(
     assert hass.data[DOMAIN][config_entry.entry_id] is not runtime_before
 
 
-async def test_options_flow_keeps_unknown_keys(
-    hass: HomeAssistant, config_entry: MockConfigEntry
+@pytest.mark.parametrize(
+    ("brand", "supported"),
+    [
+        (BRAND_TERMOWEB, False),
+        (BRAND_DUCAHEAT, False),
+        (BRAND_TEVOLVE, False),
+        (BRAND_RADIO_MONITOR, False),
+        (BRAND_RADIO, True),
+    ],
+)
+async def test_options_flow_offered_only_for_radio_entries(
+    hass: HomeAssistant, brand: str, supported: bool
 ) -> None:
-    """Saving the options form keeps option keys the form does not own."""
-    progress = {"htr:1": 1_700_000_000}
-    config_entry.add_to_hass(hass)
-    hass.config_entries.async_update_entry(
-        config_entry,
-        options={
-            "debug": False,
-            OPTION_ENERGY_HISTORY_PROGRESS: progress,
-            OPTION_ENERGY_HISTORY_IMPORTED: True,
-            "future_option": "keep-me",
-        },
-    )
+    """Cloud and listen-only entries have no options, so HA hides "Configure"."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_BRAND: brand})
+    entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "init"
-    assert _defaults(result) == {"debug": False}
-    assert result["description_placeholders"] == {"version": VERSION, "heaters": ""}
-
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"debug": True}
-    )
-
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert config_entry.options == {
-        "debug": True,
-        OPTION_ENERGY_HISTORY_PROGRESS: progress,
-        OPTION_ENERGY_HISTORY_IMPORTED: True,
-        "future_option": "keep-me",
-    }
+    assert entry.supports_options is supported

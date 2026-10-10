@@ -29,13 +29,11 @@ from .backend import (
     create_radio_client,
     create_rest_client,
 )
-from .backend.debug import build_unknown_node_probe_requests
 from .backend.radio import RadioLinkError
 from .backend.radio.discovery import LISTEN_PLACEHOLDER_NET
 from .backend.radio_client import RadioError
 from .backend.radio_power import PowerManager
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
-from .backend.sanitize import redact_text
 from .const import (
     BRAND_DUCAHEAT as BRAND_DUCAHEAT,
     BRAND_RADIO,
@@ -80,7 +78,6 @@ from .services.energy_history import (
 from .services.radio_capture import async_register_radio_capture_service
 from .services.radio_pairing import async_register_radio_pairing_services
 from .services.radio_survey import async_register_radio_survey_service
-from .services.ws_debug_probe import async_register_ws_debug_probe_service
 from .throttle import reset_samples_rate_limit_state
 from .utils import async_get_integration_version as _async_get_integration_version
 
@@ -134,20 +131,10 @@ async def _async_import_energy_history(
     )
 
 
-async def _async_probe_unknown_node_types(
-    backend: Backend,
-    dev_id: str,
-    inventory: Inventory,
-) -> None:
-    """Log discovery probes for node types not yet supported."""
+def _log_unknown_node_types(inventory: Inventory) -> None:
+    """Log node types the integration does not support yet."""
 
     if not _LOGGER.isEnabledFor(logging.DEBUG):
-        return
-
-    client = getattr(backend, "client", None)
-    probe_get = getattr(client, "debug_probe_get", None)
-    authed_headers = getattr(client, "authed_headers", None)
-    if not callable(probe_get) or not callable(authed_headers):
         return
 
     seen: set[tuple[str, str]] = set()
@@ -162,44 +149,10 @@ async def _async_probe_unknown_node_types(
             getattr(node, "addr", None),
             use_default_when_falsey=True,
         )
-        dedupe_key = (node_type, addr)
-        if dedupe_key in seen:
+        if (node_type, addr) in seen:
             continue
-        seen.add(dedupe_key)
-        display_addr = addr or "<missing>"
-        _LOGGER.debug("Unknown node type found: %s/%s", node_type, display_addr)
-
-        requests = build_unknown_node_probe_requests(
-            backend.brand,
-            dev_id,
-            node_type,
-            addr,
-        )
-        if not requests:
-            continue
-
-        try:
-            headers = await authed_headers()
-        except Exception as err:  # noqa: BLE001 - best-effort logging only
-            _LOGGER.debug(
-                "Probe header preparation failed for %s/%s: %s",
-                node_type,
-                display_addr,
-                redact_text(str(err)),
-            )
-            continue
-
-        for path, params in requests:
-            try:
-                await probe_get(path, headers=headers, params=params)
-            except Exception as err:  # noqa: BLE001 - best-effort logging only
-                _LOGGER.debug(
-                    "Probe GET %s failed for %s/%s: %s",
-                    path,
-                    node_type,
-                    display_addr,
-                    redact_text(str(err)),
-                )
+        seen.add((node_type, addr))
+        _LOGGER.debug("Unknown node type found: %s/%s", node_type, addr or "<missing>")
 
 
 async def async_list_devices(client: RESTClient) -> Any:
@@ -385,7 +338,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     # Inventory-centric design: build and freeze the gateway/node topology once
     # during setup so every runtime component can trust the shared metadata.
     inventory = Inventory(dev_id, node_inventory)
-    await _async_probe_unknown_node_types(backend, dev_id, inventory)
+    _log_unknown_node_types(inventory)
     if inventory.nodes:
         type_counts = Counter(node.type for node in inventory.nodes)
         summary = ", ".join(
@@ -418,8 +371,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     poller = HourlySamplesPoller(hass, energy_coordinator, backend, inventory)
     await poller.async_setup()
 
-    debug_enabled = bool(entry.options.get("debug", entry.data.get("debug", False)))
-
     hass.data.setdefault(DOMAIN, {})
     runtime = EntryRuntime(
         backend=backend,
@@ -440,7 +391,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         ws_trackers={},
         version=version,
         brand=brand,
-        debug=debug_enabled,
         boost_runtime={},
         boost_temperature={},
         climate_entities={},
@@ -639,7 +589,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         _async_import_energy_history,
     )
 
-    await async_register_ws_debug_probe_service(hass)
     if brand in RADIO_BRANDS:
         await async_register_radio_survey_service(hass)
         await async_register_radio_capture_service(hass)
@@ -786,13 +735,3 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate a config entry; no migrations are needed yet."""
     return True
-
-
-async def async_update_entry_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Handle options updates; recompute interval if needed."""
-    runtime = hass.data[DOMAIN][entry.entry_id]
-    debug_enabled = bool(entry.options.get("debug", entry.data.get("debug", False)))
-    if isinstance(runtime, EntryRuntime):
-        runtime.debug = debug_enabled
-        if callable(runtime.recalc_poll):
-            runtime.recalc_poll()

@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Možnosti TermoWeb",
-        "description": "Verzia: {version}",
-        "data": {
-          "debug": "Povolenie pomocníkov ladenia"
-        }
+        "title": "Možnosti TermoWeb"
       }
     }
   },
@@ -187,22 +183,6 @@
         "max_history_retrieval": {
           "name": "Maximálny počet dní histórie",
           "description": "Počet dní histórie na načítanie. Prepíše nakonfigurované predvolené nastavenie len pre tento import."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Odoslanie ladiacej sondy websocket",
-      "description": "Vyžiadajte si okamžité veľkosti snímok ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``. Pred použitím tohto pomocníka povoľte možnosť ladenia v nastaveniach integrácie.",
-      "fields": {
-        "entry_id": {
-          "name": "ID položky konfigurácie",
-          "description": "Obmedzenie sondy na jednu položku konfigurácie TermoWebu.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "ID zariadenia",
-          "description": "Obmedzenie sondy na jedno zariadenie brány.",
-          "example": "0000abcd"
         }
       }
     }

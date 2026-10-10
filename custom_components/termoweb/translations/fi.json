@@ -21,11 +21,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "TermoWeb-vaihtoehdot",
-        "description": "Versio: {version}__",
-        "data": {
-          "debug": "Ota käyttöön debug-avustajat"
-        }
+        "title": "TermoWeb-vaihtoehdot"
       }
     }
   },
@@ -173,22 +169,6 @@
         "max_history_retrieval": {
           "name": "Enintään historian päiviä",
           "description": "Haettavien päivien lukumäärä. Ohittaa vain tälle tuonnille määritetyn oletusarvon."
-        }
-      }
-    },
-    "ws_debug_probe": {
-      "name": "Lähettää websocket debug anturi",
-      "description": "Pyydä välitöntä ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` kehyskokoa. Ota debug-vaihtoehto käyttöön integraatioasetuksissa ennen tämän apuvälineen käyttöä.",
-      "fields": {
-        "entry_id": {
-          "name": "Konfigurointimerkinnän ID",
-          "description": "Rajoita koetin yhteen TermoWebin konfigurointimerkintään.",
-          "example": "abcd1234deadbeef"
-        },
-        "dev_id": {
-          "name": "Laitteen tunnus",
-          "description": "Rajoita luotain yhteen yhdyskäytävälaitteeseen.",
-          "example": "0000abcd"
         }
       }
     }
