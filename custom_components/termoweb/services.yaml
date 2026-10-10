@@ -202,6 +202,12 @@ radio_capture:
       default: false
       selector:
         boolean:
+    note:
+      name: Note
+      description: Optional text saved in the file.
+      example: identify on the living room heater
+      selector:
+        text:
 
 radio_factory_reset:
   name: Radio factory reset

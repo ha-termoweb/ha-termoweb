@@ -46,9 +46,10 @@ dialects. Both are useful: if you have a nanoCUL, please send a capture too.
 3. Leave **Radio dialect** on **auto** and **Network id** empty. Press
    **Submit**.
 4. Choose **Listen only (record radio traffic, never transmit)**.
-5. A new device **Radio gateway** appears. It has two entities:
+5. A new entry **Radio monitor** appears, with a device **Radio monitor**.
+   It has two entities:
    - **Gateway online**: it should show *Connected*.
-   - **Radio frames heard**: this number goes up when the receiver hears
+   - **Frames heard**: this number goes up when the receiver hears
      radio traffic. Heaters and the gateway talk every few minutes. If the
      number stays at 0 for 10 minutes, move the receiver closer to a heater.
 
@@ -62,14 +63,16 @@ Read all of this step first. You need your phone and a clock.
 
 1. In Home Assistant, go to **Developer tools → Actions**.
 2. Choose the action **TermoWeb: Radio capture**.
-3. **Config entry ID**: choose your listen-only entry. **Duration**: 120
-   seconds. Leave **Hide private data** off (see step 4).
+3. **Config entry ID**: choose your **Radio monitor** entry. **Duration**:
+   120 seconds. Leave **Hide private data** off (see step 4). In **Note** you
+   can type which heater you will use, for example "living room".
 4. Press **Perform action**. The recording starts now and runs for 2 minutes.
 5. In the TermoWeb app, press **identify** on one heater **3 times**, about
    **20 seconds** apart. Each time, write down the time, with seconds if
    possible (for example 14:03:25). Also write down which heater you chose.
 6. Wait until the 2 minutes are over. Home Assistant then shows the result,
-   for example `frames: 42` and the name of a file.
+   for example `frames: 42` and the name of the file, for example
+   `termoweb_radio_capture_20260115T140310Z.json`.
 
 If `frames` is 0, the receiver heard nothing. Check **Gateway online**, move
 the receiver closer, and try again.
@@ -77,7 +80,7 @@ the receiver closer, and try again.
 ## Step 4: send us the file
 
 The file is in your Home Assistant configuration folder. Its name starts with
-`termoweb_radio_capture_`. You can download it with the **File editor** or
+`termoweb_radio_capture_` and ends with the time in UTC. You can download it with the **File editor** or
 **Studio Code Server** add-on, or with Samba.
 
 Send us, **privately** (not in a public GitHub issue):

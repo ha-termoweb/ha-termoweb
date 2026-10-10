@@ -87,7 +87,7 @@ def _write_json(path: str, payload: dict[str, Any]) -> None:
 
 async def async_save_report(
     hass: HomeAssistant,
-    label: str,
+    label: str | None,
     payload: dict[str, Any],
     *,
     prefix: str = REPORT_PREFIX,
@@ -95,7 +95,8 @@ async def async_save_report(
     """Save the report in the config directory; return its path, None on failure."""
 
     stamp = dt_util.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    path = hass.config.path(f"{prefix}_{label}_{stamp}.json")
+    name = prefix if label is None else f"{prefix}_{label}"
+    path = hass.config.path(f"{name}_{stamp}.json")
     try:
         await hass.async_add_executor_job(_write_json, path, payload)
     except OSError:

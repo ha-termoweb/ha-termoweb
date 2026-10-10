@@ -279,27 +279,35 @@ custom_components/termoweb/backend/radio/capture.py :: _utcnow
 custom_components/termoweb/backend/radio/capture.py :: timestamp
     Return ``at`` as an ISO 8601 UTC string with milliseconds.
 custom_components/termoweb/backend/radio/capture.py :: _hex
-    Return upper-case hex, or None.
+    Return upper-case hex without spaces, or None.
+custom_components/termoweb/backend/radio/capture.py :: mask_mac
+    Mask a gateway MAC (``mac=..``) in a firmware line.
 custom_components/termoweb/backend/radio/capture.py :: opcode_key
     Return a data frame's histogram key and its known meaning (None: unknown).
 custom_components/termoweb/backend/radio/capture.py :: frame_record
-    Return one received frame as a capture record.
-custom_components/termoweb/backend/radio/capture.py :: line_record
-    Return one gateway line as a capture record; a gateway MAC is always masked.
+    Return one received frame as a capture record, None when it is undecodable.
+custom_components/termoweb/backend/radio/capture.py :: rx_line
+    Return an undecodable frame as the gateway's RX line (CRC bit 0).
+custom_components/termoweb/backend/radio/capture.py :: raw_record
+    Return one raw firmware line as a record; a gateway MAC is always masked.
 custom_components/termoweb/backend/radio/capture.py :: FrameCapture.__init__
     Store how to read the link's current dialect and the clock.
+custom_components/termoweb/backend/radio/capture.py :: FrameCapture.start
+    Note when the capture window opened.
+custom_components/termoweb/backend/radio/capture.py :: FrameCapture.stop
+    Note when the capture window closed.
 custom_components/termoweb/backend/radio/capture.py :: FrameCapture.on_frame
-    Record a frame the link decoded.
+    Record a frame the link heard; undecodable ones go to ``raw``.
 custom_components/termoweb/backend/radio/capture.py :: FrameCapture.on_line
     Record a gateway line that is not a decoded frame.
 custom_components/termoweb/backend/radio/capture.py :: _mask_identity
     Mask the identity/serial bytes of a ``5B`` reply or dialect-A announcement.
-custom_components/termoweb/backend/radio/capture.py :: _redact_line
-    Mask network ids and on-air hex in a gateway line.
+custom_components/termoweb/backend/radio/capture.py :: redact_line
+    Mask the MAC, network ids and on-air hex in a gateway line.
 custom_components/termoweb/backend/radio/capture.py :: redact
-    Return records safe to share: network ids become NET1, NET2...
+    Return frames and raw lines safe to share: network ids become NET1, NET2...
 custom_components/termoweb/backend/radio/capture.py :: summarise
-    Return counts, networks, node ids and an opcode histogram with known names.
+    Return frame and ack counts, networks, node ids and a named opcode histogram.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.__init__
     Initialise the REST client with authentication context.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.api_base
@@ -1920,8 +1928,10 @@ custom_components/termoweb/services/energy_history.py :: async_register_import_e
     Register the import_energy_history service if it is missing.
 custom_components/termoweb/services/energy_history.py :: async_register_import_energy_history_service._service_import_energy_history
     Handle the import_energy_history service call.
+custom_components/termoweb/services/radio_capture.py :: dialects_listened
+    Return the dialects the capture heard: both on a listen-only ESP32 entry.
 custom_components/termoweb/services/radio_capture.py :: capture_payload
-    Return the capture file content; the gateway MAC is never included.
+    Return the capture file content; the gateway MAC is always masked.
 custom_components/termoweb/services/radio_capture.py :: async_register_radio_capture_service
     Register the radio_capture service once.
 custom_components/termoweb/services/radio_capture.py :: async_register_radio_capture_service._async_radio_capture
@@ -2424,7 +2434,7 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.get_rtc_time
 custom_components/termoweb/backend/radio_monitor.py :: RadioMonitor.__init__
     Store collaborators; the reconnect loop runs one dialect window per pass.
 custom_components/termoweb/backend/radio_monitor.py :: RadioMonitor._refresh_all
-    Switch to the next dialect each window; dialect-A-only firmware stays put.
+    Listen in the next dialect each window, A first; dialect-A firmware stays.
 custom_components/termoweb/backend/radio_monitor.py :: RadioMonitor._on_frame
     Count a heard frame and publish the count; nothing is answered.
 custom_components/termoweb/backend/radio_monitor.py :: RadioMonitorBackend.create_ws_client

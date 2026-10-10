@@ -27,7 +27,8 @@ from custom_components.termoweb.backend.base import (
 from custom_components.termoweb.const import signal_radio_frames
 from custom_components.termoweb.inventory import Inventory
 
-from .radio.discovery import DISCOVERY_DIALECTS, LISTEN_WINDOW_S
+from .radio.dialect import DIALECT_A, DIALECT_B
+from .radio.discovery import LISTEN_WINDOW_S
 from .radio.link import RadioLinkError, ReceivedFrame
 from .radio_client import RadioClient
 from .radio_ws import PAYLOAD_STALE_AFTER_S, RadioListener
@@ -35,6 +36,7 @@ from .radio_ws import PAYLOAD_STALE_AFTER_S, RadioListener
 _LOGGER = logging.getLogger(__name__)
 
 MONITOR_WINDOW_S = LISTEN_WINDOW_S  # per-dialect window, as discovery listens
+MONITOR_DIALECTS = (DIALECT_A, DIALECT_B)  # ESP32: A, B, A, ... in turn
 
 
 class RadioMonitor(RadioListener):
@@ -69,13 +71,13 @@ class RadioMonitor(RadioListener):
         self._window = 0
 
     async def _refresh_all(self) -> None:
-        """Switch to the next dialect each window; dialect-A-only firmware stays put."""
+        """Listen in the next dialect each window, A first; dialect-A firmware stays."""
 
         link = self._client.link
         info = None if link is None else link.gateway_info
         if link is None or info is None or info.dialect is None:
             return
-        dialect = DISCOVERY_DIALECTS[self._window % len(DISCOVERY_DIALECTS)]
+        dialect = MONITOR_DIALECTS[self._window % len(MONITOR_DIALECTS)]
         self._window += 1
         try:
             await link.set_dialect(dialect)
@@ -93,7 +95,7 @@ class RadioMonitor(RadioListener):
         async_dispatcher_send(
             self.hass,
             signal_radio_frames(self.entry_id),
-            {"frames": self.frames, "last_frame_at": self.last_frame_at.isoformat()},
+            {"frames": self.frames, "last_frame": self.last_frame_at.isoformat()},
         )
 
 
@@ -137,4 +139,9 @@ class RadioMonitorBackend(Backend):
         return {}
 
 
-__all__ = ["MONITOR_WINDOW_S", "RadioMonitor", "RadioMonitorBackend"]
+__all__ = [
+    "MONITOR_DIALECTS",
+    "MONITOR_WINDOW_S",
+    "RadioMonitor",
+    "RadioMonitorBackend",
+]

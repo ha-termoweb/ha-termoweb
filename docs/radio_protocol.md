@@ -531,56 +531,71 @@ display flash ("identify"; `5E 01` → `5F 55` is proven in dialect A only).
 
 - Entry data: `brand: radio_monitor`, plus `radio_type` and the ESP32
   `host`/`port` or the nanoCUL `device`/`radio_device_id`. No dialect,
-  network id or nodes. Unique id `radio_monitor:<dev_id>`, so a normal
-  `radio:<dev_id>` entry for the same gateway can be added later. Only one
-  entry can hold the TCP or serial port at a time.
-- Backend `RadioMonitorBackend` (capabilities: only `frame_monitor`).
-  Platforms: `binary_sensor` (gateway online) and `sensor` (**Radio frames
-  heard**: frames since start, attribute `last_frame_at`, pushed on the
-  `termoweb_<entry>_radio_frames` signal).
+  network id or nodes. Title `Radio monitor (<host or serial path>)`. Unique
+  id `radio_monitor:<dev_id>`, so a normal `radio:<dev_id>` entry for the
+  same gateway can be added later. Only one entry can hold the TCP or serial
+  port at a time.
+- Backend `RadioMonitorBackend` (capabilities: only `frame_monitor`). The
+  device is named **Radio monitor**. Platforms: `binary_sensor` (gateway
+  online) and `sensor` (**Frames heard**: frames since start, attribute
+  `last_frame` (ISO UTC), pushed on the `termoweb_<entry>_radio_frames`
+  signal). Home Assistant names it `sensor.radio_monitor_frames_heard`.
 - ESP32 firmware (a `dialect=` field in `Q`): the monitor switches the
-  dialect with `RadioLink.set_dialect` every 10 s, B then A, as discovery
-  does. Stock nanoCUL firmware stays on dialect A.
+  dialect with `RadioLink.set_dialect` every 10 s, A then B
+  (`MONITOR_DIALECTS`). Stock nanoCUL firmware (`termoweb_rx`, no `Y`) stays
+  on dialect A.
 
 ### Capture service
 
-`termoweb.radio_capture` (`entry_id`, `seconds` 10–1800, default 120,
-`redact` default false) works on monitor entries and, passively, on normal
-radio entries: it holds the exchange lock like `radio_survey`, so heater
-commands (and the listener's keepalive clock syncs) wait until it ends.
-Keep captures on a normal entry short: heaters want a clock sync every
-150 s.
+`termoweb.radio_capture` fields:
+
+| Field | Type | Default |
+|---|---|---|
+| `entry_id` | config entry, required | – |
+| `seconds` | int 10–1800 | 120 |
+| `redact` | bool | false |
+| `note` | free text, stored in the file | none |
+
+It works on monitor entries and, passively, on normal radio entries: it
+holds the exchange lock like `radio_survey`, so heater commands (and the
+listener's keepalive clock syncs) wait until it ends. Keep captures on a
+normal entry short: heaters want a clock sync every 150 s.
 
 `RadioClient.async_capture` adds a frame listener and a line listener
 (`RadioLink.add_line_listener`: every line that is not a decoded frame,
-except raw survey lines) for the window. Each record has:
+except raw survey lines) for the window and returns a `FrameCapture`.
 
-| Field | Meaning |
+The file is `<config>/termoweb_radio_capture_<YYYYmmddTHHMMSSZ>.json`:
+
+| Key | Content |
 |---|---|
-| `t` | UTC time with milliseconds when Home Assistant read the line |
-| `kind` | `data`, `ack`, `undecodable` or `line` |
-| `rssi`, `lqi`, `micros` | the gateway's receive metadata |
-| `dialect` | the dialect that decodes the frame. A frame that fails in the link's dialect (it switched while the frame was on air) is tried in every known dialect first |
-| `net`, `src`, `dst`, `flags` | header fields |
-| `path`, `tag`, `payload` | data frames only, hex |
-| `op`, `name` | histogram key (`payload[0]`, or `tag NN` for pairing tags and empty frames) and its meaning from `protocol.OPCODE_NAMES` / `TAG_NAMES`, None when unknown |
-| `air` | the raw on-air bytes |
-| `len` | undecodable frames: length |
-| `line` | gateway lines (`#` status, `TX`, `ACK`, unparseable `RX`); a `mac=` value is always masked |
+| `version` | 1 |
+| `started`, `ended` | ISO UTC with milliseconds |
+| `gateway` | the firmware's `# Q` line; `mac=` is always masked, `net=` too with `redact` |
+| `dialects_listened` | `["A", "B"]` on a listen-only ESP32 entry, else the one dialect (`["A"]` on a stock nanoCUL) |
+| `note` | the `note` field, or null |
+| `redacted` | bool |
+| `summary` | `frames` (data + acks), `acks`, `networks`, `nodes`, `opcodes` (`{"5E": {"count": 3, "name": "flash display (identify)"}}`; key `tag NN` for pairing tags and empty frames; name null when unknown) |
+| `frames` | one item per decoded frame, below |
+| `raw` | `{t, line}` for every firmware line that is not a decoded frame (`#` status, `TX`, `ACK`) and for frames no known dialect decodes, written as `RX <micros> <rssi> <lqi> 0 <HEX>` |
 
-The service saves `<config>/termoweb_radio_capture_<entry_id>_<UTC>.json`
-(`format`, `created`, `integration_version`, `radio_type`, `listen_only`,
-`gateway` firmware/frequency/dialects, `capture_seconds`, `redacted`,
-`summary`, `records`) and returns the summary: counts per kind, first and
-last time, frames per dialect, network ids, node ids, the opcode histogram
-with names, `unknown_opcodes`, `redacted` and `file`. It is kept as
-`runtime.last_radio_capture`; diagnostics show it without network ids.
+Each `frames` item: `t` (ISO UTC, ms, when Home Assistant read the line),
+`kind` (`data` or `ack`), `rssi`, `lqi`, `micros`, `dialect` (a frame that
+fails in the link's dialect, because it switched while the frame was on air,
+is tried in every known dialect first), `net`, `src`, `dst`, `flags`,
+`path`, `tag`, `payload` (null for acks), `op` (histogram key), `name`
+(from `protocol.OPCODE_NAMES` / `TAG_NAMES`, or null) and `air` (raw on-air
+bytes). All bytes are upper-case hex strings without spaces.
+
+The service returns `{file, frames, networks, nodes, opcodes}` (the summary
+values) and keeps it as `runtime.last_radio_capture`; diagnostics show it
+without network ids.
 
 `redact=true` (`capture.redact`) replaces network ids with `NET1`, `NET2`…
 in order of appearance, masks identity and serial bytes (`5B` replies after
 the form byte, dialect-A `77` announcements after the marker) with `XX`,
-drops `air`, and removes network ids and hex runs from gateway lines. Every
-other payload byte stays. Without `redact` the file contains the network
-id, so testers share it privately.
+drops `air`, and removes network ids and hex runs from `raw` lines and the
+`gateway` line. Every other payload byte stays. Without `redact` the file
+contains the network id, so testers share it privately.
 
 The tester guide is [Help find the identify command](radio_identify_capture.md).
