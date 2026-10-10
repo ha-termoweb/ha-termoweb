@@ -7,6 +7,7 @@ import logging
 
 import pytest
 from radio_fakes import (
+    BANNER,
     NET,
     Q_LINE_NANOCUL,
     FakeGateway,
@@ -209,6 +210,74 @@ async def test_connect_failures() -> None:
     with pytest.raises(RadioLinkError, match="Q status"):
         await link.connect()
     assert not link.connected
+
+
+@pytest.mark.asyncio
+async def test_connect_times_out_and_bad_urls_are_link_errors(monkeypatch) -> None:
+    """A host that never answers times out; a bad serial URL is a link error."""
+    monkeypatch.setattr(link_mod, "OPEN_TIMEOUT_S", 0.01)
+    ft = FakeTime()
+    never: asyncio.Future = asyncio.get_running_loop().create_future()
+
+    async def hang(host: str, port: int):
+        return await never
+
+    link = RadioLink(
+        "radio.local",
+        dialect=DIALECT_A,
+        clock=ft.clock,
+        sleep=ft.sleep,
+        open_connection=hang,
+    )
+    with pytest.raises(RadioLinkError, match="timed out"):
+        await link.connect()
+    assert not link.connected
+
+    async def bad_url(host: str, port: int):
+        raise ValueError("invalid URL, protocol 'sockt' not known")
+
+    link = RadioLink("radio.local", dialect=DIALECT_A, open_connection=bad_url)
+    with pytest.raises(RadioLinkError, match="cannot connect"):
+        await link.connect()
+
+
+@pytest.mark.asyncio
+async def test_reset_banner_mid_session_drops_and_reconnect_restores_dialect(
+    caplog,
+) -> None:
+    """A stick that resets prints a new banner: the link drops and reconnects."""
+    gateways = [FakeGateway(), FakeGateway()]
+    opened: list[FakeGateway] = []
+
+    async def open_next(host: str, port: int):
+        gw = gateways.pop(0)
+        opened.append(gw)
+        return await gw.open_connection(host, port)
+
+    ft = FakeTime()
+    calls: list[int] = []
+    link = RadioLink(
+        "radio.local",
+        dialect=DIALECT_B,
+        network_id=NET,
+        clock=ft.clock,
+        sleep=ft.sleep,
+        open_connection=open_next,
+        on_disconnect=lambda: calls.append(1),
+    )
+    await link.connect()
+    caplog.set_level(logging.INFO)
+    opened[0].feed(BANNER)  # the stick reset: back to dialect A, default network
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert not link.connected
+    assert calls == [1]
+    assert "restarted" in caplog.text
+
+    await link.connect()
+    assert link.connected
+    assert opened[1].commands[:4] == ["I01", "A1", "Y1", "N1234"]
+    await link.close()
 
 
 @pytest.mark.asyncio
