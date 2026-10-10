@@ -218,29 +218,42 @@ async def test_factory_reset_saves_the_settings_first() -> None:
 
 
 @pytest.mark.asyncio
+async def test_unsupported_factory_reset_keeps_the_previous_snapshot() -> None:
+    """Nothing went on air: an earlier saved snapshot (or none) stays as it was."""
+    rig = Rig()
+    rig.reset_error = RadioUnsupportedError("Factory reset in dialect A")
+    reset = await rig.handler(service.SERVICE_RADIO_FACTORY_RESET)
+    with pytest.raises(ServiceValidationError, match="dialect A"):
+        await reset(ServiceCall({"entry_id": ENTRY_ID, "heater": 6}))
+    assert rp.saved_snapshot(rig.entry, 6) is None
+
+    rp.store_snapshot(rig.hass, rig.entry, 6, {"mode": "off"})
+    with pytest.raises(ServiceValidationError, match="dialect A"):
+        await reset(ServiceCall({"entry_id": ENTRY_ID, "heater": 6}))
+    assert rp.saved_snapshot(rig.entry, 6) == {"mode": "off"}
+
+    rig.states.clear()  # nothing known to save: nothing is touched either
+    with pytest.raises(ServiceValidationError, match="dialect A"):
+        await reset(ServiceCall({"entry_id": ENTRY_ID, "heater": 6}))
+    assert rp.saved_snapshot(rig.entry, 6) == {"mode": "off"}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("error", "raised", "match"),
+    "error",
     [
-        (
-            RadioUnsupportedError("Factory reset in dialect A"),
-            ServiceValidationError,
-            "dialect A",
-        ),
-        (
-            RadioCommandError("heater 6 rejected"),
-            HomeAssistantError,
-            "Factory reset failed",
-        ),
-        (RadioLinkError("closed"), HomeAssistantError, "Factory reset failed"),
+        RadioCommandError("heater 6 acknowledged command C8 but sent no reply"),
+        RadioLinkError("connection lost"),
     ],
 )
-async def test_factory_reset_errors_save_nothing(error, raised, match) -> None:
+async def test_failed_factory_reset_still_keeps_the_settings(error) -> None:
+    """The heater may be reset although its verdict was lost: its settings stay saved."""
     rig = Rig()
     rig.reset_error = error
     reset = await rig.handler(service.SERVICE_RADIO_FACTORY_RESET)
-    with pytest.raises(raised, match=match):
+    with pytest.raises(HomeAssistantError, match="Factory reset failed"):
         await reset(ServiceCall({"entry_id": ENTRY_ID, "heater": 6}))
-    assert rp.saved_snapshot(rig.entry, 6) is None
+    assert rp.saved_snapshot(rig.entry, 6) == SNAPSHOT
 
 
 # --- radio_pair -----------------------------------------------------------------

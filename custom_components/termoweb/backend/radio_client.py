@@ -179,6 +179,9 @@ class RadioClient:
         self._link: RadioLink | None = None
         self._connect_lock = asyncio.Lock()
         self._exchange_lock = asyncio.Lock()
+        # Dialect B rebuilds B6 (presets + mode) from a status read: one writer
+        # at a time, or a later write re-sends what it read and reverts another.
+        self._settings_lock = asyncio.Lock()
         self._disconnect_callbacks: list[Callable[[], None]] = []
         self._programs: dict[int, tuple[float, list[int] | None]] = {}
         self._locks: dict[int, bool] = {}  # last lock written, for records without it
@@ -738,14 +741,15 @@ class RadioClient:
         commands = plan_settings(
             mode=mode, stemp=stemp, prog=prog, ptemp=ptemp, units=units
         )
-        status = None
-        if needs_status(commands, self._dialect):
-            validate_commands(commands, self._dialect)  # before anything goes on air
-            status = await self._read_status(addr)
-        for planned in plan_commands(commands, self._dialect, status):
-            await self._write(addr, planned.payload)
-            if planned.opcode == protocol.OP_PROGRAM_WRITE:
-                self._programs.pop(addr, None)
+        async with self._settings_lock:
+            status = None
+            if needs_status(commands, self._dialect):
+                validate_commands(commands, self._dialect)  # before anything is sent
+                status = await self._read_status(addr)
+            for planned in plan_commands(commands, self._dialect, status):
+                await self._write(addr, planned.payload)
+                if planned.opcode == protocol.OP_PROGRAM_WRITE:
+                    self._programs.pop(addr, None)
 
     async def set_acm_boost_state(
         self,

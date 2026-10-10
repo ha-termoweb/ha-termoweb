@@ -247,10 +247,13 @@ async def test_reset_failure_keeps_the_old_network() -> None:
     with pytest.raises(radio_rehome.RehomeError) as err:
         await rig.rehome()
     assert "Heater 7 could not be reset" in str(err.value)
+    assert "If heater 7 did reset, its settings are saved" in str(err.value)
     assert "Heaters 6 are already reset" in str(err.value)
     assert "net" not in rig.steps()
     assert rig.entry.data["network_id"] == OLD_NET
     assert rp.saved_snapshot(rig.entry, 6) == SNAPSHOT
+    # Heater 7 may have reset before its verdict was lost: its settings are kept.
+    assert rp.saved_snapshot(rig.entry, 7) == SNAPSHOT
 
     rig = Rig()
     rig.client.reset_errors[6] = RadioCommandError("no ack")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 import logging
 from types import SimpleNamespace
@@ -947,3 +948,35 @@ async def test_power_limit_skips_a_heater_whose_presets_cannot_be_written(
         await client.async_balance_power()
     assert "could not restore heater 6" in caplog.text
     assert client.power.shed() == {HEATER: 2}
+
+
+@pytest.mark.asyncio
+async def test_concurrent_dialect_b_writes_do_not_revert_each_other() -> None:
+    """B6 carries presets and mode together: each read-modify-write is atomic."""
+
+    client, links, _ = make_client()
+    link = await client.async_connect()
+    status = bytearray(STATUS_SHORT)  # af 16.5, eco 18.5, comfort 21.0, manual
+
+    def heater_state(dst: int, payload: bytes) -> None:
+        if payload[0] == 0xB6:  # the heater applies presets and mode
+            status[1:4] = payload[1:4]
+            if len(payload) > 4:
+                status[4] = payload[4]
+            link.reply(0xB8, bytes(status))
+
+    link.on_send = heater_state
+    link.reply(0xB8, bytes(status))
+    send = link.send_frame
+
+    async def slow_send(dst, air, **kwargs):
+        await asyncio.sleep(0)  # airtime: let the other writer run
+        return await send(dst, air, **kwargs)
+
+    link.send_frame = slow_send
+    await asyncio.gather(
+        client.set_node_settings("dev", ("htr", "6"), ptemp=[7.0, 16.5, 22.0]),
+        client._write_settings(HEATER, mode="off"),  # noqa: SLF001 - power limit
+    )
+
+    assert status[1:5] == bytes([14, 33, 44, 4])  # new comfort 22 C and mode off

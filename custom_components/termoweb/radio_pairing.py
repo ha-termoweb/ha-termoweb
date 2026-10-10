@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import instance_id
 
 from .backend.radio.pairing import site_network_id
+from .backend.radio_client import RadioUnsupportedError
 from .const import CONF_NODES, CONF_RADIO_RESTORE
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ def _float_or_none(value: Any) -> float | None:
 
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -116,6 +117,30 @@ def store_snapshot(
     )
 
 
+async def async_reset_keeping_settings(
+    hass: HomeAssistant, runtime: Any, addr: int
+) -> bool:
+    """Save heater ``addr``'s settings, then factory-reset it; True if any were saved.
+
+    The settings are saved before the reset goes on air and kept when it fails:
+    a heater can reset and still lose its verdict. Only a reset that was never
+    sent (unsupported dialect) leaves the saved settings as they were.
+    """
+
+    entry, client = runtime.config_entry, runtime.client
+    previous = saved_snapshot(entry, addr)
+    snapshot = with_manual_target(heater_snapshot(runtime, addr), client, addr)
+    if snapshot is not None:
+        store_snapshot(hass, entry, addr, snapshot)
+    try:
+        await client.async_factory_reset(addr)
+    except RadioUnsupportedError:
+        if snapshot is not None:
+            store_snapshot(hass, entry, addr, previous)
+        raise
+    return snapshot is not None
+
+
 def add_nodes(hass: HomeAssistant, entry: ConfigEntry, addrs: Iterable[int]) -> bool:
     """Add heaters to the entry's node list and reload it; False if none were new."""
 
@@ -135,6 +160,7 @@ def add_nodes(hass: HomeAssistant, entry: ConfigEntry, addrs: Iterable[int]) -> 
 
 __all__ = [
     "add_nodes",
+    "async_reset_keeping_settings",
     "async_site_network_id",
     "heater_snapshot",
     "radio_node",

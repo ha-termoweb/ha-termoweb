@@ -20,12 +20,11 @@ from .backend.radio.pairing import IDLE_STOP_S, PairedHeater, PairingError
 from .backend.radio_client import RadioError, radio_addr
 from .const import CONF_NETWORK_ID, CONF_NODES
 from .radio_pairing import (
+    async_reset_keeping_settings,
     async_site_network_id,
-    heater_snapshot,
     radio_node,
     saved_snapshot,
     store_snapshot,
-    with_manual_target,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,12 +61,10 @@ async def _read_identities(client: Any, addrs: list[int]) -> dict[int, bytes]:
 async def _reset_all(hass: HomeAssistant, runtime: Any, addrs: list[int]) -> None:
     """Save each heater's settings, then factory-reset it; stop at the first failure."""
 
-    entry, client = runtime.config_entry, runtime.client
     done: list[int] = []
     for addr in addrs:
-        snapshot = with_manual_target(heater_snapshot(runtime, addr), client, addr)
         try:
-            await client.async_factory_reset(addr)
+            await async_reset_keeping_settings(hass, runtime, addr)
         except (RadioError, RadioLinkError) as err:
             waiting = (
                 f" Heaters {', '.join(map(str, done))} are already reset and keep "
@@ -78,10 +75,9 @@ async def _reset_all(hass: HomeAssistant, runtime: Any, addrs: list[int]) -> Non
             )
             raise RehomeError(
                 f"Heater {addr} could not be reset ({err}). The network was not "
-                f"changed.{waiting}"
+                f"changed. If heater {addr} did reset, its settings are saved "
+                f"too.{waiting}"
             ) from err
-        if snapshot is not None:
-            store_snapshot(hass, entry, addr, snapshot)
         done.append(addr)
 
 
@@ -92,7 +88,7 @@ async def _identified(client: Any, heater: PairedHeater) -> PairedHeater:
         return heater
     try:
         identity = await client.async_read_identity(heater.node_id)
-    except (RadioError, RadioLinkError):
+    except RadioError, RadioLinkError:
         return heater
     return dataclasses.replace(heater, identity=identity)
 
