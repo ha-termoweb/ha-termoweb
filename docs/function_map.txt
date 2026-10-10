@@ -1808,6 +1808,20 @@ custom_components/termoweb/radio_survey.py :: _write_json
     Write ``payload`` as indented JSON to ``path``.
 custom_components/termoweb/radio_survey.py :: async_save_report
     Save the report in the config directory; return its path, None on failure.
+custom_components/termoweb/radio_pairing.py :: radio_node
+    Return the stored node entry for a heater with radio id ``addr``.
+custom_components/termoweb/radio_pairing.py :: _float_or_none
+    Return ``value`` as a float, or None when it is not a number.
+custom_components/termoweb/radio_pairing.py :: settings_snapshot
+    Return the restorable settings of a heater state, or None if it has none.
+custom_components/termoweb/radio_pairing.py :: heater_snapshot
+    Return the restorable settings Home Assistant last saw for heater ``addr``.
+custom_components/termoweb/radio_pairing.py :: saved_snapshot
+    Return the settings saved for ``addr`` before its factory reset, if any.
+custom_components/termoweb/radio_pairing.py :: store_snapshot
+    Save (or with None, drop) the settings to restore for heater ``addr``.
+custom_components/termoweb/radio_pairing.py :: add_nodes
+    Add heaters to the entry's node list and reload it; False if none were new.
 custom_components/termoweb/runtime.py :: require_runtime
     Return the runtime container stored for ``entry_id``.
 custom_components/termoweb/services/energy_history.py :: async_import_energy_history_with_rate_limit
@@ -1824,6 +1838,16 @@ custom_components/termoweb/services/radio_survey.py :: async_register_radio_surv
     Register the radio_survey service once.
 custom_components/termoweb/services/radio_survey.py :: async_register_radio_survey_service._async_radio_survey
     Survey the air, save a redacted report and return its summary.
+custom_components/termoweb/services/radio_pairing.py :: _radio_runtime
+    Return the loaded radio entry's runtime and client, or raise for the user.
+custom_components/termoweb/services/radio_pairing.py :: _require_node
+    Raise unless heater ``addr`` is one of the entry's stored nodes.
+custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services
+    Register the radio_factory_reset and radio_pair services once.
+custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services._async_factory_reset
+    Save the heater's settings, then factory-reset it (it leaves the network).
+custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services._async_pair
+    Pair one heater: to its old address (and restore it), or as a new heater.
 custom_components/termoweb/throttle.py :: MonotonicRateLimiter.async_throttle
     Sleep if required to honour ``min_interval`` seconds between calls.
 custom_components/termoweb/throttle.py :: MonotonicRateLimiter.reset
@@ -2027,6 +2051,8 @@ custom_components/termoweb/backend/radio/protocol.py :: sync_clock
     Return the EB clock sync ``5x YY MM DD DOW HH MM SS`` plus the dialect suffix.
 custom_components/termoweb/backend/radio/protocol.py :: write_program
     Return ``B2`` + 84 (48-slot) or 42 (24-slot) bytes from 7 Monday-first days.
+custom_components/termoweb/backend/radio/protocol.py :: factory_reset
+    Return dialect B's factory reset ``C8 01 D0``; raise ValueError elsewhere.
 custom_components/termoweb/backend/radio/protocol.py :: power_verdict
     Return ``BF 01`` (granted) or ``BF 00``, the reply to a BE power request.
 custom_components/termoweb/backend/radio/protocol.py :: request_status
@@ -2157,6 +2183,26 @@ custom_components/termoweb/backend/radio/discovery.py :: survey_network
     Capture raw bursts of any dialect; None when the firmware has no survey.
 custom_components/termoweb/backend/radio/discovery.py :: probe_heaters
     Return the status of every candidate address that answers a ``B8`` request.
+custom_components/termoweb/backend/radio/pairing.py :: PairingError.__init__
+    Store the message and the heaters already paired.
+custom_components/termoweb/backend/radio/pairing.py :: classify_announcement
+    Return the pairing announcement ``frame`` carries in ``dialect``, else None.
+custom_components/termoweb/backend/radio/pairing.py :: free_node_id
+    Return the lowest radio id in MIN_NODE_ID..MAX_NODE_ID not in ``used``.
+custom_components/termoweb/backend/radio/pairing.py :: build_assignment
+    Return the on-air id assignment: tag 04, payload ``node_id``, to ``FF``.
+custom_components/termoweb/backend/radio/pairing.py :: site_network_id
+    Return a stable two-byte network id from ``seed`` (SHA-256), never reserved.
+custom_components/termoweb/backend/radio/pairing.py :: _read_identity
+    Return ``(identity, serial)`` from the heater's ``5A`` reply, if it answers.
+custom_components/termoweb/backend/radio/pairing.py :: _confirm
+    Return the paired heater once ``node_id`` answers a status read, else None.
+custom_components/termoweb/backend/radio/pairing.py :: pair_heaters
+    Answer pairing announcements on a connected ``link`` and return the paired heaters.
+custom_components/termoweb/backend/radio/pairing.py :: pair_heaters._on_frame
+    Queue every pairing announcement with the time it was heard.
+custom_components/termoweb/backend/radio/pairing.py :: pair_new_network
+    Pair heaters into ``network_id``, alternating ``dialects`` until one answers.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.create_ws_client
     Return the radio listener that plays the websocket client's role.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.fetch_hourly_samples
@@ -2191,6 +2237,14 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient._handle_discon
     Fan a link disconnect out to every registered listener.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_survey
     Capture raw bursts of every dialect on air; heater commands wait meanwhile.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.async_pair
+    Pair heaters into this network; heater commands wait meanwhile.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.async_factory_reset
+    Factory-reset a heater (dialect B ``C8 01 D0``): settings and pairing are wiped.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.async_restore
+    Give a freshly paired heater its clock, then presets, mode and program back.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._forget
+    Drop what this client remembers about a heater's program and lock.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._exchange
     Send ``payload`` to ``addr`` and return its reply; raise on no ack or reply.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._write

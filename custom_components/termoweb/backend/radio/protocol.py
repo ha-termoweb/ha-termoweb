@@ -13,7 +13,7 @@ from datetime import datetime
 import enum
 import math
 
-from .dialect import Dialect, Frame
+from .dialect import DIALECT_B, Dialect, Frame
 
 # --- opcodes -----------------------------------------------------------------
 
@@ -33,6 +33,7 @@ OP_CLOCK_STEADY = 0x52
 OP_CONFIRM_REPORT = 0x57
 OP_REPORT = 0x56  # leading marker of every unsolicited report
 OP_FLASH_DISPLAY = 0x5E
+OP_WRITE_PARAMETER = 0xC8  # C8 <two argument bytes>; reply C9 55
 
 TOGGLE_BOOST = 0xD2
 TOGGLE_RUNBACK = 0xD4
@@ -240,6 +241,16 @@ def write_program(
     flat = [slot for day in week_slots for slot in day]
     wire = rotate_week(flat, wire_slots, to_wire=True)
     return bytes([OP_PROGRAM_WRITE]) + _pack_slots(wire)
+
+
+def factory_reset(dialect: Dialect) -> bytes:
+    """Return dialect B's factory reset ``C8 01 D0``; raise ValueError elsewhere.
+
+    It wipes every setting, the clock, the program and the radio pairing.
+    """
+    if dialect is not DIALECT_B:
+        raise ValueError(f"no known factory reset in dialect {dialect.name}")
+    return bytes([OP_WRITE_PARAMETER, 0x01, 0xD0])
 
 
 def power_verdict(granted: bool = True) -> bytes:

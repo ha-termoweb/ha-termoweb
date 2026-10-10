@@ -457,3 +457,11 @@ def test_power_record_decodes_heating_voltage_and_duty() -> None:
         bytes.fromhex("B921252A02") + bytes(4),
     ):
         assert p.decode_power_record(bad) is None
+
+
+def test_factory_reset_is_dialect_b_only() -> None:
+    """``C8 01 D0`` resets a dialect-B heater; dialect A has no known reset."""
+    assert p.factory_reset(DIALECT_B) == bytes.fromhex("C801D0")
+    assert p.reply_verdict(bytes.fromhex("C955"), p.OP_WRITE_PARAMETER) is True
+    with pytest.raises(ValueError, match="dialect A"):
+        p.factory_reset(DIALECT_A)

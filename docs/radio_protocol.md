@@ -27,7 +27,7 @@ the on-air bytes are the logical bytes.
 | 4 | 1 | dst: this hop's receiver |
 | 5 | 1 | flags (`80` = ack, or "fire and forget" on a data frame) |
 | 6 | 5 | path: originator, then hops, padded (`00` from a station, `01` from a heater) |
-| 11 | 1 | tag (`00` commands, `04` id assignment, `06` route probe) |
+| 11 | 1 | tag (`00` commands, `03` dialect-B pairing announcement, `04` id assignment, `06` route probe) |
 | 12 | n | payload |
 | 12+n | 2 | CRC, high byte first, over bytes `0 .. total-3` |
 
@@ -44,7 +44,7 @@ The layout above is the same in both dialects. Only the framing differs.
 | Byte 0 | total length − 3 | total length |
 | Whitening | PN9, whole frame from byte 0 | none |
 | CRC | CRC-16/CCITT, poly `1021`, init `1D0F`, xorout `FFFF` | CRC-16/MODBUS, reflected poly `A001`, init `FFFF`, no xorout |
-| Network id | `1B 30` (fixed) | per installation, learned from traffic (no default) |
+| Network id | `1B 30` on stock gateways; a network Home Assistant pairs uses its own id (section 7) | per installation, learned from traffic (no default) |
 | Ack | logical `05 net acker sender 80 crc` (scrambled) | `08 net acker sender 80 crc` |
 | EB clock sync | 9 bytes, ends `03` | 8 bytes, no `03` |
 | Gateway `Y` mode | `0` | `1` |
@@ -114,12 +114,16 @@ A reply's first payload byte is the request opcode + 1. A two-byte
 | `C2` → `C3 55` | request / reply | meaning unknown | A | B (ack only) |
 | `D0` → `EC`-class reply | request / reply | capability, meaning unknown | A | B (ack only) |
 | `C6` → `C7 ..` | request / reply | meaning unknown | A | B (`C7 55`) |
+| `C8 <p> <v>` | station → heater | write parameter, reply `C9 55`. `C8 01 D0` is the factory reset (section 8); no other value is used | ? | B |
 | `50` | heater → station | registration; the station answers with a `51` clock sync | A | B |
 | `56 B9 ..` | heater → station | status report (E5, 15 bytes; E3, 17 bytes with boost tail) | A | ? |
 | `56 DB ..` | heater → station | advanced record report (E2) | A | ? |
 | `56 B1` + 84 bytes | heater → station | program report (9E class) | A | ? |
 | `BE ..` | heater → station | power request: the element wants to switch on | A (`BE hi lo`, 3 bytes) | B (9 bytes) |
 | empty, tag `06` | heater → any | route probe | A | B |
+| `55`, tag `03`, from `FF` | heater → any | dialect-B pairing announcement (section 7) | – | B |
+| `77` + 12-byte identity, from `FF` | heater → any | dialect-A pairing announcement (section 7) | A | – |
+| `<id>`, tag `04`, to `FF` | station → heater | id assignment (section 7) | A | B |
 
 ### Status record fields (E6 offsets, payload without the `56` marker)
 
@@ -306,3 +310,116 @@ says so.
   `configured_dialect`, `gateway` (firmware, freq, sync; no MAC),
   `survey_seconds`, and `report` (`redact(report).as_dict()`).
 
+
+## 7. Pairing
+
+A heater joins a network when its owner puts it into pairing mode on its
+panel. It then announces itself from the broadcast id `FF`, sweeping the
+destination across the id range. The station answers with one **id
+assignment**: tag `04`, payload the new id, from station `01` to `FF`, path
+`01 FF 00 00 00`, on the station's network id. The heater adopts the id and
+the network id.
+
+| | Dialect A | Dialect B |
+|---|---|---|
+| Announcement | payload `77` + 12-byte identity (13 bytes), tag `00` | payload `55`, tag `03`, net `00 00`, path `FF <dst> 01 01 01` |
+| Sweep | about 200 ms per destination | about one frame a second (`01, 04, 07, 08, 0A, 0B, 0E, …`) |
+| Identity | in the announcement | none: heaters are paired one at a time |
+| After the assignment | (ha-termoweb-local captures) registration `50` | link ack from `FF` on the new net, an empty tag-`84` frame, then `50` registrations from the new id; `B8` reads answer at once |
+| Status | documented by ha-termoweb-local, not yet tried here | proven 2026-10-10 |
+
+Assignment test vector (dialect B, id 06, synthetic network id `12 34`):
+`0F 12 34 01 FF 00 01 FF 00 00 00 04 06 D0 57`.
+
+`pairing.pair_heaters(link, ...)` runs on a connected `RadioLink` and uses the
+link's dialect and network id:
+
+1. Every announcement in the link's dialect is queued with the time it was
+   heard.
+2. The id is `wanted_id` when given (a heater re-paired to its old address),
+   else, in dialect A, the id this identity got earlier in the run, else the
+   lowest id in `02..41` that no stored node uses. No free id raises
+   `NoFreeAddressError`, which carries the heaters paired before.
+3. The assignment goes out with the normal link retries. Without an ack the
+   next announcement is answered again.
+4. After an ack, announcements heard during the next 5 s are ignored: they
+   are the same sweep. The new id must then answer a `B8` status read (3
+   tries of 1 s). A `5A` identity read follows; its tail (and, in dialect B,
+   the ASCII serial) is kept when the heater answers.
+5. Dialect A: one assignment per identity per 200 ms. An identity that is
+   already paired in this run is not answered again.
+
+**Relayed dialect-A announcements are ignored.** Already-paired heaters
+forward copies of an announcement under their own source id (the link sender
+differs from the path's originator). The relay sits on its own network, so an
+assignment sent through it on the station's network id would be dropped.
+A heater out of the gateway's direct range is paired by moving the gateway
+(or the heater) closer.
+
+`pair_heaters` stops after `max_heaters` heaters (one with `wanted_id`), or
+when the window ends. With `idle_stop_s`, each announcement keeps the window
+open that long (up to `total_s`), and after a pairing the run ends
+`idle_stop_s` after the last announcement.
+
+`pairing.pair_new_network(host, port, network_id)` is for a new installation
+of unknown dialect: it opens one link per dialect in turn (15 s slices, 5
+minutes in all, stop 60 s after the last pairing) and returns the first
+dialect that pairs a heater. A dialect the gateway firmware cannot speak is
+dropped.
+
+### Site network id
+
+Stock gateways have a per-installation network id. Home Assistant derives its
+own: `pairing.site_network_id(seed)` takes the first two bytes of the SHA-256
+of the seed that are not `00 00`, `FF FF` or `1B 30` (the stock dialect-A
+id). Heaters paired into an existing entry join the entry's network
+(`network_id`).
+
+### Notes
+
+- The firmware does not filter received frames by network id; `N<net>` only
+  sets the id in its auto-acks. Announcements on net `00 00` therefore reach
+  the client.
+- Right after pairing, a dialect-B heater took an `EB 51` clock sync but did
+  not answer `53`; the restore below sends the clock with an ack only.
+
+### From Home Assistant
+
+- `RadioClient.async_pair(window_s, wanted_id=None, max_heaters=None)` pairs
+  under the exchange lock: heater commands wait until it ends. New heaters
+  get ids no stored node uses.
+- Service `termoweb.radio_pair` (`entry_id`, optional `heater`, `restore`
+  default true, `timeout` 30-600 s, default 300) pairs one heater:
+  - with `heater` (a stored node): the heater gets that id back, then its
+    settings are restored: the clock (ack only), then `B6 af eco comfort
+    mode [setpoint]` (`B7 55`) and the `B2` program (`B3 55`), through the
+    normal settings write. The settings come from the snapshot saved by
+    `radio_factory_reset`, else from Home Assistant's current state. A
+    temporary override is restored as program mode. The heater is then
+    refreshed.
+  - without `heater`: a new heater gets the lowest free id, is added to the
+    entry's node list, and the entry reloads (the inventory is fixed while
+    the entry runs).
+  - The response is `{"heater", "added", "restored"}`.
+
+## 8. Factory reset
+
+Dialect B: `C8 01 D0` → `C9 55`. Within 3 s the heater goes silent. All
+settings, the clock, the program and the radio pairing are wiped (mode off,
+presets 5.0 / 17.0 / 19.0 °C, default program). It stays silent until its
+owner puts it into pairing mode; the pairing above brings it back. Proven
+twice on 2026-10-10, each time followed by a pairing and a restore whose
+read-back matched.
+
+`C8` with two argument bytes writes a parameter. Other values are accepted
+and not yet understood; the integration sends no other value.
+
+Dialect A: no reset is known. `protocol.factory_reset(DIALECT_A)` raises
+`ValueError`; `RadioClient.async_factory_reset` raises
+`RadioUnsupportedError`.
+
+Service `termoweb.radio_factory_reset` (`entry_id`, `heater`) first saves
+the heater's restorable settings (mode, manual setpoint, presets, program)
+from Home Assistant's state into the entry options (`radio_restore`), then
+sends the reset. The saved settings survive a restart and are used (and
+removed) by the next successful `radio_pair` restore of that heater.
