@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Generator
+import time
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -17,6 +18,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.const import DOMAIN
+from custom_components.termoweb.entities import heater as heater_module
 from custom_components.termoweb.entities.heater import (
     get_boost_runtime_minutes,
     get_boost_temperature,
@@ -158,3 +160,55 @@ async def test_boost_buttons_listen_to_coordinator_once(
             if getattr(callback, "__self__", None) is button
         ]
         assert len(listeners) == 1, button.entity_id
+
+
+def _set_ws(hass: HomeAssistant, entry: MockConfigEntry, *, healthy: bool) -> None:
+    """Report the WebSocket as healthy (recent payload) or disconnected."""
+    coordinator = hass.data[DOMAIN][entry.entry_id].coordinator
+    now = time.time()
+    coordinator.update_gateway_connection(
+        status="healthy" if healthy else "disconnected",
+        connected=healthy,
+        last_event_at=now if healthy else None,
+        healthy_since=now if healthy else None,
+        healthy_minutes=1.0 if healthy else None,
+        last_payload_at=now if healthy else None,
+        last_heartbeat_at=now if healthy else None,
+        payload_stale=not healthy,
+        payload_stale_after=None,
+        idle_restart_pending=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "value"), [(BOOST_DURATION, 3), (BOOST_TEMP, 24)]
+)
+@pytest.mark.parametrize("healthy", [True, False])
+async def test_boost_write_refreshes_node_only_when_ws_down(
+    hass: HomeAssistant,
+    extra_options: AsyncMock,
+    config_entry: MockConfigEntry,
+    entity_id: str,
+    value: float,
+    healthy: bool,
+) -> None:
+    """A boost write refreshes its node once after the delay, only if WS is down."""
+    await _setup(hass, config_entry)
+    _set_ws(hass, config_entry, healthy=healthy)
+    coordinator = hass.data[DOMAIN][config_entry.entry_id].coordinator
+    refresh = AsyncMock(return_value=None)
+
+    with (
+        patch.object(heater_module, "WS_ECHO_FALLBACK_REFRESH", 0.05),
+        patch.object(coordinator, "async_refresh_heater", refresh),
+    ):
+        await _set(hass, entity_id, value)
+        extra_options.assert_awaited_once()
+        refresh.assert_not_awaited()
+        await asyncio.sleep(0.1)
+        await hass.async_block_till_done()
+
+    if healthy:
+        refresh.assert_not_awaited()
+    else:
+        refresh.assert_awaited_once_with(("acm", "2"))

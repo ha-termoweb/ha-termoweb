@@ -239,12 +239,14 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
             inventory=inventory,
         )
         self._minutes = DEFAULT_BOOST_DURATION
+        self._refresh_fallback = NodeRefreshFallback(self, self._node_type, self._addr)
 
     async def async_added_to_hass(self) -> None:
         """Restore the preferred duration once the entity is added."""
 
         await HeaterNodeBase.async_added_to_hass(self)
         await RestoreEntity.async_added_to_hass(self)
+        self.async_on_remove(self._refresh_fallback.cancel)
 
         hass = self.hass
         await _restore_boost_value(
@@ -286,6 +288,7 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
         await _async_write_boost_preset(self, boost_time=minutes)
         self._apply_minutes(minutes, persist=True)
         self.async_write_ha_state()
+        self._refresh_fallback.schedule()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -385,12 +388,14 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
             inventory=inventory,
         )
         self._temperature = self._default_temperature()
+        self._refresh_fallback = NodeRefreshFallback(self, self._node_type, self._addr)
 
     async def async_added_to_hass(self) -> None:
         """Restore the preferred temperature once the entity is added."""
 
         await HeaterNodeBase.async_added_to_hass(self)
         await RestoreEntity.async_added_to_hass(self)
+        self.async_on_remove(self._refresh_fallback.cancel)
 
         hass = self.hass
         await _restore_boost_value(
@@ -464,6 +469,7 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
         await _async_write_boost_preset(self, boost_temp=temperature)
         self._apply_temperature(temperature, persist=True)
         self.async_write_ha_state()
+        self._refresh_fallback.schedule()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
