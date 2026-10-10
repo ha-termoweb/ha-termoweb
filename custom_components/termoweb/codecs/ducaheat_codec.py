@@ -9,7 +9,6 @@ from typing import Any
 from custom_components.termoweb.domain import canonicalize_settings_payload
 from custom_components.termoweb.domain.commands import (
     AccumulatorCommand,
-    SetExtraOptions,
     SetLock,
     SetMode,
     SetPresetTemps,
@@ -25,11 +24,9 @@ from custom_components.termoweb.domain.ids import NodeType
 from .common import validate_prog, validate_units
 from .ducaheat_models import (
     BoostPayload,
-    ExtraOptionsPayload,
     LockWritePayload,
     ModeWritePayload,
     PriorityWritePayload,
-    SetupPayload,
     StatusWritePayload,
 )
 from .ducaheat_read_models import DucaheatSegmentedSettings, DucaheatThermostatSettings
@@ -54,19 +51,18 @@ def decode_settings(payload: Any, *, node_type: NodeType) -> dict[str, Any]:
         flattened = validated.to_flat_dict(
             accumulator=node_type is NodeType.ACCUMULATOR
         )
-        if isinstance(payload, dict):
-            raw_keys = set(payload.keys())
-            if isinstance(payload.get("status"), dict):
-                raw_keys |= {f"status.{k}" for k in payload["status"]}
-            if isinstance(payload.get("setup"), dict):
-                raw_keys |= {f"setup.{k}" for k in payload["setup"]}
-            decoded_keys = set(flattened.keys()) if flattened else set()
-            _LOGGER.debug(
-                "Ducaheat %s raw_keys=%s decoded_keys=%s",
-                node_type.value,
-                sorted(raw_keys),
-                sorted(decoded_keys),
-            )
+        raw_keys = set(payload.keys())
+        if isinstance(payload.get("status"), dict):
+            raw_keys |= {f"status.{k}" for k in payload["status"]}
+        if isinstance(payload.get("setup"), dict):
+            raw_keys |= {f"setup.{k}" for k in payload["setup"]}
+        decoded_keys = set(flattened.keys()) if flattened else set()
+        _LOGGER.debug(
+            "Ducaheat %s raw_keys=%s decoded_keys=%s",
+            node_type.value,
+            sorted(raw_keys),
+            sorted(decoded_keys),
+        )
         return canonicalize_settings_payload(flattened)
 
     return canonicalize_settings_payload(payload)
@@ -106,7 +102,7 @@ def encode_units_command(command: SetUnits) -> dict[str, Any]:
 
 
 def encode_preset_temps_command(
-    command: SetPresetTemps, *, units: str | None = None
+    command: SetPresetTemps, *, units: str
 ) -> dict[str, Any]:
     """Encode preset temperatures as ``ice_temp``/``eco_temp``/``comf_temp`` for /status."""
 
@@ -172,20 +168,6 @@ def encode_program_command(
         days[str(idx)] = slots
 
     return {"prog": days}
-
-
-def encode_extra_options_command(command: SetExtraOptions) -> dict[str, Any]:
-    """Encode an extra options command for the setup endpoint."""
-
-    payload = SetupPayload.model_validate(
-        {
-            "extra_options": ExtraOptionsPayload(
-                boost_time=command.boost_time,
-                boost_temp=command.boost_temp,
-            )
-        }
-    )
-    return payload.model_dump(exclude_none=True)
 
 
 def encode_boost_command(command: AccumulatorCommand) -> dict[str, Any]:

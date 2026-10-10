@@ -259,24 +259,6 @@ class NodeSettingsWritePayload(BaseModel):
     ptemp: list[str] | None = None
     units: str | None = None
 
-    @field_validator("mode", mode="before")
-    @classmethod
-    def _normalise_mode(cls, value: Any) -> Any:
-        """Lower-case mode strings when provided."""
-
-        if value is None:
-            return value
-        return str(value).lower()
-
-    @field_validator("units", mode="before")
-    @classmethod
-    def _normalise_units(cls, value: Any) -> Any:
-        """Upper-case temperature unit identifiers."""
-
-        if value is None:
-            return value
-        return str(value).strip().upper()
-
 
 class ExtraOptionsPayload(BaseModel):
     """Accumulator extra options payload."""
@@ -304,12 +286,3 @@ class AcmBoostWritePayload(BaseModel):
     boost_time: int | None = None
     stemp: str | None = None
     units: str | None = None
-
-    @field_validator("units", mode="before")
-    @classmethod
-    def _normalise_units(cls, value: Any) -> Any:
-        """Upper-case temperature units for boost writes."""
-
-        if value is None:
-            return value
-        return str(value).strip().upper()
