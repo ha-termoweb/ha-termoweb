@@ -301,6 +301,7 @@ def test_diagnostics_radio_section_without_mac_or_network_id(
         "radio_type": "esp32",
         "dialect": "B",
         "connected": False,
+        "listen_only": False,
         "gateway": None,
     }
 
@@ -318,6 +319,11 @@ def test_diagnostics_radio_section_without_mac_or_network_id(
         "survey": True,
     }
     assert radio["last_survey"] == {"verdict": "silent"}
+    assert "last_capture" not in radio
+
+    record.last_radio_capture = {"frames": 3, "networks": ["1234"], "file": None}
+    radio = asyncio.run(async_get_config_entry_diagnostics(hass, entry))["radio"]
+    assert radio["last_capture"] == {"frames": 3, "file": None}
     text = repr(radio)
     assert "AA:BB" not in text and "1234" not in text
 

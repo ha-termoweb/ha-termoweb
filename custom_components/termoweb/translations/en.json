@@ -32,10 +32,11 @@
       "radio_discover": { "title": "Looking for your heaters" },
       "radio_method": {
         "title": "Find or pair your heaters",
-        "description": "Choose \"Find heaters that are already paired\" if your heaters already work with a TermoWeb gateway or app. The integration listens to them. This can take up to 6 minutes. Turn one heater's temperature up first: heaters talk when they start heating.\n\nChoose \"Pair new heaters\" if your heaters are new, or were reset. You press the pairing button on each heater.",
+        "description": "Choose \"Find heaters that are already paired\" if your heaters already work with a TermoWeb gateway or app. The integration listens to them. This can take up to 6 minutes. Turn one heater's temperature up first: heaters talk when they start heating.\n\nChoose \"Pair new heaters\" if your heaters are new, or were reset. You press the pairing button on each heater.\n\nChoose \"Listen only\" to record radio traffic for a test, next to a TermoWeb gateway that still runs. The integration never transmits in this mode and adds no heaters.",
         "menu_options": {
           "radio_discover": "Find heaters that are already paired",
-          "radio_pair": "Pair new heaters"
+          "radio_pair": "Pair new heaters",
+          "radio_monitor": "Listen only (record radio traffic, never transmit)"
         }
       },
       "radio_pair": {
@@ -98,7 +99,8 @@
     "abort": {
       "already_configured": "This gateway is already set up.",
       "reconfigure_successful": "The settings were saved.",
-      "no_config_entry": "The integration entry was not found."
+      "no_config_entry": "The integration entry was not found.",
+      "monitor_reconfigure": "A listen-only entry cannot be changed. Delete it and add it again."
     }
   },
   "options": {
@@ -168,6 +170,7 @@
       "power_monitor_energy": { "name": "Energy" },
       "power_monitor_power": { "name": "Power" },
       "installation_total_energy": { "name": "Total energy" },
+      "radio_frames": { "name": "Radio frames heard" },
       "installation_info": { "name": "Location" },
       "boost_minutes_remaining": { "name": "Boost minutes remaining" },
       "boost_end": { "name": "Boost end" },
@@ -285,6 +288,25 @@
           "name": "Device ID",
           "description": "Restrict the probe to a single gateway device.",
           "example": "0000abcd"
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Radio capture",
+      "description": "Record every radio frame the gateway or nanoCUL hears for a while and save it as a JSON file in the Home Assistant configuration folder. Use it to help find unknown commands, for example the \"identify\" command of the TermoWeb app. It never transmits. On a normal radio entry, heater commands wait until the capture ends.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "The radio gateway or nanoCUL config entry to use, normally the listen-only one.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Duration",
+          "description": "How long to record, 10 to 1800 seconds."
+        },
+        "redact": {
+          "name": "Hide private data",
+          "description": "Replace network ids and heater serial numbers in the file. Without it, the file contains your network id: share it only privately."
         }
       }
     },

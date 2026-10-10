@@ -875,6 +875,117 @@ def test_async_setup_entry_nanocul_builds_a_serial_client(
     assert kwargs["device_id"] == "nanocul-a1b2c3"
 
 
+MONITOR_ESP32 = {"brand": "radio_monitor", "host": "10.0.0.5", "port": 2323}
+MONITOR_STICK = {
+    "brand": "radio_monitor",
+    "radio_type": "nanocul",
+    "device": "socket://10.0.0.7:5000",
+    "radio_device_id": "nanocul-a1b2c3",
+}
+
+
+@pytest.mark.parametrize(
+    ("data", "expected_args", "expected_kwargs"),
+    [
+        (MONITOR_ESP32, ("10.0.0.5", 2323), {"listen_only": True}),
+        (
+            MONITOR_STICK,
+            ("socket://10.0.0.7:5000", 0),
+            {
+                "serial_url": "socket://10.0.0.7:5000",
+                "device_id": "nanocul-a1b2c3",
+                "listen_only": True,
+            },
+        ),
+    ],
+)
+def test_async_setup_entry_monitor_builds_listen_only_client(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    data: dict[str, Any],
+    expected_args: tuple[Any, ...],
+    expected_kwargs: dict[str, Any],
+) -> None:
+    created: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    class Unreachable(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            raise termoweb_init.RadioLinkError("unplugged")
+
+    def fake_create(*args: Any, **kwargs: Any) -> Any:
+        created.append((args, kwargs))
+        return Unreachable(None, "", "")
+
+    monkeypatch.setattr(termoweb_init, "create_radio_client", fake_create)
+    entry = ConfigEntry("monitor", data=dict(data))
+    stub_hass.config_entries.add(entry)
+
+    with pytest.raises(ConfigEntryNotReady):
+        asyncio.run(termoweb_init.async_setup_entry(stub_hass, entry))
+    ((args, kwargs),) = created
+    assert args == (*expected_args, "A", [], b"\x00\x00")  # no dialect, no heaters
+    assert kwargs == expected_kwargs
+
+
+def test_monitor_entry_sets_up_listen_only_and_unloads(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fake_radio_link import FakeRadioLink
+
+    radio_client = importlib.import_module(
+        "custom_components.termoweb.backend.radio_client"
+    )
+    links: list[Any] = []
+
+    def link_factory(host: str, port: int, dialect: Any, **kwargs: Any) -> Any:
+        link = FakeRadioLink(host, port, dialect, **kwargs)
+        links.append(link)
+        return link
+
+    def fake_create(host, port, dialect, nodes, network_id, **kwargs: Any) -> Any:
+        assert kwargs == {"listen_only": True}
+        return radio_client.RadioClient(
+            host,
+            port,
+            dialect,
+            nodes,
+            network_id=network_id,
+            station_id=radio_client.LISTEN_ONLY_STATION_ID,
+            link_factory=link_factory,
+            listen_only=True,
+        )
+
+    monkeypatch.setattr(termoweb_init, "create_radio_client", fake_create)
+    entry = ConfigEntry("monitor", data=dict(MONITOR_ESP32))
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> tuple[Any, ...]:
+        assert await termoweb_init.async_setup_entry(stub_hass, entry) is True
+        await _drain_tasks(stub_hass)
+        for _ in range(20):
+            await asyncio.sleep(0)
+        record = termoweb_init._test_helpers.get_record(stub_hass, entry)
+        ws_client = record.ws_clients["aabbcc001122"]
+        running = ws_client.is_running()
+        unloaded = await termoweb_init.async_unload_entry(stub_hass, entry)
+        return record, ws_client, running, unloaded
+
+    record, ws_client, running, unloaded = asyncio.run(_run())
+    assert type(ws_client).__name__ == "RadioMonitor" and running
+    assert list(record.inventory.nodes) == []
+    assert stub_hass.config_entries.forwarded == [(entry, ("binary_sensor", "sensor"))]
+    assert stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_capture")
+    assert stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_survey")
+    assert not stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_pair")
+    assert unloaded is True and not ws_client.is_running()
+    assert stub_hass.config_entries.unloaded == [(entry, ("binary_sensor", "sensor"))]
+    (link,) = links
+    assert link.kwargs == {"listen_only": True, "auto_ack": False}
+    assert link.station_id == 0xFE and link.network_id == b"\x00\x00"
+    assert link.sent == [] and link.closes >= 1
+
+
 def test_async_setup_entry_no_devices(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:

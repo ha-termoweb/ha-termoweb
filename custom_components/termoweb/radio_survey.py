@@ -86,18 +86,22 @@ def _write_json(path: str, payload: dict[str, Any]) -> None:
 
 
 async def async_save_report(
-    hass: HomeAssistant, label: str, payload: dict[str, Any]
+    hass: HomeAssistant,
+    label: str,
+    payload: dict[str, Any],
+    *,
+    prefix: str = REPORT_PREFIX,
 ) -> str | None:
     """Save the report in the config directory; return its path, None on failure."""
 
     stamp = dt_util.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    path = hass.config.path(f"{REPORT_PREFIX}_{label}_{stamp}.json")
+    path = hass.config.path(f"{prefix}_{label}_{stamp}.json")
     try:
         await hass.async_add_executor_job(_write_json, path, payload)
     except OSError:
-        _LOGGER.exception("Cannot write radio survey report %s", path)
+        _LOGGER.exception("Cannot write radio report %s", path)
         return None
-    _LOGGER.info("Radio survey report saved to %s", path)
+    _LOGGER.info("Radio report saved to %s", path)
     return path
 
 

@@ -102,7 +102,7 @@ A reply's first payload byte is the request opcode + 1. A two-byte
 | `B2` + 42 bytes | station → heater | weekly program write, 24 slots/day, same layout as the `B1` read, reply `B3 55` | ? | B |
 | `D2` / `D4` / `D6` / `BA` `01|00` | station → heater | boost / runback / EASY / keypad lock toggles, reply `<op+1> 55` | A | ? |
 | `C4` + 8 bytes | station → heater | advanced setup record, reply `C5 55/56` | A | ? |
-| `5E 01` | station → heater | flash display, reply `5F 55` (dialect B: ack only) | A | B (acked) |
+| `5E 01` | station → heater | flash display, reply `5F 55` (dialect B: ack only; what a real gateway sends for "identify" in dialect B is not yet captured, see section 10) | A | B (acked) |
 | `57 55` | station → heater | confirm a `56 ..` report | A | ? |
 | `51|52 YY MM DD DOW HH MM SS [03]` | station → heater | clock sync (`51` while registering), DOW 0 = Sunday, reply `53 55` | A (9 bytes) | B (8 bytes; the 9-byte form gets `53 56`) |
 | `BF 01` | station → heater | grant a `BE` power request | A | B (the repeats stop) |
@@ -501,3 +501,86 @@ installation's own network" (explanation, progress, then a summary), or the
 service `termoweb.radio_rehome` (`entry_id`, `timeout` 30-600 s, default
 300). The service returns `moved` (`from`, `to`, `restored`),
 `unidentified`, `waiting` and a plain-English `summary`.
+
+## 10. Listening only and frame captures
+
+A listen-only ("monitor") entry records traffic next to a real TermoWeb
+gateway, which is station `01` on that network. It must never transmit:
+an ack or clock sync from a second station would disturb the installation.
+It is used to learn unknown commands, first of all the dialect-B form of the
+display flash ("identify"; `5E 01` → `5F 55` is proven in dialect A only).
+
+### No-transmit guarantee
+
+- `RadioLink(listen_only=True)` writes only `I<id>`, `A0`, `Y<0|1>`,
+  `N<net>`, `Q`, `V` and `R<seconds>`. Any other command, above all `T`
+  (transmit) and `A1` (auto-ack on), raises `TransmitBlockedError` before
+  anything reaches the gateway. `listen_only` with `auto_ack=True` is a
+  `ValueError`.
+- `RadioClient(listen_only=True)` raises `TransmitBlockedError` in every
+  command path (`_exchange`, `async_send`, `async_pair`) before a frame is
+  built, and builds its link with `listen_only=True, auto_ack=False`.
+- The monitor station uses id `FE` (no heater sends to it) and network id
+  `0000` (never transmitted). The stock nanoCUL firmware ignores `Y` and `N`
+  but would read the hex digits after them as commands; `Y0` and `N0000`
+  contain no command letter.
+- The push client (`RadioMonitor`) has none of the station duties: no clock
+  syncs, `BF 01` grants, `57 55` confirmations or status polling.
+
+### Monitor runtime
+
+- Entry data: `brand: radio_monitor`, plus `radio_type` and the ESP32
+  `host`/`port` or the nanoCUL `device`/`radio_device_id`. No dialect,
+  network id or nodes. Unique id `radio_monitor:<dev_id>`, so a normal
+  `radio:<dev_id>` entry for the same gateway can be added later. Only one
+  entry can hold the TCP or serial port at a time.
+- Backend `RadioMonitorBackend` (capabilities: only `frame_monitor`).
+  Platforms: `binary_sensor` (gateway online) and `sensor` (**Radio frames
+  heard**: frames since start, attribute `last_frame_at`, pushed on the
+  `termoweb_<entry>_radio_frames` signal).
+- ESP32 firmware (a `dialect=` field in `Q`): the monitor switches the
+  dialect with `RadioLink.set_dialect` every 10 s, B then A, as discovery
+  does. Stock nanoCUL firmware stays on dialect A.
+
+### Capture service
+
+`termoweb.radio_capture` (`entry_id`, `seconds` 10–1800, default 120,
+`redact` default false) works on monitor entries and, passively, on normal
+radio entries: it holds the exchange lock like `radio_survey`, so heater
+commands (and the listener's keepalive clock syncs) wait until it ends.
+Keep captures on a normal entry short: heaters want a clock sync every
+150 s.
+
+`RadioClient.async_capture` adds a frame listener and a line listener
+(`RadioLink.add_line_listener`: every line that is not a decoded frame,
+except raw survey lines) for the window. Each record has:
+
+| Field | Meaning |
+|---|---|
+| `t` | UTC time with milliseconds when Home Assistant read the line |
+| `kind` | `data`, `ack`, `undecodable` or `line` |
+| `rssi`, `lqi`, `micros` | the gateway's receive metadata |
+| `dialect` | the dialect that decodes the frame. A frame that fails in the link's dialect (it switched while the frame was on air) is tried in every known dialect first |
+| `net`, `src`, `dst`, `flags` | header fields |
+| `path`, `tag`, `payload` | data frames only, hex |
+| `op`, `name` | histogram key (`payload[0]`, or `tag NN` for pairing tags and empty frames) and its meaning from `protocol.OPCODE_NAMES` / `TAG_NAMES`, None when unknown |
+| `air` | the raw on-air bytes |
+| `len` | undecodable frames: length |
+| `line` | gateway lines (`#` status, `TX`, `ACK`, unparseable `RX`); a `mac=` value is always masked |
+
+The service saves `<config>/termoweb_radio_capture_<entry_id>_<UTC>.json`
+(`format`, `created`, `integration_version`, `radio_type`, `listen_only`,
+`gateway` firmware/frequency/dialects, `capture_seconds`, `redacted`,
+`summary`, `records`) and returns the summary: counts per kind, first and
+last time, frames per dialect, network ids, node ids, the opcode histogram
+with names, `unknown_opcodes`, `redacted` and `file`. It is kept as
+`runtime.last_radio_capture`; diagnostics show it without network ids.
+
+`redact=true` (`capture.redact`) replaces network ids with `NET1`, `NET2`…
+in order of appearance, masks identity and serial bytes (`5B` replies after
+the form byte, dialect-A `77` announcements after the marker) with `XX`,
+drops `air`, and removes network ids and hex runs from gateway lines. Every
+other payload byte stays. Without `redact` the file contains the network
+id, so testers share it privately.
+
+The tester guide is [Help find the identify command](radio_identify_capture.md).

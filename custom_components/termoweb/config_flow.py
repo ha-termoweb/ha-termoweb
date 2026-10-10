@@ -45,6 +45,7 @@ from .const import (
     BRAND_DUCAHEAT,
     BRAND_LABELS,
     BRAND_RADIO,
+    BRAND_RADIO_MONITOR,
     BRAND_TERMOWEB,
     BRAND_TEVOLVE,
     CONF_BRAND,
@@ -429,25 +430,37 @@ async def pair_radio(
     return NetworkSighting(paired_dialect, network_id, frozenset(heaters)), heaters
 
 
-def radio_entry_data(
-    radio: Mapping[str, Any], sighting: NetworkSighting, heaters: dict[int, Any]
-) -> dict[str, Any]:
-    """Return config entry data for a discovered radio installation."""
+def _radio_connection(radio: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the entry data that says how to reach the gateway or stick."""
     if radio.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
-        connection: dict[str, Any] = {
+        return {
             CONF_RADIO_TYPE: RADIO_TYPE_NANOCUL,
             CONF_DEVICE: radio[CONF_DEVICE],
             CONF_RADIO_DEVICE_ID: radio[CONF_RADIO_DEVICE_ID],
         }
-    else:
-        connection = {
-            CONF_RADIO_TYPE: RADIO_TYPE_ESP32,
-            CONF_HOST: radio[CONF_HOST],
-            CONF_PORT: radio[CONF_PORT],
-        }
+    return {
+        CONF_RADIO_TYPE: RADIO_TYPE_ESP32,
+        CONF_HOST: radio[CONF_HOST],
+        CONF_PORT: radio[CONF_PORT],
+    }
+
+
+def radio_monitor_entry_data(radio: Mapping[str, Any]) -> dict[str, Any]:
+    """Return entry data for a listen-only entry: no dialect, network or heaters."""
+    return {
+        CONF_BRAND: BRAND_RADIO_MONITOR,
+        **_radio_connection(radio),
+        "supports_diagnostics": True,
+    }
+
+
+def radio_entry_data(
+    radio: Mapping[str, Any], sighting: NetworkSighting, heaters: dict[int, Any]
+) -> dict[str, Any]:
+    """Return config entry data for a discovered radio installation."""
     return {
         CONF_BRAND: BRAND_RADIO,
-        **connection,
+        **_radio_connection(radio),
         CONF_DIALECT: sighting.dialect.name,
         CONF_NETWORK_ID: sighting.network_id.hex().upper(),
         CONF_NODES: [radio_node(addr) for addr in sorted(heaters)],
@@ -620,10 +633,29 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_radio_method(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Offer to find heaters that are already paired, or to pair new ones."""
+        """Offer to find paired heaters, to pair new ones, or to only listen."""
         return self.async_show_menu(
-            step_id="radio_method", menu_options=["radio_discover", "radio_pair"]
+            step_id="radio_method",
+            menu_options=["radio_discover", "radio_pair", "radio_monitor"],
         )
+
+    async def async_step_radio_monitor(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Create a listen-only entry: it records traffic and never transmits.
+
+        Its own unique id lets a normal entry for the same gateway be added
+        later; only one of them can hold the port at a time.
+        """
+        dev_id = self._radio[_GATEWAY_ID]
+        await self.async_set_unique_id(f"{BRAND_RADIO_MONITOR}:{dev_id}")
+        self._abort_if_unique_id_configured()
+        data = radio_monitor_entry_data(self._radio)
+        if self._nanocul_flow():
+            title = f"{NANOCUL_LABEL} listen only ({data[CONF_DEVICE]})"
+        else:
+            title = f"{RADIO_GATEWAY_LABEL} listen only ({data[CONF_HOST]})"
+        return self.async_create_entry(title=title, data=data)
 
     async def async_step_radio_pair(
         self, user_input: dict[str, Any] | None = None
@@ -947,6 +979,8 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
         if entry is None:
             return self.async_abort(reason="no_config_entry")
+        if entry.data.get(CONF_BRAND) == BRAND_RADIO_MONITOR:
+            return self.async_abort(reason="monitor_reconfigure")
         if entry.data.get(CONF_BRAND) == BRAND_RADIO:
             if entry.data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
                 return await self.async_step_reconfigure_nanocul()

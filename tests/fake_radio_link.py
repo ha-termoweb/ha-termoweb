@@ -101,6 +101,10 @@ class FakeRadioLink:
         self.info: GatewayInfo | None = gateway_info()
         self.gateway_info: GatewayInfo | None = None
         self.listeners: list[Callable[[ReceivedFrame], None]] = []
+        self.line_listeners: list[Callable[[str], None]] = []
+        self.dialects: list[str] = []
+        self.dialect_error: Exception | None = None
+        self.kwargs = _kwargs
         self.sent: list[tuple[int, bytes]] = []
         self.replies: dict[int, list[bytes]] = {}
         self.no_ack: set[int] = set()
@@ -121,6 +125,12 @@ class FakeRadioLink:
 
         for listener in list(self.listeners):
             listener(frame)
+
+    def deliver_line(self, line: str) -> None:
+        """Hand a non-frame gateway line to every line listener."""
+
+        for listener in list(self.line_listeners):
+            listener(line)
 
     def drop(self) -> None:
         """Simulate the gateway closing an established connection."""
@@ -156,6 +166,21 @@ class FakeRadioLink:
                 self.listeners.remove(callback)
 
         return _remove
+
+    def add_line_listener(self, callback: Callable[[str], None]):
+        self.line_listeners.append(callback)
+
+        def _remove() -> None:
+            if callback in self.line_listeners:
+                self.line_listeners.remove(callback)
+
+        return _remove
+
+    async def set_dialect(self, dialect: Dialect) -> None:
+        if self.dialect_error is not None:
+            raise self.dialect_error
+        self.dialect = dialect
+        self.dialects.append(dialect.name)
 
     async def send_frame(self, dst: int, air: bytes, **_kwargs: Any) -> AckResult:
         if not self.connected:

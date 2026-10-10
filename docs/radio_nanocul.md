@@ -63,3 +63,23 @@ To change the port later, open the integration and choose **Reconfigure**.
 
 A stick shared over the network (for example with `ser2net`) also works: type
 its address as `socket://<address>:<port>` in step 3.
+
+## Listen only: record radio traffic for a test
+
+If your heaters still use a TermoWeb gateway, the stick can record what the
+gateway and the heaters send, without transmitting anything. We use these
+recordings to learn unknown commands.
+
+1. In step 3, after you press **Submit**, choose **Listen only (record radio
+   traffic, never transmit)**.
+2. The entry has no heaters. It shows **Gateway online** and **Radio frames
+   heard**.
+3. Record with the **TermoWeb: Radio capture** action. The guide
+   [Help find the identify command](radio_identify_capture.md) explains every
+   step.
+
+The stock firmware only hears dialect A. The stick never transmits in this
+mode, not even link-layer acks.
+
+Only one entry can use the stick at a time. Delete the listen-only entry
+before you set up the stick to control your heaters.

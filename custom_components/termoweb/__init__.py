@@ -31,6 +31,7 @@ from .backend import (
 )
 from .backend.debug import build_unknown_node_probe_requests
 from .backend.radio import RadioLinkError
+from .backend.radio.discovery import LISTEN_PLACEHOLDER_NET
 from .backend.radio_client import RadioError
 from .backend.radio_power import PowerManager
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
@@ -38,6 +39,7 @@ from .backend.sanitize import redact_text
 from .const import (
     BRAND_DUCAHEAT as BRAND_DUCAHEAT,
     BRAND_RADIO,
+    BRAND_RADIO_MONITOR,
     BRAND_TEVOLVE as BRAND_TEVOLVE,
     CONF_BRAND,
     CONF_DEVICE,
@@ -53,6 +55,7 @@ from .const import (
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     MIN_POLL_INTERVAL,
+    RADIO_BRANDS,
     RADIO_TYPE_NANOCUL,
     signal_ws_status,
 )
@@ -74,6 +77,7 @@ from .services.energy_history import (
     async_import_energy_history_with_rate_limit,
     async_register_import_energy_history_service,
 )
+from .services.radio_capture import async_register_radio_capture_service
 from .services.radio_pairing import async_register_radio_pairing_services
 from .services.radio_survey import async_register_radio_survey_service
 from .services.ws_debug_probe import async_register_ws_debug_probe_service
@@ -86,12 +90,16 @@ SupportsDiagnostics = getattr(config_entries_module, "SupportsDiagnostics", None
 
 PLATFORMS = ["button", "binary_sensor", "climate", "number", "sensor"]
 LOCK_PLATFORMS = ["lock"]
+MONITOR_PLATFORMS = ["binary_sensor", "sensor"]  # gateway online + frames heard
 
 
 def _platforms_for_brand(brand: str) -> list[str]:
     """Return entity platforms enabled for the configured brand's backend."""
 
-    if backend_capabilities(brand).lock:
+    capabilities = backend_capabilities(brand)
+    if capabilities.frame_monitor:
+        return list(MONITOR_PLATFORMS)
+    if capabilities.lock:
         return [*PLATFORMS, *LOCK_PLATFORMS]
     return list(PLATFORMS)
 
@@ -213,10 +221,36 @@ async def async_list_devices(client: RESTClient) -> Any:
         raise
 
 
+def _create_monitor_client(data: Mapping[str, Any]) -> Any:
+    """Return the listen-only radio client of a monitor entry (dialect A to start)."""
+
+    if data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
+        return create_radio_client(
+            data[CONF_DEVICE],
+            0,
+            "A",
+            [],
+            LISTEN_PLACEHOLDER_NET,
+            serial_url=data[CONF_DEVICE],
+            device_id=data.get(CONF_RADIO_DEVICE_ID),
+            listen_only=True,
+        )
+    return create_radio_client(
+        data[CONF_HOST],
+        int(data[CONF_PORT]),
+        "A",
+        [],
+        LISTEN_PLACEHOLDER_NET,
+        listen_only=True,
+    )
+
+
 def _create_client(hass: HomeAssistant, entry: ConfigEntry, brand: str) -> Any:
     """Return the cloud REST client, or the radio gateway client for radio entries."""
 
     data = entry.data
+    if brand == BRAND_RADIO_MONITOR:
+        return _create_monitor_client(data)
     if brand == BRAND_RADIO:
 
         def _save_power(settings: dict[str, Any]) -> None:
@@ -608,8 +642,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     )
 
     await async_register_ws_debug_probe_service(hass)
-    if brand == BRAND_RADIO:
+    if brand in RADIO_BRANDS:
         await async_register_radio_survey_service(hass)
+        await async_register_radio_capture_service(hass)
+    if brand == BRAND_RADIO:
         await async_register_radio_pairing_services(hass)
 
     _LOGGER.info("TermoWeb setup complete (v%s)", version)

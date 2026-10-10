@@ -49,6 +49,60 @@ REPLY_REJECTED = 0x56
 
 ROUTE_PROBE_TAG = 0x06
 
+# What a payload's first byte means (radio_protocol.md section 4), for captures.
+OPCODE_NAMES: dict[int, str] = {
+    0x50: "registration",
+    0x51: "clock sync (registering)",
+    0x52: "clock sync",
+    0x53: "clock sync reply",
+    0x56: "report",
+    0x57: "report confirmation",
+    0x5A: "identity request",
+    0x5B: "identity reply",
+    0x5E: "flash display (identify)",
+    0x5F: "flash display reply",
+    0x77: "pairing announcement (dialect A)",
+    0xB0: "program read",
+    0xB1: "program reply",
+    0xB2: "program write",
+    0xB3: "program write reply",
+    0xB4: "mode / setpoint write",
+    0xB5: "mode / setpoint write reply",
+    0xB6: "preset write",
+    0xB7: "preset write reply",
+    0xB8: "status request",
+    0xB9: "status reply",
+    0xBA: "keypad lock",
+    0xBB: "keypad lock reply",
+    0xBC: "energy / power record request",
+    0xBD: "energy / power record reply",
+    0xBE: "power request",
+    0xBF: "power verdict",
+    0xC2: "unknown request C2",
+    0xC3: "reply to C2",
+    0xC4: "advanced setup write",
+    0xC5: "advanced setup write reply",
+    0xC6: "unknown request C6",
+    0xC7: "reply to C6",
+    0xC8: "write parameter",
+    0xC9: "write parameter reply",
+    0xD0: "capability request",
+    0xD2: "boost toggle",
+    0xD3: "boost toggle reply",
+    0xD4: "runback toggle",
+    0xD5: "runback toggle reply",
+    0xD6: "EASY toggle",
+    0xD7: "EASY toggle reply",
+    0xDA: "advanced record request",
+    0xDB: "advanced record reply",
+}
+# Frames whose meaning is in the tag byte rather than the payload.
+TAG_NAMES: dict[int, str] = {
+    0x03: "pairing announcement",
+    0x04: "id assignment",
+    ROUTE_PROBE_TAG: "route probe",
+}
+
 # --- modes -------------------------------------------------------------------
 
 MODE_AUTO = 0x01

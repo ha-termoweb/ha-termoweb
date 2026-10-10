@@ -10,7 +10,7 @@ or return "no data". See ``docs/radio_backend.md``.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from datetime import datetime
 import logging
 import time
@@ -37,12 +37,14 @@ from custom_components.termoweb.planner.radio_planner import (
 )
 
 from .radio import protocol
+from .radio.capture import FrameCapture
 from .radio.dialect import DIALECTS, Dialect, Frame, build_frame
 from .radio.link import (
     DEFAULT_PORT,
     GatewayInfo,
     RadioLink,
     RadioLinkError,
+    TransmitBlockedError,
     supports_survey,
 )
 from .radio.pairing import PairedHeater, pair_heaters
@@ -74,8 +76,12 @@ CLOCK_REPLY_REQUEST = protocol.OP_CLOCK_STEADY  # both 51 and 52 are answered ``
 GATEWAY_NAME = "Radio gateway"
 GATEWAY_MODEL = "ESP32 + CC1101 radio gateway"
 NANOCUL_MODEL = "nanoCUL USB stick"
+# A listen-only station never transmits; an id no heater sends to keeps it that
+# way even if a firmware auto-ack were ever switched on behind our back.
+LISTEN_ONLY_STATION_ID = 0xFE
 
 LinkFactory = Callable[..., RadioLink]
+Sleep = Callable[[float], Awaitable[Any]]
 
 
 class RadioError(Exception):
@@ -143,11 +149,14 @@ class RadioClient:
         power: PowerManager | None = None,
         device_id: str | None = None,
         model: str = GATEWAY_MODEL,
+        listen_only: bool = False,
     ) -> None:
         """Store the gateway address, dialect and stored node list; nothing connects.
 
         ``device_id`` names a gateway whose firmware reports no MAC address
         (a nanoCUL stick); ``model`` is what Home Assistant shows for it.
+        A ``listen_only`` client never transmits: its link refuses every
+        transmit and its own commands raise TransmitBlockedError.
         """
 
         dialect = DIALECTS.get(str(dialect_name).strip().upper())
@@ -162,6 +171,7 @@ class RadioClient:
         self._station_id = station_id
         self._device_id = device_id
         self._model = model
+        self._listen_only = listen_only
         self._link_factory = link_factory
         self._clock = clock
         self._nodes = [dict(node) for node in nodes if isinstance(node, Mapping)]
@@ -196,6 +206,20 @@ class RadioClient:
         return self._link is not None and self._link.connected
 
     @property
+    def listen_only(self) -> bool:
+        """Return True when this client never transmits."""
+
+        return self._listen_only
+
+    def _require_transmit(self) -> None:
+        """Raise TransmitBlockedError when this client is listen-only."""
+
+        if self._listen_only:
+            raise TransmitBlockedError(
+                "this radio entry is listen-only and never transmits"
+            )
+
+    @property
     def gateway_info(self) -> GatewayInfo | None:
         """Return the gateway's last ``Q`` status, if connected once."""
 
@@ -207,6 +231,11 @@ class RadioClient:
         async with self._connect_lock:
             link = self._link
             if link is None:
+                listen: dict[str, bool] = (
+                    {"listen_only": True, "auto_ack": False}
+                    if self._listen_only
+                    else {}
+                )
                 link = self._link_factory(
                     self._host,
                     self._port,
@@ -214,6 +243,7 @@ class RadioClient:
                     station_id=self._station_id,
                     network_id=self._network_id,
                     on_disconnect=self._handle_disconnect,
+                    **listen,
                 )
                 self._link = link
             if not link.connected:
@@ -264,6 +294,26 @@ class RadioClient:
         async with self._exchange_lock:
             return await link.survey(seconds)
 
+    async def async_capture(
+        self, seconds: float, *, sleep: Sleep = asyncio.sleep
+    ) -> list[dict[str, Any]]:
+        """Record every frame and gateway line for ``seconds``; heater commands wait.
+
+        Recording only listens; station replies of a normal entry still go out.
+        """
+
+        link = await self.async_connect()
+        capture = FrameCapture(lambda: link.dialect)
+        async with self._exchange_lock:
+            remove_frames = link.add_listener(capture.on_frame)
+            remove_lines = link.add_line_listener(capture.on_line)
+            try:
+                await sleep(seconds)
+            finally:
+                remove_frames()
+                remove_lines()
+        return capture.records
+
     async def async_pair(
         self,
         window_s: float,
@@ -278,6 +328,7 @@ class RadioClient:
         pairs one heater to that id (one re-paired after a factory reset).
         """
 
+        self._require_transmit()
         link = await self.async_connect()
         existing: set[int] = set()
         for node in self._nodes:
@@ -382,6 +433,7 @@ class RadioClient:
     ) -> Frame:
         """Send ``payload`` to ``addr`` and return its reply; raise on no ack or reply."""
 
+        self._require_transmit()
         link = await self.async_connect()
         opcode = payload[0] if request_opcode is None else request_opcode
         matches = protocol.reply_predicate(opcode, *reply_lens)
@@ -458,6 +510,7 @@ class RadioClient:
     async def async_send(self, addr: int, payload: bytes) -> None:
         """Send a payload that has no reply (e.g. ``BF 01``, ``57 55``); require its ack."""
 
+        self._require_transmit()
         link = await self.async_connect()
         air = build_frame(
             link.dialect, link.station_id, addr, payload, network_id=link.network_id
@@ -590,11 +643,12 @@ class RadioClient:
         dev_id = dev_id_from_mac(None if info is None else info.mac) or self._device_id
         if info is None or dev_id is None:
             raise RadioError("the radio gateway did not report its MAC address")
+        detail = "listen only" if self._listen_only else f"dialect {self._dialect.name}"
         return [
             {
                 "dev_id": dev_id,
                 "name": GATEWAY_NAME,
-                "model": f"{self._model} (dialect {self._dialect.name})",
+                "model": f"{self._model} ({detail})",
                 "serial_id": dev_id,
                 "fw_version": info.version,
             }

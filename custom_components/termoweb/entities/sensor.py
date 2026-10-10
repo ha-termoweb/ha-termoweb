@@ -14,12 +14,14 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import STATE_UNKNOWN, UnitOfTemperature, UnitOfTime
+from homeassistant.core import callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.backend.factory import backend_capabilities
-from custom_components.termoweb.const import DOMAIN
+from custom_components.termoweb.const import DOMAIN, signal_radio_frames
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
 from custom_components.termoweb.domain.view import DomainStateView
 from custom_components.termoweb.entities.heater import (
@@ -49,6 +51,7 @@ from custom_components.termoweb.inventory import (
 )
 from custom_components.termoweb.runtime import require_runtime
 from custom_components.termoweb.utils import (
+    build_gateway_device_info,
     build_installation_device_info,
     build_power_monitor_device_info,
     float_or_none,
@@ -329,6 +332,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 dev_id,
             )
         )
+
+    if capabilities.frame_monitor:
+        new_entities.append(RadioFramesSensor(entry.entry_id, dev_id))
 
     if new_entities:
         _LOGGER.debug("Adding %d TermoWeb sensors", len(new_entities))
@@ -1246,3 +1252,43 @@ class InstallationInfoSensor(CoordinatorEntity, SensorEntity):
         except LookupError:
             pass
         return attrs
+
+
+class RadioFramesSensor(SensorEntity):
+    """Frames a listen-only radio gateway has heard since Home Assistant started."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "radio_frames"
+    _attr_should_poll = False
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = "frames"
+
+    def __init__(self, entry_id: str, dev_id: str) -> None:
+        """Start at zero frames; the radio monitor pushes every new count."""
+        self._entry_id = entry_id
+        self._dev_id = str(dev_id)
+        self._attr_unique_id = f"{DOMAIN}:{self._dev_id}:radio_frames"
+        self._attr_native_value = 0
+        self._attr_extra_state_attributes = {"last_frame_at": None}
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return Home Assistant device metadata for the gateway."""
+        return build_gateway_device_info(self.hass, self._entry_id, self._dev_id)
+
+    async def async_added_to_hass(self) -> None:
+        """Follow the radio monitor's frame count."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, signal_radio_frames(self._entry_id), self._handle_frames
+            )
+        )
+
+    @callback
+    def _handle_frames(self, payload: Mapping[str, Any]) -> None:
+        """Show the new frame count and the time of the last frame."""
+        self._attr_native_value = payload.get("frames", 0)
+        self._attr_extra_state_attributes = {
+            "last_frame_at": payload.get("last_frame_at")
+        }
+        self.async_write_ha_state()

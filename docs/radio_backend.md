@@ -319,9 +319,16 @@ The radio form asks for host, port (2323), an optional dialect (`auto`, `A`,
 1. `probe_gateway` connects with auto-ack off (nothing is transmitted) and
    reads the gateway MAC from the `# Q` line. The MAC becomes the `dev_id`
    and the entry's unique id (`radio:<mac>`). No MAC → error
-   `no_gateway_mac`. A menu (`radio_method`) then offers discovery (below)
-   or pairing new heaters (`radio_pair`, see
-   [radio protocol §7](radio_protocol.md#7-pairing)).
+   `no_gateway_mac`. A menu (`radio_method`) then offers discovery (below),
+   pairing new heaters (`radio_pair`, see
+   [radio protocol §7](radio_protocol.md#7-pairing)), or **listen only**
+   (`radio_monitor`): an entry with `brand: radio_monitor`, no heaters and no
+   network id, which never transmits and records traffic with the
+   `radio_capture` service
+   ([radio protocol §10](radio_protocol.md#10-listening-only-and-frame-captures)).
+   It has its own unique id, `radio_monitor:<dev_id>`; only one entry can
+   use the gateway's port at a time. A listen-only entry cannot be
+   reconfigured (`monitor_reconfigure`): delete it and add it again.
 2. `radio_discover` is a progress step running `discover_radio`:
    - with a dialect and a known network id (given, or dialect A's fixed
      `1B30`), it skips listening;

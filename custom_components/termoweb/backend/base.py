@@ -141,6 +141,7 @@ class BackendCapabilities:
     energy_history: bool = False
     energy: bool = False  # heater energy/power and installation total sensors
     geo_data: bool = False  # installation location sensor
+    frame_monitor: bool = False  # listen-only radio: frames-heard sensor, no heaters
 
 
 class Backend(ABC):
