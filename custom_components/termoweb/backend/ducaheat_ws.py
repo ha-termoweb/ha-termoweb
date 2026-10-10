@@ -395,18 +395,22 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._update_status("starting")
         try:
             while True:
+                session_started = time.time()
                 try:
                     await self._throttle_connection_attempt()
                     await self._connect_once()
                     await self._read_loop_ws()
                 except asyncio.CancelledError:
                     break
-                except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive
+                except Exception as exc:
                     _LOGGER.debug("WS (ducaheat): error %s", exc, exc_info=True)
-                    await asyncio.sleep(self._next_backoff())
                 finally:
+                    healthy_session = self._session_received_payload(session_started)
                     await self._disconnect("loop")
                     self._update_status("disconnected")
+                if healthy_session:
+                    self._reset_backoff()
+                await asyncio.sleep(self._next_backoff())
         finally:
             self._update_status("stopped")
 
