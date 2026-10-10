@@ -155,7 +155,13 @@ See `radio_protocol.md` section 10.
   `HomeAssistantError`. Only the debounced mode/setpoint write, which runs after
   the service call returned, logs its failure instead.
 - REST requests must be rate-limited and treated as a fallback when WebSocket
-  updates are unavailable.
+  updates are unavailable. Each `RESTClient` owns one `RequestLimiter`: every
+  request start (polling, writes, segmented writes, the TermoWeb RTC
+  keepalive, token POSTs and the energy history import) is spaced at least
+  0.5 s apart, so one config entry never exceeds 2 requests/s in total. A 429
+  pauses all requests on that client for the `Retry-After` delay (seconds or
+  HTTP date, capped at 15 min; 30 s when absent) and raises
+  `BackendRateLimitError` with `retry_after` set.
 - The `import_energy_history` service must throttle to **2 queries per second**
   (the shared samples limiter in `throttle.py`).
 - Energy history import (`energy.py`) never deletes statistics. It walks each

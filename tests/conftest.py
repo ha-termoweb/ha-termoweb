@@ -2665,3 +2665,11 @@ def ducaheat_rest_harness(
 
 def pytest_runtest_setup(item: Any) -> None:  # pragma: no cover - ensure isolation
     _install_stubs()
+
+
+@pytest.fixture(autouse=True)
+def _no_rest_spacing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable the 0.5 s REST spacing; limiter tests inject their own clock."""
+    from custom_components.termoweb.backend import rest_client
+
+    monkeypatch.setattr(rest_client, "REST_MIN_INTERVAL_S", 0.0)

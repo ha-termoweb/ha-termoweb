@@ -44,10 +44,11 @@ def test_request_text_failure_logs_placeholder(
 
     asyncio.run(_run())
 
-    error_logs = [
+    # A 5xx is transient: exactly one WARNING line, no ERROR.
+    failure_logs = [
         record
         for record in caplog.records
-        if record.levelno == logging.ERROR and record.name == api.__name__
+        if record.levelno >= logging.WARNING and record.name == api.__name__
     ]
-    assert error_logs, "Expected error log records for failed request"
-    assert any("<no body>" in record.getMessage() for record in error_logs)
+    assert [r.levelno for r in failure_logs] == [logging.WARNING]
+    assert "<no body>" in failure_logs[0].getMessage()

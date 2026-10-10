@@ -1133,7 +1133,7 @@ def test_request_cancelled_error_propagates() -> None:
 
 
 def test_request_generic_exception_logs(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.ERROR, logger=api.__name__)
+    caplog.set_level(logging.WARNING, logger=api.__name__)
 
     async def _run() -> None:
         session = FakeSession()
@@ -1150,6 +1150,8 @@ def test_request_generic_exception_logs(caplog: pytest.LogCaptureFixture) -> Non
 
     assert "Request GET" in caplog.text
     assert "Bearer ***" in caplog.text
+    # Transient transport errors log once, below ERROR.
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
 
 
 def test_set_node_settings_invalid_units() -> None:
