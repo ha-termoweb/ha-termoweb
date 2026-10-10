@@ -21,6 +21,7 @@ from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.backend.factory import backend_capabilities
+from custom_components.termoweb.coerce import as_float, as_int, as_percentage
 from custom_components.termoweb.const import DOMAIN, signal_radio_frames
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
 from custom_components.termoweb.domain.ids import HEATING_NODE_TYPES
@@ -50,7 +51,6 @@ from custom_components.termoweb.utils import (
     build_gateway_device_info,
     build_installation_device_info,
     build_power_monitor_device_info,
-    float_or_none,
 )
 
 _WH_TO_KWH = 1 / 1000.0
@@ -71,15 +71,8 @@ def _looks_like_integer_string(value: str) -> bool:
 def _normalise_energy_value(coordinator: Any, raw: Any) -> float | None:
     """Try to coerce a raw energy reading into kWh."""
 
-    if isinstance(raw, bool):
-        return None
-
-    try:
-        numeric = float(raw)
-    except (TypeError, ValueError):
-        return None
-
-    if not math.isfinite(numeric):
+    numeric = as_float(raw)
+    if numeric is None:
         return None
 
     scale_attr = getattr(coordinator, "_termoweb_energy_scale", None)
@@ -356,7 +349,7 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
     def native_value(self) -> float | None:
         """Return the latest temperature reported by the heater."""
         state = self.heater_state()
-        return float_or_none(getattr(state, "mtemp", None))
+        return as_float(getattr(state, "mtemp", None))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -410,20 +403,8 @@ class ThermostatBatterySensor(HeaterNodeBase, SensorEntity):
     def _coerce_level(value: Any) -> int | None:
         """Return a clamped 0–5 battery level from ``value`` when possible."""
 
-        if value is None:
-            return None
-        if isinstance(value, bool):
-            return int(value)
-        try:
-            numeric = float(value)
-        except (TypeError, ValueError):
-            try:
-                numeric = float(str(value).strip())
-            except (TypeError, ValueError):
-                return None
-        if math.isnan(numeric):
-            return None
-        return max(0, min(5, int(numeric)))
+        level = as_int(value)
+        return None if level is None else max(0, min(5, level))
 
     @property
     def native_value(self) -> int | None:
@@ -507,10 +488,7 @@ class AccumulatorChargePercentageSensor(AccumulatorChargeSensorBase):
     def _coerce_value(self, raw: Any) -> StateType:  # type: ignore[override]
         """Return the accumulator charge percentage as an integer."""
 
-        numeric = float_or_none(raw)
-        if numeric is None or not math.isfinite(numeric):
-            return None
-        return max(0, min(100, int(numeric)))
+        return as_percentage(raw)
 
 
 class AccumulatorCurrentChargeSensor(AccumulatorChargePercentageSensor):

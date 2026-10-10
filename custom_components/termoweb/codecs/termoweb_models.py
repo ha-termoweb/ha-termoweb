@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from custom_components.termoweb.codecs.common import safe_temperature
+
 
 class DevSummary(BaseModel):
     """Summary of a gateway returned by ``/api/v2/devs/``."""
@@ -57,21 +59,6 @@ class NodesResponse(BaseModel):
     pmo: dict[str, NodeSummary] | None = None
 
 
-def _format_temperature(value: Any) -> Any:
-    """Return a temperature value formatted with one decimal when numeric."""
-
-    try:
-        return f"{float(value):.1f}"
-    except (TypeError, ValueError):
-        return value
-
-
-def normalise_temperature(value: Any) -> Any:
-    """Format numeric temperatures into a one-decimal string when possible."""
-
-    return _format_temperature(value)
-
-
 def normalise_prog(value: Any) -> Any:
     """Coerce program values to integers when possible without raising."""
 
@@ -91,7 +78,7 @@ def normalise_ptemp(value: Any) -> Any:
 
     if not isinstance(value, Iterable) or isinstance(value, (str, bytes)):
         return value
-    return [_format_temperature(item) for item in value]
+    return [safe_temperature(item) for item in value]
 
 
 class _NodeStateFields(BaseModel):
@@ -138,7 +125,7 @@ class HeaterStatusPayload(_NodeStateFields, _ChargeFields):
     def _normalise_temperature(cls, value: Any) -> Any:
         """Format numeric temperatures to a one-decimal string."""
 
-        return normalise_temperature(value)
+        return safe_temperature(value)
 
     @field_validator("prog", mode="before")
     @classmethod
@@ -176,7 +163,7 @@ class HeaterSettingsPayload(_NodeStateFields, _ChargeFields):
     def _normalise_temperature(cls, value: Any) -> Any:
         """Format numeric temperatures to a one-decimal string."""
 
-        return normalise_temperature(value)
+        return safe_temperature(value)
 
     @field_validator("prog", mode="before")
     @classmethod
@@ -213,7 +200,7 @@ class ThermostatSettingsPayload(_NodeStateFields):
     def _normalise_temperature(cls, value: Any) -> Any:
         """Format numeric temperatures to a one-decimal string."""
 
-        return normalise_temperature(value)
+        return safe_temperature(value)
 
     @field_validator("prog", mode="before")
     @classmethod

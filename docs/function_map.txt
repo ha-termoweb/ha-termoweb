@@ -326,12 +326,6 @@ custom_components/termoweb/backend/rest_client.py :: RESTClient.get_node_setting
     Return settings/state for a node.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.get_rtc_time
     Return RTC metadata for a device's manager endpoint.
-custom_components/termoweb/backend/rest_client.py :: RESTClient._ensure_temperature
-    Normalise a numeric temperature to a string with one decimal.
-custom_components/termoweb/backend/rest_client.py :: RESTClient._ensure_prog
-    Validate and normalise a weekly program list.
-custom_components/termoweb/backend/rest_client.py :: RESTClient._ensure_ptemp
-    Validate preset temperatures and return formatted strings.
 custom_components/termoweb/backend/rest_client.py :: RESTClient._extract_samples
     Normalise heater samples payloads into {"t", "counter"} lists.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.set_node_settings
@@ -358,8 +352,6 @@ custom_components/termoweb/backend/sanitize.py :: redact_token_fragment
     Return a shortened representation of a token-like string.
 custom_components/termoweb/backend/sanitize.py :: mask_identifier
     Return a masked identifier suitable for log output.
-custom_components/termoweb/backend/sanitize.py :: build_acm_boost_payload
-    Return a validated accumulator boost payload.
 custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.create_ws_client
     Instantiate the unified websocket client for TermoWeb.
 custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.fetch_hourly_samples
@@ -528,10 +520,6 @@ custom_components/termoweb/backend/ws_health.py :: WsHealthTracker.stale_deadlin
     Return the monotonic timestamp when the payload becomes stale.
 custom_components/termoweb/backend/ws_health.py :: WsHealthTracker.snapshot
     Return a serializable snapshot of the tracker state.
-custom_components/termoweb/boost.py :: coerce_int
-    Return ``value`` as ``int`` when possible, else ``None``.
-custom_components/termoweb/boost.py :: coerce_boost_bool
-    Return ``value`` as a boolean when possible.
 custom_components/termoweb/boost.py :: coerce_boost_minutes
     Return ``value`` as positive minutes when possible.
 custom_components/termoweb/boost.py :: _coerce_positive_minutes
@@ -542,10 +530,26 @@ custom_components/termoweb/boost.py :: resolve_boost_end_from_fields
     Translate boost end ``day``/``minute`` fields into a timestamp.
 custom_components/termoweb/boost.py :: validate_boost_minutes
     Return a validated boost duration in minutes or ``None``.
+custom_components/termoweb/coerce.py :: as_number
+    Return a finite int/float (ints kept as int, strings as float) or None.
+custom_components/termoweb/coerce.py :: as_float
+    Return ``value`` as a finite float, or None.
+custom_components/termoweb/coerce.py :: as_int
+    Return ``value`` as an int truncated toward zero, or None.
+custom_components/termoweb/coerce.py :: as_bool
+    Return ``value`` as a bool from bool, 1/0 or common strings, or None.
+custom_components/termoweb/coerce.py :: as_percentage
+    Return ``as_int(value)`` clamped to 0..100, or None.
 custom_components/termoweb/codecs/common.py :: format_temperature
-    Format numeric temperatures to a one-decimal string.
+    Format a finite numeric temperature as a one-decimal string or raise.
+custom_components/termoweb/codecs/common.py :: safe_temperature
+    Format an inbound temperature; keep non-numeric text stripped, else None.
 custom_components/termoweb/codecs/common.py :: validate_units
     Validate and normalise temperature units.
+custom_components/termoweb/codecs/common.py :: validate_prog
+    Return a 168-slot weekly program of 0/1/2 integers or raise ValueError.
+custom_components/termoweb/codecs/common.py :: validate_ptemp
+    Return three formatted preset temperatures [cold, night, day] or raise.
 custom_components/termoweb/codecs/ducaheat_codec.py :: decode_settings
     Decode segmented settings payloads into canonical mappings.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_select_payload
@@ -598,16 +602,6 @@ custom_components/termoweb/codecs/ducaheat_models.py :: BoostPayload._format_boo
     Format boost temperature values.
 custom_components/termoweb/codecs/ducaheat_models.py :: BoostPayload._validate_units
     Ensure units are uppercase when provided.
-custom_components/termoweb/codecs/ducaheat_read_models.py :: _coerce_bool
-    Coerce common truthy and falsy values to ``bool``.
-custom_components/termoweb/codecs/ducaheat_read_models.py :: _coerce_number
-    Return ``value`` as a number when possible.
-custom_components/termoweb/codecs/ducaheat_read_models.py :: _coerce_percentage
-    Clamp percentage values to the 0-100 range.
-custom_components/termoweb/codecs/ducaheat_read_models.py :: _coerce_int
-    Return ``value`` coerced to int when possible.
-custom_components/termoweb/codecs/ducaheat_read_models.py :: _safe_temperature
-    Defensively format inbound temperature values.
 custom_components/termoweb/codecs/ducaheat_read_models.py :: _normalise_prog
     Convert vendor programme payloads into a 168-slot list.
 custom_components/termoweb/codecs/ducaheat_read_models.py :: _normalise_prog._coerce_slots
@@ -688,10 +682,6 @@ custom_components/termoweb/codecs/ducaheat_read_models.py :: _merge_boost_metada
     Assign a metadata value while respecting preference rules.
 custom_components/termoweb/codecs/ducaheat_read_models.py :: _merge_accumulator_charge_metadata
     Copy accumulator charge metadata from ``source`` into ``target``.
-custom_components/termoweb/codecs/termoweb_codec.py :: _validate_prog
-    Validate a weekly program sequence.
-custom_components/termoweb/codecs/termoweb_codec.py :: _validate_ptemp
-    Validate preset temperatures and return formatted strings.
 custom_components/termoweb/codecs/termoweb_codec.py :: _normalise_mode
     Lower-case and normalise heater modes.
 custom_components/termoweb/codecs/termoweb_codec.py :: build_settings_payload
@@ -710,10 +700,6 @@ custom_components/termoweb/codecs/termoweb_codec.py :: decode_samples
     Normalise samples payloads into {"t", "counter"} lists with second timestamps.
 custom_components/termoweb/codecs/termoweb_models.py :: NodeSummary._stringify_numeric
     Convert numeric addresses to strings for consistency.
-custom_components/termoweb/codecs/termoweb_models.py :: _format_temperature
-    Return a temperature value formatted with one decimal when numeric.
-custom_components/termoweb/codecs/termoweb_models.py :: normalise_temperature
-    Format numeric temperatures into a one-decimal string when possible.
 custom_components/termoweb/codecs/termoweb_models.py :: normalise_prog
     Coerce program values to integers when possible without raising.
 custom_components/termoweb/codecs/termoweb_models.py :: normalise_ptemp
@@ -1014,8 +1000,6 @@ custom_components/termoweb/domain/state.py :: _copy_sequence
     Return a shallow copy of a sequence when applicable.
 custom_components/termoweb/domain/state.py :: _copy_mapping
     Return a shallow copy of a mapping when applicable.
-custom_components/termoweb/domain/state.py :: _coerce_number
-    Return ``value`` as a number when possible.
 custom_components/termoweb/domain/state.py :: canonicalize_settings_payload
     Return canonical setting fields derived from ``payload``.
 custom_components/termoweb/domain/state.py :: NodeDelta.payload
@@ -1852,8 +1836,6 @@ custom_components/termoweb/utils.py :: build_power_monitor_device_info
     Return canonical ``DeviceInfo`` for a TermoWeb power monitor.
 custom_components/termoweb/utils.py :: translate_default_device_name
     Attach a device translation key when ``info`` carries a default node name.
-custom_components/termoweb/utils.py :: float_or_none
-    Return value as ``float`` if possible, else ``None``.
 scripts/generate_function_map.py :: DocExtractor.__init__
     Initialise the extractor for ``file_path``.
 scripts/generate_function_map.py :: DocExtractor.visit_ClassDef

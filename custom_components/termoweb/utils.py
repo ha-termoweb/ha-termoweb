@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import math
-from typing import Any
-
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration as loader_async_get_integration
@@ -220,25 +217,3 @@ def translate_default_device_name(info: DeviceInfo, addr: str) -> DeviceInfo:
             info["translation_placeholders"] = {"addr": addr}
             break
     return info
-
-
-def float_or_none(value: Any) -> float | None:
-    """Return value as ``float`` if possible, else ``None``.
-
-    Converts integers, floats, and numeric strings to ``float`` while safely
-    handling ``None`` and non-numeric inputs.
-    """
-
-    try:
-        if value is None:
-            return None
-        if isinstance(value, (int, float)):
-            num = float(value)
-        else:
-            string_val = str(value).strip()
-            if not string_val:
-                return None
-            num = float(string_val)
-        return num if math.isfinite(num) else None
-    except Exception:  # noqa: BLE001
-        return None

@@ -27,13 +27,6 @@ from custom_components.termoweb.domain import (
 from custom_components.termoweb.inventory import AccumulatorNode, HeaterNode
 
 
-class ExplodingStr:
-    """Helper that raises when stringified to test defensive paths."""
-
-    def __str__(self) -> str:
-        raise RuntimeError("boom")
-
-
 def _state_payload(
     coordinator: coord_module.StateCoordinator, node_type: str, addr: str
 ) -> dict[str, Any] | None:
@@ -44,39 +37,6 @@ def _state_payload(
         return None
     state = view.get_heater_state(node_type, addr)
     return state_to_dict(state) if state is not None else None
-
-
-def test_coerce_int_variants() -> None:
-    """``coerce_int`` should normalise primitives and guard against errors."""
-
-    assert boost_module.coerce_int(None) is None
-    assert boost_module.coerce_int(True) == 1
-    assert boost_module.coerce_int(False) == 0
-    assert boost_module.coerce_int(5.7) == 5
-    assert boost_module.coerce_int(float("inf")) is None
-    assert boost_module.coerce_int(ExplodingStr()) is None
-    assert boost_module.coerce_int("   ") is None
-    assert boost_module.coerce_int(" 7.2 ") == 7
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    (
-        (True, True),
-        (False, False),
-        (None, None),
-        ("Yes", True),
-        ("off", False),
-        (1, True),
-        (0, False),
-        (2, None),
-        (ExplodingStr(), None),
-    ),
-)
-def test_coerce_boost_bool_variants(value: Any, expected: bool | None) -> None:
-    """``coerce_boost_bool`` should normalise truthy and falsey values."""
-
-    assert boost_module.coerce_boost_bool(value) is expected
 
 
 def test_resolve_boost_end_from_fields_variants(

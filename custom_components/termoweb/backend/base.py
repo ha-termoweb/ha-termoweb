@@ -14,13 +14,13 @@ from typing import Any, ClassVar, Protocol
 from homeassistant.util import dt as dt_util
 
 from custom_components.termoweb.backend.sanitize import mask_identifier
+from custom_components.termoweb.coerce import as_float
 from custom_components.termoweb.inventory import (
     Inventory,
     NodeDescriptor,
     normalize_node_addr,
     normalize_node_type,
 )
-from custom_components.termoweb.utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -329,15 +329,15 @@ def normalise_sample_records(
     for record in records:
         if not isinstance(record, Mapping):
             continue
-        timestamp = float_or_none(record.get("t"))
+        timestamp = as_float(record.get("t"))
         if timestamp is None:
             continue
-        counter = float_or_none(record.get("counter"))
+        counter = as_float(record.get("counter"))
         if counter is None:
             counter = (
-                float_or_none(record.get("counter_max"))
-                or float_or_none(record.get("counter_min"))
-                or float_or_none(record.get("value"))
+                as_float(record.get("counter_max"))
+                or as_float(record.get("counter_min"))
+                or as_float(record.get("value"))
             )
         if counter is None:
             continue
@@ -355,7 +355,7 @@ def normalise_sample_records(
             "ts": ts,
             "energy_wh": energy_wh,
         }
-        power = float_or_none(record.get("power"))
+        power = as_float(record.get("power"))
         if power is not None:
             sample["power_w"] = power
         samples.append(sample)

@@ -8,6 +8,8 @@ import logging
 import typing
 from typing import Any
 
+from custom_components.termoweb.coerce import as_bool, as_int, as_number
+
 from .energy import EnergySnapshot
 from .ids import NodeId, NodeType
 
@@ -30,19 +32,6 @@ def _copy_mapping(value: Any) -> dict[str, Any] | None:
     if isinstance(value, Mapping):
         return dict(value)
     return None
-
-
-def _coerce_number(value: Any) -> float | int | None:
-    """Return ``value`` as a number when possible."""
-
-    if isinstance(value, (int, float)):
-        return value
-    if value is None:
-        return None
-    try:
-        return float(str(value).strip())
-    except (TypeError, ValueError):
-        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,12 +225,9 @@ def _populate_heater_state(
         else:
             state.state = str(raw_state)
     if "max_power" in payload:
-        state.max_power = _coerce_number(payload.get("max_power"))
+        state.max_power = as_number(payload.get("max_power"))
     if "batt_level" in payload:
-        try:
-            state.batt_level = int(payload.get("batt_level"))
-        except (TypeError, ValueError):
-            state.batt_level = None
+        state.batt_level = as_int(payload.get("batt_level"))
     if "lock" in payload:
         lock_value = payload.get("lock")
         if isinstance(lock_value, bool):
@@ -259,8 +245,7 @@ def _populate_heater_state(
         else:
             state.lock = None
     if "priority" in payload:
-        raw_priority = _coerce_number(payload.get("priority"))
-        state.priority = int(raw_priority) if raw_priority is not None else None
+        state.priority = as_int(payload.get("priority"))
     return state
 
 
@@ -277,23 +262,17 @@ def _populate_accumulator_fields(
 
     _populate_heater_state(state, payload)
     if "charge_level" in payload:
-        state.charge_level = _coerce_number(payload.get("charge_level"))
+        state.charge_level = as_number(payload.get("charge_level"))
     if "charging" in payload:
-        charging_value = payload.get("charging")
-        if isinstance(charging_value, bool):
-            state.charging = charging_value
-        elif isinstance(charging_value, (int, float)):
-            state.charging = bool(charging_value)
-        else:
-            state.charging = None
+        state.charging = as_bool(payload.get("charging"))
     if "current_charge_per" in payload:
-        state.current_charge_per = _coerce_number(payload.get("current_charge_per"))
+        state.current_charge_per = as_number(payload.get("current_charge_per"))
     if "target_charge_per" in payload:
-        state.target_charge_per = _coerce_number(payload.get("target_charge_per"))
+        state.target_charge_per = as_number(payload.get("target_charge_per"))
     if "boost_active" in payload:
         state.boost_active = payload.get("boost_active")
     if "boost_remaining" in payload:
-        state.boost_remaining = _coerce_number(payload.get("boost_remaining"))
+        state.boost_remaining = as_number(payload.get("boost_remaining"))
     if "boost_time" in payload:
         state.boost_time = payload.get("boost_time")
     if "boost_temp" in payload:
@@ -334,23 +313,23 @@ def _populate_power_monitor_state(
     """Populate power monitor fields on ``state``."""
 
     if "power" in payload:
-        state.power = _coerce_number(payload.get("power"))
+        state.power = as_number(payload.get("power"))
     if "voltage" in payload:
-        state.voltage = _coerce_number(payload.get("voltage"))
+        state.voltage = as_number(payload.get("voltage"))
     if "current" in payload:
-        state.current = _coerce_number(payload.get("current"))
+        state.current = as_number(payload.get("current"))
     if "energy" in payload:
-        state.energy = _coerce_number(payload.get("energy"))
+        state.energy = as_number(payload.get("energy"))
     status = payload.get("status")
     if isinstance(status, Mapping):
         if state.power is None and "power" in status:
-            state.power = _coerce_number(status.get("power"))
+            state.power = as_number(status.get("power"))
         if state.voltage is None and "voltage" in status:
-            state.voltage = _coerce_number(status.get("voltage"))
+            state.voltage = as_number(status.get("voltage"))
         if state.current is None and "current" in status:
-            state.current = _coerce_number(status.get("current"))
+            state.current = as_number(status.get("current"))
         if state.energy is None and "energy" in status:
-            state.energy = _coerce_number(status.get("energy"))
+            state.energy = as_number(status.get("energy"))
     return state
 
 

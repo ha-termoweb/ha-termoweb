@@ -24,7 +24,6 @@ from custom_components.termoweb.utils import (
     build_gateway_device_info,
     build_installation_device_info,
     build_power_monitor_device_info,
-    float_or_none,
     translate_default_device_name,
 )
 
@@ -40,27 +39,6 @@ def test_addresses_by_node_type_skips_invalid_entries() -> None:
     mapping, unknown = addresses_by_node_type(nodes, known_types=["htr"])
     assert mapping == {"acm": ["B"]}
     assert unknown == {"acm"}
-
-
-@pytest.mark.parametrize(
-    "value, expected",
-    [
-        (None, None),
-        ("abc", None),
-        ("123", 123.0),
-        (5, 5.0),
-        ("   ", None),
-        (float("nan"), None),
-        (float("inf"), None),
-    ],
-)
-def test_float_or_none(value, expected) -> None:
-    assert float_or_none(value) == expected
-
-
-@pytest.mark.parametrize("value", ["nan", "inf"])
-def test_float_or_none_non_finite_strings(value) -> None:
-    assert float_or_none(value) is None
 
 
 @pytest.mark.parametrize(

@@ -473,45 +473,6 @@ class RESTClient:
         )
         return {}
 
-    def _ensure_temperature(self, value: Any) -> str:
-        """Normalise a numeric temperature to a string with one decimal."""
-
-        try:
-            return f"{float(value):.1f}"
-        except (TypeError, ValueError) as err:
-            raise ValueError(f"Invalid temperature value: {value!r}") from err
-
-    def _ensure_prog(self, prog: list[int]) -> list[int]:
-        """Validate and normalise a weekly program list."""
-
-        if not isinstance(prog, list) or len(prog) != 168:
-            raise ValueError("prog must be a list of 168 integers (0, 1, or 2)")
-        normalised: list[int] = []
-        for value in prog:
-            try:
-                ivalue = int(value)
-            except (TypeError, ValueError) as err:
-                raise ValueError(f"prog contains non-integer value: {value!r}") from err
-            if ivalue not in (0, 1, 2):
-                raise ValueError(f"prog values must be 0, 1, or 2; got {ivalue}")
-            normalised.append(ivalue)
-        return normalised
-
-    def _ensure_ptemp(self, ptemp: list[float]) -> list[str]:
-        """Validate preset temperatures and return formatted strings."""
-
-        if not isinstance(ptemp, list) or len(ptemp) != 3:
-            raise ValueError(
-                "ptemp must be a list of three numeric values [cold, night, day]"
-            )
-        formatted: list[str] = []
-        for value in ptemp:
-            try:
-                formatted.append(self._ensure_temperature(value))
-            except ValueError as err:
-                raise ValueError(f"ptemp contains non-numeric value: {value}") from err
-        return formatted
-
     async def set_node_settings(
         self,
         dev_id: str,

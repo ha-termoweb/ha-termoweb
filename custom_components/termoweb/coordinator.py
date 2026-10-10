@@ -22,7 +22,8 @@ from homeassistant.util import dt as dt_util
 from .backend.factory import backend_capabilities
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import mask_identifier
-from .boost import coerce_int, resolve_boost_end_from_fields
+from .boost import resolve_boost_end_from_fields
+from .coerce import as_float, as_int
 from .const import BRAND_TERMOWEB, MIN_POLL_INTERVAL
 from .domain.energy import (
     EnergyNodeMetrics,
@@ -50,7 +51,6 @@ from .domain.state import (
 from .domain.view import DomainStateView
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
 from .runtime import require_runtime
-from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 _DataT = TypeVar("_DataT")
@@ -436,7 +436,7 @@ class StateCoordinator(
             ttl_value = _PENDING_SETTINGS_TTL
         expires_at = time_mod() + max(ttl_value, 0.0)
         normalized_mode = self._normalize_mode_value(mode)
-        normalized_stemp = float_or_none(stemp)
+        normalized_stemp = as_float(stemp)
         self._pending_settings[key] = PendingSetting(
             mode=normalized_mode,
             stemp=normalized_stemp,
@@ -476,15 +476,15 @@ class StateCoordinator(
         if not isinstance(payload, Mapping):
             return None
 
-        year = coerce_int(payload.get("y"))
-        month = coerce_int(payload.get("n"))
-        day = coerce_int(payload.get("d"))
+        year = as_int(payload.get("y"))
+        month = as_int(payload.get("n"))
+        day = as_int(payload.get("d"))
         if year is None or month is None or day is None:
             return None
 
-        hour = coerce_int(payload.get("h"))
-        minute = coerce_int(payload.get("m"))
-        second = coerce_int(payload.get("s"))
+        hour = as_int(payload.get("h"))
+        minute = as_int(payload.get("m"))
+        second = as_int(payload.get("s"))
 
         tzinfo = dt_util.now().tzinfo or UTC
         try:
@@ -545,8 +545,8 @@ class StateCoordinator(
 
         if not isinstance(payload, Mapping):
             return False
-        day = coerce_int(payload.get("boost_end_day"))
-        minute = coerce_int(payload.get("boost_end_min"))
+        day = as_int(payload.get("boost_end_day"))
+        minute = as_int(payload.get("boost_end_min"))
         return day is not None or minute is not None
 
     def _apply_accumulator_boost_metadata(
@@ -606,7 +606,7 @@ class StateCoordinator(
             return True
 
         mode_payload = self._normalize_mode_value(payload.get("mode"))
-        stemp_payload = float_or_none(payload.get("stemp"))
+        stemp_payload = as_float(payload.get("stemp"))
 
         mode_matches = mode_expected is None or mode_expected == mode_payload
         stemp_matches = True
@@ -1110,12 +1110,12 @@ class EnergyStateCoordinator(
                     continue
 
                 last = samples[-1]
-                counter = float_or_none(last.get("counter"))
+                counter = as_float(last.get("counter"))
                 if counter is None:
-                    counter = float_or_none(last.get("counter_max"))
+                    counter = as_float(last.get("counter_max"))
                 if counter is None:
-                    counter = float_or_none(last.get("counter_min"))
-                t = float_or_none(last.get("t"))
+                    counter = as_float(last.get("counter_min"))
+                t = as_float(last.get("t"))
                 if counter is None or t is None:
                     _LOGGER.debug(
                         "Latest sample missing 't' or 'counter' for "
@@ -1287,23 +1287,23 @@ class EnergyStateCoordinator(
                 extracted = EnergyStateCoordinator._extract_sample_point(nested)
                 if extracted:
                     return extracted
-            t = float_or_none(payload.get("t"))
+            t = as_float(payload.get("t"))
             if t is None:
                 return None
             counter_raw = payload.get("counter")
-            counter = float_or_none(counter_raw)
-            counter_min = float_or_none(payload.get("counter_min"))
-            counter_max = float_or_none(payload.get("counter_max"))
+            counter = as_float(counter_raw)
+            counter_min = as_float(payload.get("counter_min"))
+            counter_max = as_float(payload.get("counter_max"))
             if isinstance(counter_raw, Mapping):
-                counter = float_or_none(counter_raw.get("value")) or float_or_none(
+                counter = as_float(counter_raw.get("value")) or as_float(
                     counter_raw.get("counter")
                 )
-                counter_min = counter_min or float_or_none(counter_raw.get("min"))
-                counter_max = counter_max or float_or_none(counter_raw.get("max"))
+                counter_min = counter_min or as_float(counter_raw.get("min"))
+                counter_max = counter_max or as_float(counter_raw.get("max"))
             if counter is None:
                 counter = counter_max or counter_min
             if counter is None:
-                counter = float_or_none(payload.get("value"))
+                counter = as_float(payload.get("value"))
             if counter is None:
                 return None
             return t, counter

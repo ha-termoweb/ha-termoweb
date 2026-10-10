@@ -19,21 +19,20 @@ from custom_components.termoweb.backend.base import (
 )
 from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient
 from custom_components.termoweb.backend.rest_client import RESTClient
-from custom_components.termoweb.backend.sanitize import (
-    build_acm_boost_payload,
-    mask_identifier,
-    redact_text,
-)
-from custom_components.termoweb.boost import (
-    coerce_boost_bool,
-    coerce_int,
-    validate_boost_minutes,
+from custom_components.termoweb.backend.sanitize import mask_identifier, redact_text
+from custom_components.termoweb.boost import validate_boost_minutes
+from custom_components.termoweb.codecs.common import (
+    format_temperature,
+    validate_prog,
+    validate_ptemp,
 )
 from custom_components.termoweb.codecs.ducaheat_codec import (
     decode_settings,
+    encode_boost_command,
     encode_program_command,
     extract_prog_days,
 )
+from custom_components.termoweb.coerce import as_bool, as_percentage
 from custom_components.termoweb.const import BRAND_DUCAHEAT, WS_NAMESPACE
 from custom_components.termoweb.domain.commands import (
     BaseCommand,
@@ -44,6 +43,7 @@ from custom_components.termoweb.domain.commands import (
     SetProgram,
     SetSetpoint,
     SetUnits,
+    StartBoost,
     StopBoost,
 )
 from custom_components.termoweb.domain.ids import NodeId, NodeType
@@ -291,9 +291,9 @@ class DucaheatRESTClient(RESTClient):
                 commands.append(SetMode(mode_value))
 
             if prog is not None:
-                commands.append(SetProgram(self._ensure_prog(prog)))
+                commands.append(SetProgram(validate_prog(prog)))
             if ptemp is not None:
-                commands.append(SetPresetTemps(self._ensure_ptemp(ptemp)))
+                commands.append(SetPresetTemps(validate_ptemp(ptemp)))
 
             return await self._execute_segmented_commands(
                 dev_id,
@@ -311,14 +311,14 @@ class DucaheatRESTClient(RESTClient):
                 payload["mode"] = str(mode).strip().lower()
             if stemp is not None:
                 try:
-                    payload["stemp"] = self._ensure_temperature(stemp)
+                    payload["stemp"] = format_temperature(stemp)
                 except ValueError as err:
                     raise ValueError(f"Invalid stemp value: {stemp}") from err
                 payload["units"] = self._ensure_units(units)
             if prog is not None:
                 current_prog = await self._get_prog_days(dev_id, node_id, headers)
                 payload["prog"] = encode_program_command(
-                    SetProgram(self._ensure_prog(prog)), current=current_prog
+                    SetProgram(validate_prog(prog)), current=current_prog
                 )["prog"]
             if ptemp is not None:
                 payload["ptemp"] = self._serialise_prog_temps(ptemp)
@@ -357,7 +357,7 @@ class DucaheatRESTClient(RESTClient):
                 boost_minutes = validate_boost_minutes(boost_time)
 
             if stemp is not None:
-                formatted_stemp = self._ensure_temperature(stemp)
+                formatted_stemp = format_temperature(stemp)
                 commands.append(
                     SetSetpoint(
                         formatted_stemp, mode=mode_value, boost_time=boost_minutes
@@ -372,9 +372,9 @@ class DucaheatRESTClient(RESTClient):
                 commands.append(SetUnits(units_value))
 
             if prog is not None:
-                commands.append(SetProgram(self._ensure_prog(prog)))
+                commands.append(SetProgram(validate_prog(prog)))
             if ptemp is not None:
-                commands.append(SetPresetTemps(self._ensure_ptemp(ptemp)))
+                commands.append(SetPresetTemps(validate_ptemp(ptemp)))
             if mode_value is not None and stemp is None:
                 commands.append(SetMode(mode_value, boost_time=boost_minutes))
 
@@ -503,15 +503,15 @@ class DucaheatRESTClient(RESTClient):
         if not isinstance(source, Mapping):
             return
 
-        charging_value = coerce_boost_bool(source.get("charging"))
+        charging_value = as_bool(source.get("charging"))
         if charging_value is not None:
             target["charging"] = charging_value
 
         for key in ("current_charge_per", "target_charge_per"):
-            coerced = coerce_int(source.get(key))
+            coerced = as_percentage(source.get(key))
             if coerced is None:
                 continue
-            target[key] = max(0, min(100, coerced))
+            target[key] = coerced
 
     async def _post_acm_endpoint(
         self,
@@ -635,7 +635,7 @@ class DucaheatRESTClient(RESTClient):
         formatted_temp: str | None = None
         if stemp is not None:
             try:
-                formatted_temp = self._ensure_temperature(stemp)
+                formatted_temp = format_temperature(stemp)
             except ValueError as err:
                 raise ValueError(f"Invalid stemp value: {stemp!r}") from err
 
@@ -643,11 +643,9 @@ class DucaheatRESTClient(RESTClient):
         if units is not None:
             unit_value = self._ensure_units(units)
 
-        payload = build_acm_boost_payload(
-            boost,
-            boost_time,
-            stemp=formatted_temp,
-            units=unit_value,
+        command_type = StartBoost if boost else StopBoost
+        payload = encode_boost_command(
+            command_type(boost_time=boost_time, stemp=formatted_temp, units=unit_value)
         )
         if boost:
             _LOGGER.info(
@@ -686,7 +684,7 @@ class DucaheatRESTClient(RESTClient):
 
     def _serialise_prog_temps(self, ptemp: list[float]) -> dict[str, str]:
         """Serialise preset temperatures into the API schema."""
-        cold, night, day = self._ensure_ptemp(ptemp)
+        cold, night, day = validate_ptemp(ptemp)
         return {"cold": cold, "night": night, "day": day}
 
 

@@ -29,11 +29,11 @@ from ..boost import (
     supports_boost,
     validate_boost_minutes,
 )
+from ..coerce import as_float
 from ..domain import DomainState, HeaterState
 from ..identifiers import build_heater_unique_id, thermostat_fallback_name
 from ..inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
 from ..runtime import require_runtime
-from ..utils import float_or_none
 from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
@@ -541,14 +541,14 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         """Return the measured ambient temperature."""
 
         state = self.heater_state()
-        return float_or_none(getattr(state, "mtemp", None))
+        return as_float(getattr(state, "mtemp", None))
 
     @property
     def target_temperature(self) -> float | None:
         """Return the target temperature set on the heater."""
 
         state = self.heater_state()
-        return float_or_none(getattr(state, "stemp", None))
+        return as_float(getattr(state, "stemp", None))
 
     @property
     def temperature_unit(self) -> str:
@@ -596,7 +596,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             ptemp = getattr(state, "ptemp", None)
             try:
                 if isinstance(ptemp, (list, tuple)) and 0 <= slot < len(ptemp):
-                    attrs["program_setpoint"] = float_or_none(ptemp[slot])
+                    attrs["program_setpoint"] = as_float(ptemp[slot])
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -879,7 +879,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                     self._node_type,
                     self._addr,
                     mode=mode_api,
-                    stemp=float_or_none(stemp),
+                    stemp=as_float(stemp),
                 )
             except Exception as err:  # pragma: no cover - defensive
                 _LOGGER.debug(

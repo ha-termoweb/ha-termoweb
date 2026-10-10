@@ -1489,7 +1489,7 @@ def test_heater_energy_client_error_update_failed(
         def _raise_client_error(_value: Any) -> float:
             raise ClientError("bad")
 
-        monkeypatch.setattr(coord_module, "float_or_none", _raise_client_error)
+        monkeypatch.setattr(coord_module, "as_float", _raise_client_error)
 
         with pytest.raises(UpdateFailed, match="API error: bad"):
             await coord.async_refresh()

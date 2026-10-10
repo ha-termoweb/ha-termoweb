@@ -16,7 +16,14 @@ from pydantic import (
 )
 
 from custom_components.termoweb.boost import validate_boost_minutes
-from custom_components.termoweb.codecs.common import format_temperature, validate_units
+from custom_components.termoweb.codecs.common import safe_temperature, validate_units
+from custom_components.termoweb.coerce import (
+    as_bool,
+    as_float,
+    as_int,
+    as_number,
+    as_percentage,
+)
 
 ACCUMULATOR_ONLY_FIELDS: set[str] = {
     "boost_active",
@@ -35,73 +42,6 @@ ACCUMULATOR_ONLY_FIELDS: set[str] = {
 
 
 _STATUS_PRESET_KEYS = ("ice_temp", "eco_temp", "comf_temp")
-
-
-def _coerce_bool(value: Any) -> bool | None:
-    """Coerce common truthy and falsy values to ``bool``."""
-
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in {"1", "true", "yes", "on"}:
-            return True
-        if lowered in {"0", "false", "no", "off"}:
-            return False
-    return None
-
-
-def _coerce_number(value: Any) -> float | int | None:
-    """Return ``value`` as a number when possible."""
-
-    if isinstance(value, (int, float)):
-        return value
-    if value is None:
-        return None
-    try:
-        return float(str(value).strip())
-    except (TypeError, ValueError):
-        return None
-
-
-def _coerce_percentage(value: Any) -> int | None:
-    """Clamp percentage values to the 0-100 range."""
-
-    number = _coerce_number(value)
-    if number is None:
-        return None
-    try:
-        as_int = int(number)
-    except (TypeError, ValueError):
-        return None
-    return max(0, min(100, as_int))
-
-
-def _coerce_int(value: Any) -> int | None:
-    """Return ``value`` coerced to int when possible."""
-
-    try:
-        return None if value is None else int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _safe_temperature(value: Any) -> str | None:
-    """Defensively format inbound temperature values."""
-
-    if value is None:
-        return None
-    try:
-        return format_temperature(value)
-    except ValueError:
-        if isinstance(value, str):
-            cleaned = value.strip()
-            return cleaned or None
-        return None
 
 
 def _normalise_prog(data: Any) -> list[int] | None:
@@ -201,7 +141,7 @@ def _normalise_prog_temps(data: Any) -> list[str] | None:
     ]
     formatted: list[str] = []
     for value in temps:
-        safe = _safe_temperature(value)
+        safe = safe_temperature(value)
         if safe is None:
             return None
         formatted.append(safe)
@@ -295,7 +235,7 @@ class DucaheatStatusSegment(DucaheatReadModel):
     def _format_temps(cls, value: Any) -> str | None:
         """Validate and format temperature strings."""
 
-        return _safe_temperature(value)
+        return safe_temperature(value)
 
     @field_validator(
         "boost_active",
@@ -309,7 +249,7 @@ class DucaheatStatusSegment(DucaheatReadModel):
     def _coerce_booleans(cls, value: Any) -> bool | None:
         """Coerce truthy and falsy values."""
 
-        return _coerce_bool(value)
+        return as_bool(value)
 
     @field_validator("boost_time")
     @classmethod
@@ -337,21 +277,21 @@ class DucaheatStatusSegment(DucaheatReadModel):
     def _coerce_numbers(cls, value: Any) -> float | int | None:
         """Coerce numeric metadata safely."""
 
-        return _coerce_number(value)
+        return as_number(value)
 
     @field_validator("boost_end_day", "boost_end_min", mode="before")
     @classmethod
     def _clean_boost_end(cls, value: Any) -> int | None:
         """Convert boost end metadata to integers when possible."""
 
-        return _coerce_int(value)
+        return as_int(value)
 
     @field_validator("current_charge_per", "target_charge_per", mode="before")
     @classmethod
     def _clean_percentages(cls, value: Any) -> int | None:
         """Clamp charge percentage values."""
 
-        return _coerce_percentage(value)
+        return as_percentage(value)
 
     @model_validator(mode="after")
     def _derive_boost_end(self) -> DucaheatStatusSegment:
@@ -359,9 +299,9 @@ class DucaheatStatusSegment(DucaheatReadModel):
 
         if self.boost_end and isinstance(self.boost_end, Mapping):
             if self.boost_end_day is None:
-                self.boost_end_day = _coerce_int(self.boost_end.get("day"))
+                self.boost_end_day = as_int(self.boost_end.get("day"))
             if self.boost_end_min is None:
-                self.boost_end_min = _coerce_int(self.boost_end.get("minute"))
+                self.boost_end_min = as_int(self.boost_end.get("minute"))
         return self
 
     @model_validator(mode="after")
@@ -406,28 +346,28 @@ class DucaheatExtraOptions(DucaheatReadModel):
     def _format_boost_temp(cls, value: Any) -> str | None:
         """Format boost temperature strings."""
 
-        return _safe_temperature(value)
+        return safe_temperature(value)
 
     @field_validator("boost_end_day", "boost_end_min", mode="before")
     @classmethod
     def _clean_boost_end(cls, value: Any) -> int | None:
         """Convert boost end metadata to integers when possible."""
 
-        return _coerce_int(value)
+        return as_int(value)
 
     @field_validator("charging", mode="before")
     @classmethod
     def _coerce_charging(cls, value: Any) -> bool | None:
         """Coerce charging metadata to booleans."""
 
-        return _coerce_bool(value)
+        return as_bool(value)
 
     @field_validator("current_charge_per", "target_charge_per", mode="before")
     @classmethod
     def _clean_percentages(cls, value: Any) -> int | None:
         """Clamp charge percentage values."""
 
-        return _coerce_percentage(value)
+        return as_percentage(value)
 
     @model_validator(mode="after")
     def _derive_boost_end(self) -> DucaheatExtraOptions:
@@ -435,9 +375,9 @@ class DucaheatExtraOptions(DucaheatReadModel):
 
         if self.boost_end and isinstance(self.boost_end, Mapping):
             if self.boost_end_day is None:
-                self.boost_end_day = _coerce_int(self.boost_end.get("day"))
+                self.boost_end_day = as_int(self.boost_end.get("day"))
             if self.boost_end_min is None:
-                self.boost_end_min = _coerce_int(self.boost_end.get("minute"))
+                self.boost_end_min = as_int(self.boost_end.get("minute"))
         return self
 
 
@@ -476,35 +416,35 @@ class DucaheatSetupSegment(DucaheatReadModel):
     def _format_boost_temp(cls, value: Any) -> str | None:
         """Format boost temperature strings."""
 
-        return _safe_temperature(value)
+        return safe_temperature(value)
 
     @field_validator("boost_end_day", "boost_end_min", mode="before")
     @classmethod
     def _clean_boost_end(cls, value: Any) -> int | None:
         """Convert boost end metadata to integers when possible."""
 
-        return _coerce_int(value)
+        return as_int(value)
 
     @field_validator("charging", mode="before")
     @classmethod
     def _coerce_charging(cls, value: Any) -> bool | None:
         """Coerce charging metadata to booleans."""
 
-        return _coerce_bool(value)
+        return as_bool(value)
 
     @field_validator("current_charge_per", "target_charge_per", mode="before")
     @classmethod
     def _clean_percentages(cls, value: Any) -> int | None:
         """Clamp charge percentage values."""
 
-        return _coerce_percentage(value)
+        return as_percentage(value)
 
     @field_validator("priority", mode="before")
     @classmethod
     def _coerce_priority(cls, value: Any) -> int | None:
         """Coerce string-wrapped numeric priority to int."""
 
-        return _coerce_int(value)
+        return as_int(value)
 
     @model_validator(mode="after")
     def _derive_boost_end(self) -> DucaheatSetupSegment:
@@ -512,9 +452,9 @@ class DucaheatSetupSegment(DucaheatReadModel):
 
         if self.boost_end and isinstance(self.boost_end, Mapping):
             if self.boost_end_day is None:
-                self.boost_end_day = _coerce_int(self.boost_end.get("day"))
+                self.boost_end_day = as_int(self.boost_end.get("day"))
             if self.boost_end_min is None:
-                self.boost_end_min = _coerce_int(self.boost_end.get("minute"))
+                self.boost_end_min = as_int(self.boost_end.get("minute"))
         return self
 
 
@@ -564,13 +504,7 @@ class DucaheatThermostatSettings(DucaheatReadModel):
     def _coerce_temps(cls, value: Any) -> float | None:
         """Coerce temperature values to floats."""
 
-        number = _coerce_number(value)
-        if number is None:
-            return None
-        try:
-            return float(number)
-        except (TypeError, ValueError):
-            return None
+        return as_float(value)
 
     @field_validator("units")
     @classmethod
@@ -594,10 +528,10 @@ class DucaheatThermostatSettings(DucaheatReadModel):
         if isinstance(value, Iterable) and not isinstance(value, (bytes, str)):
             cleaned: list[float] = []
             for temp in value:
-                number = _coerce_number(temp)
+                number = as_float(temp)
                 if number is None:
                     return None
-                cleaned.append(float(number))
+                cleaned.append(number)
             return cleaned
         return None
 
@@ -743,7 +677,7 @@ def _merge_boost_metadata(
     if "boost_active" in source:
         _assign("boost_active", source["boost_active"])
     elif "boost" in source:
-        _assign("boost_active", _coerce_bool(source.get("boost")))
+        _assign("boost_active", as_bool(source.get("boost")))
 
     for key in ("boost_end_day", "boost_end_min"):
         if key in source:
@@ -773,14 +707,14 @@ def _merge_accumulator_charge_metadata(
             return True
         return target[key] is None
 
-    charging_value = _coerce_bool(source.get("charging"))
+    charging_value = as_bool(source.get("charging"))
     if charging_value is not None and _should_assign("charging"):
         target["charging"] = charging_value
 
     for key in ("current_charge_per", "target_charge_per"):
         if not _should_assign(key):
             continue
-        coerced = _coerce_percentage(source.get(key))
+        coerced = as_percentage(source.get(key))
         if coerced is None:
             continue
         target[key] = coerced

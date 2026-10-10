@@ -4,58 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import logging
-import math
 from typing import Any, Final
 
 from homeassistant.util import dt as dt_util
 
+from .coerce import as_bool, as_int
+
 _LOGGER = logging.getLogger(__name__)
-
-
-def coerce_int(value: Any) -> int | None:
-    """Return ``value`` as ``int`` when possible, else ``None``."""
-
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, (int, float)):
-        if isinstance(value, float) and not math.isfinite(value):
-            return None
-        return int(value)
-    try:
-        candidate = str(value).strip()
-    except Exception:  # noqa: BLE001 - defensive
-        return None
-    if not candidate:
-        return None
-    try:
-        return int(float(candidate))
-    except (TypeError, ValueError):  # pragma: no cover - defensive
-        return None
-
-
-def coerce_boost_bool(value: Any) -> bool | None:
-    """Return ``value`` as a boolean when possible."""
-
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return None
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if value == 1:
-            return True
-        if value == 0:
-            return False
-    try:
-        text = str(value).strip().lower()
-    except Exception:  # noqa: BLE001 - defensive
-        return None
-    if text in {"true", "1", "yes", "on"}:
-        return True
-    if text in {"false", "0", "no", "off"}:
-        return False
-    return None
 
 
 def coerce_boost_minutes(value: Any) -> int | None:
@@ -64,7 +19,7 @@ def coerce_boost_minutes(value: Any) -> int | None:
     if value is None or isinstance(value, bool):
         return None
 
-    minutes = coerce_int(value)
+    minutes = as_int(value)
     if minutes is None or minutes <= 0:
         return None
 
@@ -91,7 +46,7 @@ def supports_boost(node: Any) -> bool:
             )
             return False
 
-    result = coerce_boost_bool(candidate)
+    result = as_bool(candidate)
     if result is not None:
         return result
 
@@ -106,8 +61,8 @@ def resolve_boost_end_from_fields(
 ) -> tuple[datetime | None, int | None]:
     """Translate boost end ``day``/``minute`` fields into a timestamp."""
 
-    day = coerce_int(boost_end_day)
-    minute = coerce_int(boost_end_min)
+    day = as_int(boost_end_day)
+    minute = as_int(boost_end_min)
     if day is None or minute is None or minute < 0:
         return None, None
 

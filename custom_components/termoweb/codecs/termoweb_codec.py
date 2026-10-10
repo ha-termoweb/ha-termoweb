@@ -9,7 +9,12 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from custom_components.termoweb.boost import validate_boost_minutes
-from custom_components.termoweb.codecs.common import format_temperature, validate_units
+from custom_components.termoweb.codecs.common import (
+    format_temperature,
+    validate_prog,
+    validate_ptemp,
+    validate_units,
+)
 from custom_components.termoweb.domain import canonicalize_settings_payload
 from custom_components.termoweb.domain.commands import (
     AccumulatorCommand,
@@ -39,39 +44,6 @@ from .termoweb_models import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def _validate_prog(prog: list[int]) -> list[int]:
-    """Validate a weekly program sequence."""
-
-    if not isinstance(prog, list) or len(prog) != 168:
-        raise ValueError("prog must be a list of 168 integers (0, 1, or 2)")
-    normalised: list[int] = []
-    for value in prog:
-        try:
-            ivalue = int(value)
-        except (TypeError, ValueError) as err:
-            raise ValueError(f"prog contains non-integer value: {value!r}") from err
-        if ivalue not in (0, 1, 2):
-            raise ValueError(f"prog values must be 0, 1, or 2; got {ivalue}")
-        normalised.append(ivalue)
-    return normalised
-
-
-def _validate_ptemp(ptemp: list[float | str]) -> list[str]:
-    """Validate preset temperatures and return formatted strings."""
-
-    if not isinstance(ptemp, list) or len(ptemp) != 3:
-        raise ValueError(
-            "ptemp must be a list of three numeric values [cold, night, day]"
-        )
-    formatted: list[str] = []
-    for value in ptemp:
-        try:
-            formatted.append(format_temperature(value, label="temperature"))
-        except ValueError as err:
-            raise ValueError(f"ptemp contains non-numeric value: {value}") from err
-    return formatted
-
-
 def _normalise_mode(mode: str) -> str:
     """Lower-case and normalise heater modes."""
 
@@ -96,9 +68,9 @@ def build_settings_payload(commands: list[BaseCommand]) -> dict[str, Any]:
         elif isinstance(command, SetSetpoint):
             stemp = format_temperature(command.setpoint, label="stemp")
         elif isinstance(command, SetProgram):
-            prog = _validate_prog(command.program)
+            prog = validate_prog(command.program)
         elif isinstance(command, SetPresetTemps):
-            ptemp = _validate_ptemp(command.presets)
+            ptemp = validate_ptemp(command.presets)
         elif isinstance(command, SetUnits):
             units = validate_units(command.units)
         else:
