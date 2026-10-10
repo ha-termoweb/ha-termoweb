@@ -15,9 +15,13 @@ from typing import Any
 from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv, device_registry as dr
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.typing import ConfigType
@@ -44,7 +48,7 @@ from .coordinator import (
 )
 from .domain.ids import NodeType
 from .energy import energy_import_store
-from .identifiers import build_cloud_unique_id
+from .identifiers import build_cloud_unique_id, migrate_unique_id
 from .inventory import (
     Inventory,
     build_node_inventory,
@@ -661,6 +665,33 @@ def _migrate_to_1_4(hass: HomeAssistant, entry: ConfigEntry) -> None:
     )
 
 
+async def _migrate_to_1_5(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Move entity unique IDs to the one scheme; entity IDs and history stay."""
+
+    ent_reg = er.async_get(hass)
+
+    @callback
+    def _migrate(entity: er.RegistryEntry) -> dict[str, Any] | None:
+        """Return the new unique ID of an older-format entity, or None."""
+
+        new_id = migrate_unique_id(entity.domain, entity.unique_id)
+        if new_id is None:
+            return None
+        if taken := ent_reg.async_get_entity_id(entity.domain, DOMAIN, new_id):
+            _LOGGER.warning(
+                "Not migrating %s to unique ID %s: %s already has it",
+                entity.entity_id,
+                new_id,
+                taken,
+            )
+            return None
+        _LOGGER.debug("Migrating %s unique ID to %s", entity.entity_id, new_id)
+        return {"new_unique_id": new_id}
+
+    await er.async_migrate_entries(hass, entry.entry_id, _migrate)
+    hass.config_entries.async_update_entry(entry, minor_version=5)
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate a config entry to the current version."""
     if entry.version > 1:
@@ -671,4 +702,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _migrate_to_1_3(hass, entry)
     if entry.minor_version < 4:
         _migrate_to_1_4(hass, entry)
+    if entry.minor_version < 5:
+        await _migrate_to_1_5(hass, entry)
     return True

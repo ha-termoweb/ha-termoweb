@@ -24,7 +24,10 @@ from custom_components.termoweb.entities.heater import (
     derive_boost_state_from_domain,
     log_skipped_nodes,
 )
-from custom_components.termoweb.identifiers import build_heater_unique_id
+from custom_components.termoweb.identifiers import (
+    build_gateway_entity_unique_id,
+    build_heater_unique_id,
+)
 from custom_components.termoweb.inventory import (
     Inventory,
     normalize_node_addr,
@@ -109,7 +112,7 @@ class GatewayOnlineBinarySensor(
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = str(dev_id)
-        self._attr_unique_id = f"{self._dev_id}_online"
+        self._attr_unique_id = build_gateway_entity_unique_id(self._dev_id, "online")
 
     def _gateway_connection_state(self) -> GatewayConnectionState:
         """Return the gateway connection state for this device."""

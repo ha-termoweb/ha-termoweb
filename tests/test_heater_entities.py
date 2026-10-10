@@ -70,8 +70,8 @@ def test_heater_node_base_normalizes_address(monkeypatch: pytest.MonkeyPatch) ->
     heater = HeaterNodeBase(coordinator, "entry", "dev", " 01 ", " Heater 01 ")
 
     assert heater._addr == "01"
-    assert heater.device_info["identifiers"] == {(heater_module.DOMAIN, "dev", "01")}
-    assert heater._attr_unique_id == f"{heater_module.DOMAIN}:dev:htr:01"
+    assert heater.device_info["identifiers"] == {(DOMAIN, "dev", "01")}
+    assert heater._attr_unique_id == f"{DOMAIN}:dev:htr:01"
     assert calls == [(" 01 ", {})]
 
 

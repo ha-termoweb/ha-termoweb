@@ -42,6 +42,10 @@ custom_components/termoweb/__init__.py :: _migrate_to_1_3
     Drop the ``supports_diagnostics`` key that old releases stored.
 custom_components/termoweb/__init__.py :: _migrate_to_1_4
     Case-fold the account unique ID and scope it by backend (Tevolve -> ducaheat).
+custom_components/termoweb/__init__.py :: _migrate_to_1_5
+    Move entity unique IDs to the one scheme; entity IDs and history stay.
+custom_components/termoweb/__init__.py :: _migrate_to_1_5._migrate
+    Return the new unique ID of an older-format entity, or None.
 custom_components/termoweb/__init__.py :: async_migrate_entry
     Migrate a config entry to the current version.
 custom_components/termoweb/backend/base.py :: HttpClientProto.list_devices
@@ -1610,8 +1614,12 @@ custom_components/termoweb/entities/switch.py :: _iter_lockable_inventory_nodes
     Yield htr and acm node metadata from ``inventory``.
 custom_components/termoweb/entities/switch.py :: _build_settings_resolver
     Return callable resolving the domain state for a node.
+custom_components/termoweb/identifiers.py :: _key
+    Return ``suffix`` without its leading colon; it must be one snake_case token.
+custom_components/termoweb/identifiers.py :: _dev
+    Return the normalised gateway id; raise ValueError when it is missing.
 custom_components/termoweb/identifiers.py :: build_heater_unique_id
-    Return the canonical unique ID for a heater node.
+    Return the canonical unique ID for a node entity (``suffix`` is its key).
 custom_components/termoweb/identifiers.py :: build_heater_energy_unique_id
     Return the canonical unique ID for a heater energy sensor.
 custom_components/termoweb/identifiers.py :: build_power_monitor_unique_id
@@ -1620,6 +1628,14 @@ custom_components/termoweb/identifiers.py :: build_power_monitor_energy_unique_i
     Return the canonical unique ID for a power monitor energy sensor.
 custom_components/termoweb/identifiers.py :: build_power_monitor_power_unique_id
     Return the canonical unique ID for a power monitor power sensor.
+custom_components/termoweb/identifiers.py :: build_installation_entity_unique_id
+    Return the canonical unique ID for an installation-level entity.
+custom_components/termoweb/identifiers.py :: build_gateway_entity_unique_id
+    Return the canonical unique ID for a gateway-level entity.
+custom_components/termoweb/identifiers.py :: is_canonical_unique_id
+    Return True when ``unique_id`` has the shape of the one scheme above.
+custom_components/termoweb/identifiers.py :: migrate_unique_id
+    Return the canonical ID for an older ``domain`` entity ID, else None.
 custom_components/termoweb/identifiers.py :: thermostat_fallback_name
     Return the fallback friendly name for a thermostat node.
 custom_components/termoweb/identifiers.py :: build_cloud_unique_id

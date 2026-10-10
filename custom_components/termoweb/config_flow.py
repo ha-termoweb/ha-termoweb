@@ -529,7 +529,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Initial setup and (optional) reconfigure without use_push."""
 
     VERSION = 1
-    MINOR_VERSION = 4
+    MINOR_VERSION = 5
 
     @staticmethod
     @callback

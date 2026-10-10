@@ -22,7 +22,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.backend.factory import backend_capabilities
 from custom_components.termoweb.coerce import as_float, as_int, as_percentage
-from custom_components.termoweb.const import DOMAIN, signal_radio_frames
+from custom_components.termoweb.const import signal_radio_frames
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
 from custom_components.termoweb.domain.ids import HEATING_NODE_TYPES
 from custom_components.termoweb.domain.view import DomainStateView
@@ -34,8 +34,10 @@ from custom_components.termoweb.entities.heater import (
     log_skipped_nodes,
 )
 from custom_components.termoweb.identifiers import (
+    build_gateway_entity_unique_id,
     build_heater_energy_unique_id,
     build_heater_unique_id,
+    build_installation_entity_unique_id,
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
     thermostat_fallback_name,
@@ -253,8 +255,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
         heater_details,
     ):
-        energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
-        uid_prefix = energy_unique_id.rsplit(":", 1)[0]
         new_entities.extend(
             _create_boost_sensors(
                 coordinator,
@@ -262,7 +262,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 dev_id,
                 addr_str,
                 base_name,
-                uid_prefix,
                 node_type=node_type,
                 inventory=heater_details.inventory,
             )
@@ -278,7 +277,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
 
     if capabilities.energy:
-        uid_total = f"{DOMAIN}:{dev_id}:energy_total"
+        uid_total = build_installation_entity_unique_id(dev_id, "energy_total")
         new_entities.append(
             InstallationTotalEnergySensor(
                 energy_coordinator,
@@ -849,7 +848,9 @@ def _create_heater_sensors(
             target_type,
             canonical_addr,
         )
-        power_unique_id = f"{energy_unique_id.rsplit(':', 1)[0]}:power"
+        power_unique_id = build_heater_unique_id(
+            dev_id, target_type, canonical_addr, suffix="power"
+        )
         sensors.extend(
             (
                 energy_cls(
@@ -886,7 +887,6 @@ def _create_boost_sensors(
     dev_id: str,
     addr: str,
     base_name: str,
-    uid_prefix: str,
     *,
     node_type: str | None = None,
     inventory: Inventory | None = None,
@@ -900,14 +900,16 @@ def _create_boost_sensors(
 ]:
     """Create the boost-related sensors for a heater node."""
 
-    boost_prefix = f"{uid_prefix}:boost"
+    uid_type = node_type or "htr"
     minutes = minutes_cls(
         coordinator,
         entry_id,
         dev_id,
         addr,
         name=None,
-        unique_id=f"{boost_prefix}:minutes_remaining",
+        unique_id=build_heater_unique_id(
+            dev_id, uid_type, addr, suffix="boost_minutes_remaining"
+        ),
         device_name=base_name,
         node_type=node_type,
         inventory=inventory,
@@ -918,7 +920,7 @@ def _create_boost_sensors(
         dev_id,
         addr,
         name=None,
-        unique_id=f"{boost_prefix}:end",
+        unique_id=build_heater_unique_id(dev_id, uid_type, addr, suffix="boost_end"),
         device_name=base_name,
         node_type=node_type,
         inventory=inventory,
@@ -1150,7 +1152,7 @@ class InstallationInfoSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = dev_id
-        self._attr_unique_id = f"{DOMAIN}:{dev_id}:site:info"
+        self._attr_unique_id = build_installation_entity_unique_id(dev_id, "info")
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -1215,7 +1217,9 @@ class RadioFramesSensor(SensorEntity):
         """Start at zero frames; the radio monitor pushes every new count."""
         self._entry_id = entry_id
         self._dev_id = str(dev_id)
-        self._attr_unique_id = f"{DOMAIN}:{self._dev_id}:frames_heard"
+        self._attr_unique_id = build_gateway_entity_unique_id(
+            self._dev_id, "frames_heard"
+        )
         self._attr_native_value = 0
         self._attr_extra_state_attributes = {"last_frame": None}
 

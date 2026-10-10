@@ -23,7 +23,6 @@ from custom_components.termoweb.boost import (
     supports_boost,
 )
 from custom_components.termoweb.coerce import as_bool, as_float
-from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.domain import DomainStateView
 from custom_components.termoweb.domain.state import (
     AccumulatorState,
@@ -32,6 +31,7 @@ from custom_components.termoweb.domain.state import (
     PowerMonitorState,
     ThermostatState,
 )
+from custom_components.termoweb.identifiers import build_heater_unique_id
 from custom_components.termoweb.inventory import (
     Inventory,
     Node,
@@ -558,8 +558,8 @@ class HeaterNodeBase(CoordinatorEntity):
             or "htr"
         )
         self._node_type = resolved_type
-        self._attr_unique_id = (
-            unique_id or f"{DOMAIN}:{dev_id}:{resolved_type}:{self._addr}"
+        self._attr_unique_id = unique_id or build_heater_unique_id(
+            dev_id, resolved_type, self._addr
         )
         self._device_name = device_name or name
         self._inventory: Inventory | None = inventory

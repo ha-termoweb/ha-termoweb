@@ -182,6 +182,21 @@ parent by registry id (`via_device_id`), never by the deprecated `via_device`
 identifier: the gateway points at the site, and nodes and power monitors point
 at the gateway. `utils.build_node_device_info` builds the node devices.
 
+## Entity unique IDs
+
+Every entity unique ID is built in `identifiers.py`, and nowhere else, with one
+scheme: `termoweb:<dev_id>[:<device>]:<key>`. `<device>` is the device the
+entity belongs to: nothing for the gateway, `site` for the site, or
+`<node_type>:<addr>` for a node. `<key>` is one snake_case token. Examples:
+`termoweb:<dev>:online`, `termoweb:<dev>:site:energy_total`,
+`termoweb:<dev>:acm:2:boost_end`.
+
+Config entry version 1.5 moves older IDs to this scheme with
+`entity_registry.async_migrate_entries`. `identifiers.migrate_unique_id` holds
+the table of old formats. Only the unique ID changes, so the entity ID,
+history and user customisations stay. If an entity already has the new ID,
+the old entity is left as it is and a WARNING is logged.
+
 ## Operational constraints
 
 - Entity services and writes fail loudly: invalid input or the wrong node type
