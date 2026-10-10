@@ -10,12 +10,13 @@ from unittest.mock import AsyncMock
 from homeassistant.core import HomeAssistant
 import pytest
 
-from custom_components.termoweb import coordinator as coord_module
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.coordinator import (
-    EnergyStateCoordinator,
-    StateCoordinator,
+    energy as energy_module,
+    state as state_module,
 )
+from custom_components.termoweb.coordinator.energy import EnergyStateCoordinator
+from custom_components.termoweb.coordinator.state import StateCoordinator
 from custom_components.termoweb.domain.state import state_to_dict
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from tests.fakes.cloud import DEV_ID
@@ -34,8 +35,9 @@ class Clock:
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> Clock:
         """Drive ``time.time`` and ``time.monotonic`` as seen by the coordinator."""
-        monkeypatch.setattr(coord_module, "time", SimpleNamespace(time=self))
-        monkeypatch.setattr(coord_module, "time_mod", self)
+        monkeypatch.setattr(energy_module, "time", SimpleNamespace(time=self))
+        monkeypatch.setattr(energy_module, "time_mod", self)
+        monkeypatch.setattr(state_module, "time_mod", self)
         return self
 
 

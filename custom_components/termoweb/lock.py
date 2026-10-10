@@ -11,7 +11,7 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.backend.sanitize import mask_identifier
-from custom_components.termoweb.coordinator import StateCoordinator
+from custom_components.termoweb.coordinator.state import StateCoordinator
 from custom_components.termoweb.domain.ids import HEATING_NODE_TYPES
 from custom_components.termoweb.domain.state import DomainState
 from custom_components.termoweb.entity import (

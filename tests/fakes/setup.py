@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb.const import BRAND_TERMOWEB
-from custom_components.termoweb.coordinator import StateCoordinator
+from custom_components.termoweb.coordinator.state import StateCoordinator
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 
 

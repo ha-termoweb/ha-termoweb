@@ -19,7 +19,6 @@ from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.termoweb import coordinator as coord_module
 from custom_components.termoweb.backend.rest_client import (
     BackendAuthError,
     BackendRateLimitError,
@@ -27,7 +26,8 @@ from custom_components.termoweb.backend.rest_client import (
 )
 from custom_components.termoweb.backend.termoweb import TermoWebBackend
 from custom_components.termoweb.backend.termoweb_ws import TermoWebWSClient
-from custom_components.termoweb.coordinator import (
+from custom_components.termoweb.coordinator import state as coord_module
+from custom_components.termoweb.coordinator.state import (
     StateCoordinator,
     build_device_metadata,
 )
@@ -1006,3 +1006,35 @@ async def test_boost_start_button_uses_device_boost_time(
 
     boost.assert_awaited_once()
     assert boost.await_args.kwargs["boost_time"] == 120
+
+
+async def test_poll_stores_thermostat_settings(hass: HomeAssistant) -> None:
+    """Thermostats are polled with the heaters and land in the state store."""
+    client = rest_client(
+        get_node_settings=AsyncMock(return_value={"mode": "auto", "stemp": "19.5"})
+    )
+    coord = state_coordinator(hass, client, {"thm": ["2"]})
+
+    await coord.async_refresh()
+
+    client.get_node_settings.assert_awaited_once_with(DEV_ID, ("thm", "2"))
+    assert node_state(coord, "thm", "2") == {"mode": "auto", "stemp": "19.5"}
+
+
+async def test_pending_write_that_expires_during_the_read_is_merged(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pending write whose TTL runs out while the read is in flight stops deferring."""
+    clock = Clock(100.0).install(monkeypatch)
+
+    async def _slow_read(*_args: Any) -> dict[str, str]:
+        clock.now = 106.0  # the 5 s TTL expires while the request is in flight
+        return {"mode": "eco"}
+
+    client = rest_client(get_node_settings=AsyncMock(side_effect=_slow_read))
+    coord = state_coordinator(hass, client, {"htr": ["1"]})
+    coord.register_pending_setting("htr", "1", mode="auto", stemp=None, ttl=5)
+
+    await coord.async_refresh_heater(("htr", "1"))
+
+    assert node_state(coord, "htr", "1") == {"mode": "eco"}
