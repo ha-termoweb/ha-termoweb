@@ -1231,7 +1231,7 @@ class EnergyStateCoordinator(
                         self._skip_polls,
                     )
                     return
-                except (ClientError, BackendAuthError):
+                except ClientError, BackendAuthError:
                     samples = []
 
                 if not samples:
