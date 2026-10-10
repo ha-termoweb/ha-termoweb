@@ -1061,9 +1061,12 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
         )
         power = dict(self.entry.options.get(CONF_RADIO_POWER) or {})
         if user_input is not None:
-            data: dict[str, Any] = {"debug": bool(user_input.get("debug", False))}
+            # Keep option keys this form does not own (e.g. energy-import progress).
+            data: dict[str, Any] = {
+                **self.entry.options,
+                "debug": bool(user_input.get("debug", False)),
+            }
             if radio_addrs:
-                data = {**self.entry.options, **data}
                 data[CONF_RADIO_POWER] = {
                     **power,
                     KEY_RATED_POWER: {

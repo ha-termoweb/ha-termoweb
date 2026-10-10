@@ -11,6 +11,10 @@ from conftest import _install_stubs
 _install_stubs()
 
 import custom_components.termoweb.config_flow as config_flow
+from custom_components.termoweb.energy import (
+    OPTION_ENERGY_HISTORY_IMPORTED,
+    OPTION_ENERGY_HISTORY_PROGRESS,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -492,4 +496,30 @@ def test_options_flow_init_and_submit(
         options_flow.async_step_init({"debug": True, "poll_interval": 240})
     )
     assert created["type"] == "create_entry"
-    assert created["data"] == {"debug": True}
+    assert created["data"] == {"poll_interval": 10, "debug": True}
+
+
+def test_options_flow_submit_keeps_energy_import_state() -> None:
+    """Saving the cloud options form must not wipe the energy-import progress."""
+    hass = HomeAssistant()
+    progress = {"htr:1": 1_700_000_000, "acm:2": 1_700_003_600}
+    entry = ConfigEntry(
+        "entry-id",
+        data={"brand": config_flow.BRAND_TERMOWEB},
+        options={
+            "debug": False,
+            OPTION_ENERGY_HISTORY_PROGRESS: progress,
+            OPTION_ENERGY_HISTORY_IMPORTED: True,
+        },
+    )
+    options_flow = config_flow.TermoWebConfigFlow.async_get_options_flow(entry)
+    options_flow.hass = hass
+
+    created = asyncio.run(options_flow.async_step_init({"debug": True}))
+
+    assert created["type"] == "create_entry"
+    assert created["data"] == {
+        "debug": True,
+        OPTION_ENERGY_HISTORY_PROGRESS: progress,
+        OPTION_ENERGY_HISTORY_IMPORTED: True,
+    }
