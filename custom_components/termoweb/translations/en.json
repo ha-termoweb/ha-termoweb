@@ -251,7 +251,7 @@
     },
     "set_preset_temperatures": {
       "name": "Set preset temperatures",
-      "description": "Set the cold, night and day preset temperatures for a TermoWeb heater. You can either provide all three temperatures as a single list (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "description": "Set the cold, night and day preset temperatures for a TermoWeb heater. You can either provide all three temperatures as a single list (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``). Presets you leave out keep their current value.",
       "fields": {
         "ptemp": {
           "name": "Preset temperatures",

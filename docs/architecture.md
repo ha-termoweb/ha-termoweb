@@ -149,6 +149,10 @@ See `radio_protocol.md` section 10.
 
 ## Operational constraints
 
+- Entity services and writes fail loudly: invalid input or the wrong node type
+  raises `ServiceValidationError`, a failed backend write raises
+  `HomeAssistantError`. Only the debounced mode/setpoint write, which runs after
+  the service call returned, logs its failure instead.
 - REST requests must be rate-limited and treated as a fallback when WebSocket
   updates are unavailable.
 - The `import_energy_history` service must throttle to **2 queries per second**

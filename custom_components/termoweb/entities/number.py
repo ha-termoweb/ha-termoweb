@@ -9,7 +9,7 @@ from typing import Any, TypeVar
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.const import UnitOfPower, UnitOfTemperature, UnitOfTime
-from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -30,6 +30,7 @@ from .heater import (
     DEFAULT_BOOST_DURATION,
     DEFAULT_BOOST_TEMPERATURE,
     HeaterNodeBase,
+    async_backend_write,
     get_boost_runtime_minutes,
     get_boost_temperature,
     heater_platform_details_for_entry,
@@ -244,12 +245,9 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
 
         minutes = self._hours_to_minutes(value)
         if minutes is None or minutes not in ALLOWED_BOOST_MINUTES:
-            _LOGGER.error(
-                "Invalid boost duration for %s: %s",
-                self._addr,
-                value,
+            raise ServiceValidationError(
+                f"Invalid boost duration for {self._addr}: {value}"
             )
-            return
 
         self._apply_minutes(minutes, persist=True)
         self.async_write_ha_state()
@@ -416,12 +414,9 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
 
         temperature = self._validate_temperature(value)
         if temperature is None:
-            _LOGGER.error(
-                "Invalid boost temperature for %s: %s",
-                self._addr,
-                value,
+            raise ServiceValidationError(
+                f"Invalid boost temperature for {self._addr}: {value}"
             )
-            return
 
         hass = self.hass
         if hass is None:
@@ -434,35 +429,20 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
             self._addr,
         )
         if not entity_id:
-            _LOGGER.error(
-                "Cannot resolve climate entity for boost temperature on %s",
-                self._addr,
+            raise HomeAssistantError(
+                f"Cannot resolve climate entity for boost temperature on {self._addr}"
             )
-            return
         self._climate_entity_id = entity_id
 
+        # A failed device write raises here, so the value is only kept once
+        # the device accepted it.
         data = {"entity_id": entity_id, "temperature": temperature}
-        try:
-            await hass.services.async_call(
-                DOMAIN,
-                "set_acm_preset",
-                data,
-                blocking=True,
-            )
-        except ServiceNotFound as err:
-            _LOGGER.error(
-                "Boost preset service unavailable for %s: %s",
-                entity_id,
-                err,
-            )
-            return
-        except HomeAssistantError as err:  # pragma: no cover - defensive logging
-            _LOGGER.error(
-                "Boost preset service failed for %s: %s",
-                entity_id,
-                err,
-            )
-            return
+        await hass.services.async_call(
+            DOMAIN,
+            "set_acm_preset",
+            data,
+            blocking=True,
+        )
 
         self._apply_temperature(temperature, persist=True)
         self.async_write_ha_state()
@@ -567,12 +547,15 @@ class HeaterPriorityNumber(HeaterNodeBase, NumberEntity):
 
         priority = int(value)
         if priority < 0 or priority > 30:
-            raise ValueError(f"Priority must be 0-30, got {priority}")
+            raise ServiceValidationError(f"Priority must be 0-30, got {priority}")
         runtime = require_runtime(self.hass, self._entry_id)
-        await runtime.backend.set_node_priority(
-            self._dev_id,
-            (self._node_type, self._addr),
-            priority=priority,
+        await async_backend_write(
+            "Priority write",
+            runtime.backend.set_node_priority(
+                self._dev_id,
+                (self._node_type, self._addr),
+                priority=priority,
+            ),
         )
         await self.coordinator.async_request_refresh()
 

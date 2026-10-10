@@ -14,6 +14,7 @@ from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import StateCoordinator
 from custom_components.termoweb.entities.heater import (
     SettingsResolver,
+    async_backend_write,
     build_settings_resolver,
     log_skipped_nodes,
 )
@@ -170,10 +171,13 @@ class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
             self._addr,
         )
         runtime = require_runtime(self.hass, self._entry_id)
-        await runtime.backend.set_node_lock(
-            self._dev_id,
-            (self._node_type, self._addr),
-            lock=True,
+        await async_backend_write(
+            "Child lock",
+            runtime.backend.set_node_lock(
+                self._dev_id,
+                (self._node_type, self._addr),
+                lock=True,
+            ),
         )
         await self.coordinator.async_request_refresh()
 
@@ -187,10 +191,13 @@ class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
             self._addr,
         )
         runtime = require_runtime(self.hass, self._entry_id)
-        await runtime.backend.set_node_lock(
-            self._dev_id,
-            (self._node_type, self._addr),
-            lock=False,
+        await async_backend_write(
+            "Child unlock",
+            runtime.backend.set_node_lock(
+                self._dev_id,
+                (self._node_type, self._addr),
+                lock=False,
+            ),
         )
         await self.coordinator.async_request_refresh()
 

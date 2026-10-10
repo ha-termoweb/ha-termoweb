@@ -70,6 +70,16 @@ class HttpClientProto(Protocol):
     ) -> Any:
         """Toggle accumulator boost state for the specified node."""
 
+    async def set_acm_extra_options(
+        self,
+        dev_id: str,
+        addr: str | int,
+        *,
+        boost_time: int | None = None,
+        boost_temp: float | None = None,
+    ) -> Any:
+        """Write the default boost duration/temperature for an accumulator."""
+
     async def set_node_lock(
         self,
         dev_id: str,
@@ -210,6 +220,23 @@ class Backend(ABC):
             boost_time=boost_time,
             stemp=stemp,
             units=units,
+        )
+
+    async def set_acm_extra_options(
+        self,
+        dev_id: str,
+        addr: str | int,
+        *,
+        boost_time: int | None = None,
+        boost_temp: float | None = None,
+    ) -> Any:
+        """Write accumulator boost defaults using the backend client."""
+
+        await self.client.set_acm_extra_options(
+            dev_id,
+            addr,
+            boost_time=boost_time,
+            boost_temp=boost_temp,
         )
 
     async def set_node_lock(
