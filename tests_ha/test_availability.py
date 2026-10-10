@@ -87,6 +87,14 @@ async def _refresh(hass: HomeAssistant, entry: MockConfigEntry, name: str) -> No
     await hass.async_block_till_done()
 
 
+async def _fire_next_hourly_poll(hass: HomeAssistant) -> None:
+    """Advance time to the next HH:05 energy poll and let it run."""
+    now = dt_util.utcnow()
+    target = (now + timedelta(hours=1)).replace(minute=5, second=0, microsecond=0)
+    async_fire_time_changed(hass, target)
+    await hass.async_block_till_done()
+
+
 async def test_node_entities_unavailable_while_cloud_down(
     hass: HomeAssistant,
     cloud: FakeCloud,
@@ -127,7 +135,7 @@ async def test_energy_entities_unavailable_when_energy_poll_fails(
     assert float(hass.states.get(TOTAL).state) == pytest.approx(4.0)
 
     cloud.get_node_samples.side_effect = TimeoutError
-    await _refresh(hass, config_entry, "energy_coordinator")
+    await _fire_next_hourly_poll(hass)
 
     for entity_id in (TOTAL, HTR_ENERGY, ACM_ENERGY, PMO_ENERGY):
         assert hass.states.get(entity_id).state == STATE_UNAVAILABLE, entity_id

@@ -6,7 +6,6 @@ import asyncio
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import timedelta
 import inspect
 import logging
 import time
@@ -64,7 +63,6 @@ from .coordinator import (
     build_device_metadata,
 )
 from .energy import energy_import_store
-from .hourly_poller import HourlySamplesPoller
 from .inventory import (
     Inventory,
     build_node_inventory,
@@ -340,9 +338,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         state_coordinator=coordinator,
     )
     await energy_coordinator.async_config_entry_first_refresh()
-
-    poller = HourlySamplesPoller(hass, energy_coordinator, backend, inventory)
-    await poller.async_setup()
+    entry.async_on_unload(energy_coordinator.async_start_hourly_poll())
 
     hass.data.setdefault(DOMAIN, {})
     runtime = EntryRuntime(
@@ -352,7 +348,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         energy_coordinator=energy_coordinator,
         dev_id=dev_id,
         inventory=inventory,
-        hourly_poller=poller,
         config_entry=entry,
         base_poll_interval=max(base_interval, MIN_POLL_INTERVAL),
         poll_suspended=False,
@@ -421,7 +416,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
 
         if not tasks:
             if suspended:
-                coordinator.update_interval = timedelta(seconds=base_interval)
+                coordinator.resume_polling(base_interval)
                 runtime.poll_suspended = False
                 _cancel_timer()
                 _LOGGER.info(
@@ -478,7 +473,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
 
         if not any_running:
             if suspended:
-                coordinator.update_interval = timedelta(seconds=base_interval)
+                coordinator.resume_polling(base_interval)
                 runtime.poll_suspended = False
                 _cancel_timer()
                 _LOGGER.info(
@@ -510,7 +505,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
             return
 
         if suspended:
-            coordinator.update_interval = timedelta(seconds=base_interval)
+            coordinator.resume_polling(base_interval)
             _LOGGER.info(
                 "WS: tracker unhealthy or payload stale; resuming REST polling at %ss",
                 base_interval,
@@ -566,7 +561,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
 class _ShutdownTargets:
     """Container for shutdown handles derived from runtime storage."""
 
-    poller: Any | None
     ws_tasks: dict[str, Any]
     ws_clients: dict[str, Any]
     unsub_ws_status: Callable[[], None] | None
@@ -584,23 +578,11 @@ def _collect_shutdown_targets(
     ws_tasks = runtime.ws_tasks
     ws_clients = runtime.ws_clients
     return _ShutdownTargets(
-        poller=runtime.hourly_poller,
         ws_tasks=ws_tasks,
         ws_clients=ws_clients,
         unsub_ws_status=runtime.unsub_ws_status,
         poll_resume_unsub=runtime.poll_resume_unsub,
     )
-
-
-async def _shutdown_hourly_poller(poller: Any) -> None:
-    """Stop the hourly poller when it exposes async_shutdown."""
-
-    if not hasattr(poller, "async_shutdown"):
-        return
-    try:
-        await poller.async_shutdown()
-    except Exception:  # pragma: no cover - defensive shutdown logging
-        _LOGGER.exception("Failed to stop hourly samples poller")
 
 
 async def _shutdown_ws_tasks(ws_tasks: Mapping[str, typing.Any]) -> None:
@@ -659,7 +641,6 @@ async def _async_shutdown_entry(runtime: EntryRuntime) -> None:
     if targets is None:
         return
 
-    await _shutdown_hourly_poller(targets.poller)
     await _shutdown_ws_tasks(targets.ws_tasks)
     await _shutdown_ws_clients(targets.ws_clients)
     _shutdown_runtime_callback(

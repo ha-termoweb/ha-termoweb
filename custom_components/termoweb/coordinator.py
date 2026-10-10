@@ -16,6 +16,7 @@ from typing import Any, TypeVar
 
 from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -23,11 +24,7 @@ from .backend.factory import backend_capabilities
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import mask_identifier
 from .boost import coerce_int, resolve_boost_end_from_fields
-from .const import (
-    BRAND_TERMOWEB,
-    HTR_ENERGY_UPDATE_INTERVAL,
-    MIN_POLL_INTERVAL,
-)
+from .const import BRAND_TERMOWEB, MIN_POLL_INTERVAL
 from .domain.energy import (
     EnergyNodeMetrics,
     EnergySnapshot,
@@ -73,6 +70,11 @@ _PENDING_SETTINGS_TTL = 10.0
 _SETPOINT_TOLERANCE = 0.05
 
 ENERGY_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "pmo"})
+# Minute past each hour at which REST energy samples are polled, so the
+# previous hour's final sample is available.
+ENERGY_POLL_MINUTE = 5
+# Upper bound on hourly energy polls skipped after a 429.
+ENERGY_RATE_LIMIT_MAX_SKIP = 8
 
 
 @dataclass
@@ -1009,9 +1011,16 @@ class StateCoordinator(
         else:
             if self._backoff:
                 self._backoff = 0
-                self.update_interval = timedelta(seconds=self._base_interval)
+                # Do not re-enable polling that WS health suspended meanwhile.
+                if self.update_interval is not None:
+                    self.update_interval = timedelta(seconds=self._base_interval)
 
             return result
+
+    def resume_polling(self, base_interval: int) -> None:
+        """Resume REST polling at ``base_interval`` or the rate-limit backoff."""
+
+        self.update_interval = timedelta(seconds=max(base_interval, self._backoff))
 
 
 class EnergyStateCoordinator(
@@ -1032,7 +1041,8 @@ class EnergyStateCoordinator(
             hass,
             logger=_wrap_logger(_LOGGER),
             name="termoweb-htr-energy",
-            update_interval=HTR_ENERGY_UPDATE_INTERVAL,
+            # REST samples are polled at HH:05 by ``async_start_hourly_poll``.
+            update_interval=None,
         )
         if not isinstance(inventory, Inventory):
             msg = "Energy inventory is unavailable"
@@ -1041,8 +1051,8 @@ class EnergyStateCoordinator(
         self._dev_id = dev_id
         self._inventory: Inventory = inventory
         self._last: dict[tuple[str, str], tuple[float, float]] = {}
-        self._base_interval = HTR_ENERGY_UPDATE_INTERVAL
-        self._base_interval_seconds = HTR_ENERGY_UPDATE_INTERVAL.total_seconds()
+        self._rate_limit_backoff = 0  # hourly polls to skip after the next 429
+        self._skip_polls = 0
         self._ws_lease: float = 0.0
         self._ws_deadline: float | None = None
         self._ws_margin_default = 60.0
@@ -1198,7 +1208,7 @@ class EnergyStateCoordinator(
         energy_by_type: dict[str, dict[str, float]],
         power_by_type: dict[str, dict[str, float]],
     ) -> None:
-        """Fetch recent energy samples for every tracked node."""
+        """Fetch recent energy samples for every tracked node; stop on a 429."""
 
         for node_type, addrs_for_type in targets_by_type.items():
             for addr in addrs_for_type:
@@ -1208,7 +1218,20 @@ class EnergyStateCoordinator(
                     samples = await self.client.get_node_samples(
                         dev_id, (node_type, addr), start, now
                     )
-                except (ClientError, BackendRateLimitError, BackendAuthError):
+                except BackendRateLimitError as err:
+                    self._rate_limit_backoff = min(
+                        max(1, self._rate_limit_backoff * 2),
+                        ENERGY_RATE_LIMIT_MAX_SKIP,
+                    )
+                    self._skip_polls = self._rate_limit_backoff
+                    _LOGGER.warning(
+                        "Energy poll rate limited (%s); skipping the next %d "
+                        "hourly polls",
+                        err,
+                        self._skip_polls,
+                    )
+                    return
+                except ClientError, BackendAuthError:
                     samples = []
 
                 if not samples:
@@ -1245,6 +1268,7 @@ class EnergyStateCoordinator(
                     energy_bucket,
                     power_bucket,
                 )
+        self._rate_limit_backoff = 0
 
     def _process_energy_sample(
         self,
@@ -1342,13 +1366,34 @@ class EnergyStateCoordinator(
 
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
-        except (ClientError, BackendRateLimitError, BackendAuthError) as err:
+        except (ClientError, BackendAuthError) as err:
             raise UpdateFailed(f"API error: {err}") from err
         else:
-            self.update_interval = self._base_interval
             self._ws_deadline = None
             self._publish_to_state_store(snapshot)
             return snapshot
+
+    def async_start_hourly_poll(self) -> Callable[[], None]:
+        """Schedule the HH:05 REST sample poll; return its unsubscribe callback."""
+
+        return async_track_time_change(
+            self.hass, self._async_hourly_poll, minute=ENERGY_POLL_MINUTE, second=0
+        )
+
+    async def _async_hourly_poll(self, _now: datetime | None = None) -> None:
+        """Poll REST samples for the past hour unless backing off after a 429."""
+
+        if self._skip_polls > 0:
+            self._skip_polls -= 1
+            _LOGGER.debug(
+                "Hourly energy poll skipped (rate-limit backoff, %d left)",
+                self._skip_polls,
+            )
+            return
+        try:
+            await self.async_refresh()
+        except UpdateFailed as err:
+            _LOGGER.debug("Hourly energy poll failed: %s", err)
 
     def _should_skip_poll(self) -> bool:
         """Return True when websocket pushes keep energy data fresh."""
@@ -1423,13 +1468,9 @@ class EnergyStateCoordinator(
 
         now = time_mod()
         if self._ws_lease > 0:
-            margin = self._ws_margin_seconds()
-            wait_seconds = max(self._ws_lease + margin, 300.0)
-            interval_seconds = min(self._base_interval_seconds, wait_seconds)
-            new_interval = timedelta(seconds=interval_seconds)
-            if self.update_interval != new_interval:
-                self.update_interval = new_interval
-            self._ws_deadline = now + self._ws_lease + margin
+            # Fresh WS samples suspend the hourly REST poll until the lease
+            # (plus margin) runs out; they never make REST polling more frequent.
+            self._ws_deadline = now + self._ws_lease + self._ws_margin_seconds()
         else:
             self._ws_deadline = None
 
@@ -1508,131 +1549,6 @@ class EnergyStateCoordinator(
 
         if changed or snapshot != self.data:
             self.async_set_updated_data(snapshot)
-
-    async def merge_samples_for_window(
-        self,
-        dev_id: str,
-        samples: Mapping[tuple[str, str], Iterable[Mapping[str, typing.Any]]],
-    ) -> None:
-        """Merge normalised hourly samples into the cached energy state."""
-
-        if dev_id != self._dev_id or not isinstance(samples, Mapping):
-            return
-
-        inventory = self._inventory
-        targets_by_type = self._targets_by_type(inventory)
-        alias_map = inventory.sample_alias_map(
-            include_types=ENERGY_NODE_TYPES,
-            restrict_to=ENERGY_NODE_TYPES,
-        )
-
-        merge_counts: dict[tuple[str, str], int] = {}
-        snapshot = coerce_snapshot(self.data)
-        energy_by_type: dict[str, dict[str, float]] = {
-            node_type: {} for node_type in targets_by_type
-        }
-        power_by_type: dict[str, dict[str, float]] = {
-            node_type: {} for node_type in targets_by_type
-        }
-        if snapshot is not None and snapshot.dev_id == dev_id:
-            for node_id, metrics in snapshot.iter_metrics():
-                node_type = node_id.node_type.value
-                if node_type not in targets_by_type:
-                    continue
-                if node_id.addr not in targets_by_type[node_type]:
-                    continue
-                if metrics.energy_kwh is not None:
-                    energy_by_type.setdefault(node_type, {})[node_id.addr] = (
-                        metrics.energy_kwh
-                    )
-                if metrics.power_w is not None:
-                    power_by_type.setdefault(node_type, {})[node_id.addr] = (
-                        metrics.power_w
-                    )
-
-        for descriptor, records in samples.items():
-            if not isinstance(descriptor, tuple) or len(descriptor) != 2:
-                continue
-
-            raw_type, raw_addr = descriptor
-            node_type = normalize_node_type(
-                raw_type,
-                use_default_when_falsey=True,
-            )
-            addr = normalize_node_addr(
-                raw_addr,
-                use_default_when_falsey=True,
-            )
-            if not node_type or not addr:
-                continue
-
-            canonical_type = alias_map.get(node_type, node_type)
-            tracked_addrs = targets_by_type.get(canonical_type)
-            if not tracked_addrs or addr not in tracked_addrs:
-                continue
-
-            energy_bucket = energy_by_type.setdefault(canonical_type, {})
-            power_bucket = power_by_type.setdefault(canonical_type, {})
-            scale = float(self._counter_scales.get(canonical_type, 1000.0) or 1000.0)
-            factor = scale / 1000.0 if scale else 1.0
-
-            prepared: list[tuple[float, float]] = []
-            for record in records:
-                if not isinstance(record, Mapping):
-                    continue
-                ts_value = record.get("ts")
-                if isinstance(ts_value, datetime):
-                    when = dt_util.as_utc(ts_value).timestamp()
-                else:
-                    when = float_or_none(record.get("timestamp"))
-                    if when is None:
-                        continue
-                energy_wh = float_or_none(record.get("energy_wh"))
-                if energy_wh is None:
-                    continue
-                prepared.append((when, energy_wh * factor))
-
-            if not prepared:
-                continue
-
-            prepared.sort(key=lambda item: item[0])
-            merge_counts[(canonical_type, addr)] = len(prepared)
-
-            energy_bucket = energy_by_type.setdefault(canonical_type, {})
-            power_bucket = power_by_type.setdefault(canonical_type, {})
-
-            for when, counter in prepared:
-                self._process_energy_sample(
-                    canonical_type,
-                    addr,
-                    when,
-                    counter,
-                    energy_bucket,
-                    power_bucket,
-                    prune_power=True,
-                )
-
-        snapshot = self._build_snapshot(
-            dev_id,
-            targets_by_type,
-            energy_by_type,
-            power_by_type,
-            source="history",
-            updated_at=time_mod(),
-            ws_deadline=self._ws_deadline,
-        )
-        self.async_set_updated_data(snapshot)
-
-        if merge_counts:
-            summary = ", ".join(
-                f"{node_type}:{addr}={count}"
-                for (node_type, addr), count in sorted(merge_counts.items())
-            )
-            _LOGGER.debug(
-                "Hourly samples merge complete for %s: %s",
-                mask_identifier(dev_id),
-                summary,
-            )
 
 
 def _wrap_logger(logger: Any) -> Any:
