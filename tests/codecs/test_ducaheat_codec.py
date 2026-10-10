@@ -7,13 +7,11 @@ import pytest
 from custom_components.termoweb.codecs.ducaheat_codec import (
     decode_settings,
     encode_boost_command,
-    encode_extra_options_command,
     encode_preset_temps_command,
     encode_program_command,
     encode_setpoint_command,
 )
 from custom_components.termoweb.domain.commands import (
-    SetExtraOptions,
     SetPresetTemps,
     SetProgram,
     SetSetpoint,
@@ -55,12 +53,6 @@ def test_encode_program_command_splits_weekly_prog() -> None:
     assert payload["prog"]["0"] == [0, 1, 2] * 8
     assert len(payload["prog"]["6"]) == 24
 
-
-def test_encode_extra_options_requires_values() -> None:
-    """Require at least one setup extra_options value."""
-
-    with pytest.raises(ValueError, match="extra_options must include"):
-        encode_extra_options_command(SetExtraOptions())
 
 
 def test_encode_boost_command_validates_minutes_and_formats() -> None:
@@ -232,16 +224,6 @@ def test_encode_preset_temps_with_units() -> None:
         "comf_temp": "21.0",
         "units": "C",
     }
-
-
-def test_encode_extra_options_with_values() -> None:
-    """Extra options encoding with valid boost_time and boost_temp."""
-
-    payload = encode_extra_options_command(
-        SetExtraOptions(boost_time=120, boost_temp=25.0)
-    )
-    assert "extra_options" in payload
-    assert payload["extra_options"]["boost_time"] == 120
 
 
 def test_codec_decode_settings_discards_capabilities() -> None:

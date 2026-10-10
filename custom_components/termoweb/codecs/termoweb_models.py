@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 import typing
 from typing import Any
 
@@ -37,14 +37,10 @@ class NodeSummary(BaseModel):
 
     @field_validator("addr", "address", mode="before")
     @classmethod
-    def _stringify_numeric(cls, value: Any) -> Any:
-        """Convert numeric addresses to strings for consistency."""
+    def _stringify_numeric(cls, value: Any) -> str:
+        """Convert the integer wire addresses to strings for consistency."""
 
-        if isinstance(value, (int, float)):
-            if isinstance(value, float) and value.is_integer():
-                return str(int(value))
-            return str(value)
-        return value
+        return str(value)
 
 
 class NodesResponse(BaseModel):
@@ -62,8 +58,6 @@ class NodesResponse(BaseModel):
 def normalise_prog(value: Any) -> Any:
     """Coerce program values to integers when possible without raising."""
 
-    if not isinstance(value, list):
-        return value
     normalised: list[int | float | str] = []
     for item in value:
         try:
@@ -76,8 +70,6 @@ def normalise_prog(value: Any) -> Any:
 def normalise_ptemp(value: Any) -> Any:
     """Format preset temperatures while preserving the original length."""
 
-    if not isinstance(value, Iterable) or isinstance(value, (str, bytes)):
-        return value
     return [safe_temperature(item) for item in value]
 
 
@@ -259,24 +251,6 @@ class NodeSettingsWritePayload(BaseModel):
     ptemp: list[str] | None = None
     units: str | None = None
 
-    @field_validator("mode", mode="before")
-    @classmethod
-    def _normalise_mode(cls, value: Any) -> Any:
-        """Lower-case mode strings when provided."""
-
-        if value is None:
-            return value
-        return str(value).lower()
-
-    @field_validator("units", mode="before")
-    @classmethod
-    def _normalise_units(cls, value: Any) -> Any:
-        """Upper-case temperature unit identifiers."""
-
-        if value is None:
-            return value
-        return str(value).strip().upper()
-
 
 class ExtraOptionsPayload(BaseModel):
     """Accumulator extra options payload."""
@@ -304,12 +278,3 @@ class AcmBoostWritePayload(BaseModel):
     boost_time: int | None = None
     stemp: str | None = None
     units: str | None = None
-
-    @field_validator("units", mode="before")
-    @classmethod
-    def _normalise_units(cls, value: Any) -> Any:
-        """Upper-case temperature units for boost writes."""
-
-        if value is None:
-            return value
-        return str(value).strip().upper()

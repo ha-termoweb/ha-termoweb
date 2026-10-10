@@ -8,7 +8,6 @@ from typing import Any
 
 from custom_components.termoweb.codecs.ducaheat_codec import (
     encode_boost_command,
-    encode_extra_options_command,
     encode_lock_command,
     encode_mode_command,
     encode_preset_temps_command,
@@ -21,7 +20,6 @@ from custom_components.termoweb.codecs.ducaheat_models import StatusWritePayload
 from custom_components.termoweb.domain.commands import (
     AccumulatorCommand,
     BaseCommand,
-    SetExtraOptions,
     SetLock,
     SetMode,
     SetPresetTemps,
@@ -101,9 +99,6 @@ def _build_write_call(
     elif isinstance(command, SetProgram):
         payload = encode_program_command(command, current=current_prog)
         path = f"{base_path}/prog"
-    elif isinstance(command, SetExtraOptions):
-        payload = encode_extra_options_command(command)
-        path = f"{base_path}/setup"
     elif isinstance(command, SetLock):
         payload = encode_lock_command(command)
         path = f"{base_path}/lock"
