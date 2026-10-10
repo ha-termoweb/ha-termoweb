@@ -17,7 +17,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.typing import ConfigType
@@ -57,7 +57,11 @@ from .services.radio_capture import async_register_radio_capture_service
 from .services.radio_pairing import async_register_radio_pairing_services
 from .services.radio_survey import async_register_radio_survey_service
 from .throttle import reset_samples_rate_limit_state
-from .utils import async_get_integration_version as _async_get_integration_version
+from .utils import (
+    async_get_integration_version as _async_get_integration_version,
+    build_gateway_device_info,
+    build_installation_device_info,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -475,11 +479,29 @@ async def async_setup_entry(  # noqa: C901
         hass, _start_ws(dev_id), f"{DOMAIN}-start-ws-{entry.entry_id}"
     )
 
+    _register_hub_devices(hass, entry, runtime)
     platforms = _platforms_for_brand(brand)
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
 
     _LOGGER.info("TermoWeb setup complete (v%s)", version)
     return True
+
+
+def _register_hub_devices(
+    hass: HomeAssistant, entry: ConfigEntry, runtime: EntryRuntime
+) -> None:
+    """Register the site and gateway devices so child devices can name their ids."""
+
+    dev_reg = dr.async_get(hass)
+    if runtime.backend.capabilities.site_device:
+        dev_reg.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            **build_installation_device_info(hass, entry.entry_id, runtime.dev_id),
+        )
+    dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        **build_gateway_device_info(hass, entry.entry_id, runtime.dev_id),
+    )
 
 
 @dataclass(frozen=True, slots=True)

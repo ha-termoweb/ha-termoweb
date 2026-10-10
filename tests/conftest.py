@@ -903,6 +903,41 @@ def _install_stubs() -> None:
     entity_registry_mod = sys.modules.get(
         "homeassistant.helpers.entity_registry"
     ) or types.ModuleType("homeassistant.helpers.entity_registry")
+    device_registry_mod = sys.modules.get(
+        "homeassistant.helpers.device_registry"
+    ) or types.ModuleType("homeassistant.helpers.device_registry")
+
+    class _DeviceRegistry:
+        """Minimal device registry: devices keyed by config entry and identifier."""
+
+        def __init__(self) -> None:
+            self.devices: dict[tuple[str, Any], SimpleNamespace] = {}
+
+        def async_get_or_create(
+            self, *, config_entry_id: str, identifiers: Any = (), **info: Any
+        ) -> SimpleNamespace:
+            for identifier in identifiers:
+                if existing := self.devices.get((config_entry_id, identifier)):
+                    return existing
+            device = SimpleNamespace(
+                id=f"device-{len(self.devices)}", identifiers=set(identifiers), **info
+            )
+            for identifier in device.identifiers:
+                self.devices.setdefault((config_entry_id, identifier), device)
+            return device
+
+        def async_get_device_by_identifier(
+            self, identifier: Any, config_entry_id: str
+        ) -> SimpleNamespace | None:
+            return self.devices.get((config_entry_id, identifier))
+
+    def _async_get_device_registry(hass: Any) -> _DeviceRegistry:
+        data = getattr(hass, "data", None)
+        if not isinstance(data, dict):
+            return _DeviceRegistry()
+        return data.setdefault("device_registry", _DeviceRegistry())
+
+    device_registry_mod.async_get = _async_get_device_registry  # type: ignore[attr-defined]
     instance_id_mod = types.ModuleType("homeassistant.helpers.instance_id")
 
     async def _async_get_instance_id(_hass: Any) -> str:
@@ -1070,6 +1105,7 @@ def _install_stubs() -> None:
     sys.modules["homeassistant.data_entry_flow"] = data_entry_flow_mod
     sys.modules["homeassistant.helpers.entity"] = entity_mod
     sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
+    sys.modules["homeassistant.helpers.device_registry"] = device_registry_mod
     sys.modules["homeassistant.helpers.service"] = service_mod
     sys.modules["homeassistant.helpers.dispatcher"] = dispatcher_mod
     sys.modules["homeassistant.helpers.event"] = event_mod
@@ -1117,6 +1153,7 @@ def _install_stubs() -> None:
     helpers_mod.aiohttp_client = aiohttp_client_mod
     helpers_mod.entity = entity_mod
     helpers_mod.entity_registry = entity_registry_mod
+    helpers_mod.device_registry = device_registry_mod
     helpers_mod.dispatcher = dispatcher_mod
     helpers_mod.translation = translation_mod
     helpers_mod.update_coordinator = update_coordinator_mod

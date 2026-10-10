@@ -14,7 +14,6 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.boost import supports_boost
-from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import StateCoordinator
 from custom_components.termoweb.domain import DomainStateView, GatewayConnectionState
 from custom_components.termoweb.domain.ids import HEATER_NODE_TYPES
@@ -34,7 +33,7 @@ from custom_components.termoweb.inventory import (
 from custom_components.termoweb.runtime import require_runtime
 from custom_components.termoweb.utils import (
     build_gateway_device_info,
-    translate_default_device_name,
+    build_node_device_info,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -226,14 +225,14 @@ class HeaterBoostActiveBinarySensor(
         """Expose Home Assistant device metadata for the heater."""
 
         model = "Accumulator" if self._node_type == "acm" else "Heater"
-        info = DeviceInfo(
-            identifiers={(DOMAIN, self._dev_id, self._addr)},
+        return build_node_device_info(
+            self.hass,
+            self._entry_id,
+            self._dev_id,
+            self._addr,
             name=self._device_name,
-            manufacturer="TermoWeb",
             model=model,
-            via_device=(DOMAIN, self._dev_id),
         )
-        return translate_default_device_name(info, self._addr)
 
     def boost_state(self) -> BoostState:
         """Return derived boost metadata for this heater."""
@@ -262,5 +261,3 @@ def _iter_boostable_inventory_nodes(
         if not canonical_type or not canonical_addr:
             continue
         yield (canonical_type, canonical_addr, metadata.name)
-
-

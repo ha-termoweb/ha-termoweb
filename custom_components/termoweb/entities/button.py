@@ -25,7 +25,7 @@ from ..inventory import (
     normalize_node_type,
 )
 from ..runtime import require_runtime
-from ..utils import build_gateway_device_info, translate_default_device_name
+from ..utils import build_gateway_device_info, build_node_device_info
 from .heater import (
     BOOST_BUTTON_METADATA,
     BoostButtonMetadata,
@@ -275,14 +275,14 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
     def device_info(self) -> DeviceInfo:
         """Return Home Assistant device metadata for the accumulator."""
 
-        info = DeviceInfo(
-            identifiers={(DOMAIN, self.boost_context.dev_id, self.boost_context.addr)},
+        return build_node_device_info(
+            self.hass,
+            self.boost_context.entry_id,
+            self.boost_context.dev_id,
+            self.boost_context.addr,
             name=self.boost_context.base_name,
-            manufacturer="TermoWeb",
             model="Accumulator",
-            via_device=(DOMAIN, self.boost_context.dev_id),
         )
-        return translate_default_device_name(info, self.boost_context.addr)
 
     async def _async_boost_request(
         self,
@@ -444,20 +444,14 @@ class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
         if self._flash_context.node_type == "acm":
             model = "Accumulator"
 
-        info = DeviceInfo(
-            identifiers={
-                (
-                    DOMAIN,
-                    self._flash_context.dev_id,
-                    self._flash_context.addr,
-                )
-            },
+        return build_node_device_info(
+            self.hass,
+            self._flash_context.entry_id,
+            self._flash_context.dev_id,
+            self._flash_context.addr,
             name=self._flash_context.name,
-            manufacturer="TermoWeb",
             model=model,
-            via_device=(DOMAIN, self._flash_context.dev_id),
         )
-        return translate_default_device_name(info, self._flash_context.addr)
 
     async def async_press(self) -> None:
         """Call the backend /select endpoint to flash the unit display."""

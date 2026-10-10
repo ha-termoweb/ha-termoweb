@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import types
 from typing import Any
 
@@ -348,6 +349,7 @@ def test_brand_keys_become_manufacturer_labels_and_monitor_has_no_site() -> None
     """Brand keys show as their labels; a listen-only gateway has no site parent."""
 
     hass = types.SimpleNamespace(data={DOMAIN: {}})
+    registry = importlib.import_module("homeassistant.helpers.device_registry")
     for brand, label in (
         ("termoweb", "TermoWeb"),
         ("ducaheat", "Ducaheat"),
@@ -355,12 +357,12 @@ def test_brand_keys_become_manufacturer_labels_and_monitor_has_no_site() -> None
         ("radio_monitor", "Radio"),
     ):
         build_entry_runtime(hass=hass, entry_id=brand, dev_id="dev", brand=brand)
+        site = registry.async_get(hass).async_get_or_create(
+            config_entry_id=brand, identifiers={(DOMAIN, "dev", "site")}
+        )
         info = build_gateway_device_info(hass, brand, "dev")
         assert info["manufacturer"] == label
         has_site = brand != "radio_monitor"
-        assert ("via_device" in info) is has_site
-    assert build_gateway_device_info(None, None, "dev")["via_device"] == (
-        DOMAIN,
-        "dev",
-        "site",
-    )
+        assert (info.get("via_device_id") == site.id) is has_site
+        assert "via_device" not in info
+    assert "via_device_id" not in build_gateway_device_info(None, None, "dev")

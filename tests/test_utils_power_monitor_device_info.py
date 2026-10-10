@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import types
 
 from conftest import build_entry_runtime
@@ -84,6 +85,10 @@ def test_build_power_monitor_device_info_sets_via_device_reference() -> None:
     """The via-device reference should point back to the owning gateway."""
 
     hass = types.SimpleNamespace(data={})
+    registry = importlib.import_module("homeassistant.helpers.device_registry")
+    gateway = registry.async_get(hass).async_get_or_create(
+        config_entry_id="entry-id", identifiers={(DOMAIN, "gateway-23")}
+    )
 
     info = build_power_monitor_device_info(
         hass,
@@ -93,5 +98,6 @@ def test_build_power_monitor_device_info_sets_via_device_reference() -> None:
         name="Storage Monitor",
     )
 
-    assert info["via_device"] == (DOMAIN, "gateway-23")
+    assert info["via_device_id"] == gateway.id
+    assert "via_device" not in info
     assert info["name"] == "Storage Monitor"

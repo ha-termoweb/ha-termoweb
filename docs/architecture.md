@@ -174,6 +174,14 @@ platforms to the gateway-online binary sensor and the frames-heard sensor;
 `site_device` is off, so its gateway has no site device.
 See `radio_protocol.md` section 10.
 
+## Device registry
+
+Setup registers the site device (when the backend has `site_device`) and then
+the gateway device, before the platforms load. Every other device names its
+parent by registry id (`via_device_id`), never by the deprecated `via_device`
+identifier: the gateway points at the site, and nodes and power monitors point
+at the gateway. `utils.build_node_device_info` builds the node devices.
+
 ## Operational constraints
 
 - Entity services and writes fail loudly: invalid input or the wrong node type

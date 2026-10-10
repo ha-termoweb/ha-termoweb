@@ -42,6 +42,7 @@ from homeassistant.const import ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import entity_platform as entity_platform_module
 from homeassistant.helpers.entity_platform import EntityPlatform
+from homeassistant.helpers import device_registry as device_registry_module
 from homeassistant.helpers import dispatcher as dispatcher_module
 from homeassistant.util import dt as dt_util
 
@@ -354,6 +355,9 @@ def test_async_setup_entry_creates_entities(
 
         platform = EntityPlatform()
         entity_platform_module._set_current_platform(platform)
+        gateway = device_registry_module.async_get(hass).async_get_or_create(
+            config_entry_id=entry_id, identifiers={(DOMAIN, dev_id)}
+        )
 
         entry = types.SimpleNamespace(entry_id=entry_id)
         await async_setup_entry(hass, entry, _async_add_entities)
@@ -388,7 +392,7 @@ def test_async_setup_entry_creates_entities(
             if getattr(entity, "_node_type", "htr") != "acm":
                 expected_model = "Heater"
             assert info["model"] == expected_model
-            assert info["via_device"] == (DOMAIN, dev_id)
+            assert info["via_device_id"] == gateway.id
 
         # Unnamed nodes get a translatable default device name; named ones don't.
         default_info = entities_by_addr["B2"].device_info

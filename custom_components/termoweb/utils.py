@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration as loader_async_get_integration
 
@@ -35,6 +36,21 @@ def _entry_gateway_record(
         return require_runtime(hass, entry_id)
     except LookupError:
         return None
+
+
+def _link_via_device(
+    info: DeviceInfo,
+    hass: HomeAssistant | None,
+    entry_id: str | None,
+    parent: tuple[str, ...],
+) -> None:
+    """Set ``via_device_id`` to the entry's registered ``parent`` device, if any."""
+
+    if hass is None or entry_id is None:
+        return
+    device = dr.async_get(hass).async_get_device_by_identifier(parent, entry_id)
+    if device is not None:
+        info["via_device_id"] = device.id
 
 
 def _has_capability(entry_data: EntryRuntime | None, name: str) -> bool:
@@ -135,7 +151,7 @@ def build_gateway_device_info(
         model="Gateway/Controller",
     )
     if _has_capability(entry_data, "site_device"):
-        info["via_device"] = (DOMAIN, str(dev_id), "site")
+        _link_via_device(info, hass, entry_id, (DOMAIN, str(dev_id), "site"))
     _set_configuration_url(info, entry_data)
 
     info = apply_entry_device_overrides(
@@ -187,11 +203,32 @@ def build_power_monitor_device_info(
         manufacturer="TermoWeb",
         name=display_name,
         model="Power Monitor",
-        via_device=(DOMAIN, str(dev_id)),
     )
+    _link_via_device(info, hass, entry_id, (DOMAIN, str(dev_id)))
     translate_default_device_name(info, normalized_addr)
 
     return apply_entry_device_overrides(info, entry_data)
+
+
+def build_node_device_info(
+    hass: HomeAssistant | None,
+    entry_id: str | None,
+    dev_id: str,
+    addr: str,
+    *,
+    name: str,
+    model: str,
+) -> DeviceInfo:
+    """Return ``DeviceInfo`` for a heater, accumulator or thermostat node."""
+
+    info: DeviceInfo = DeviceInfo(
+        identifiers={(DOMAIN, str(dev_id), str(addr))},
+        name=name,
+        manufacturer="TermoWeb",
+        model=model,
+    )
+    _link_via_device(info, hass, entry_id, (DOMAIN, str(dev_id)))
+    return translate_default_device_name(info, str(addr))
 
 
 # English default node names; keys match the ``device`` section of strings.json.
