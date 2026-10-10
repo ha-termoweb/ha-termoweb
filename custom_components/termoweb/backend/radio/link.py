@@ -44,6 +44,10 @@ class RadioLinkError(Exception):
     """Raised when the gateway connection fails or refuses a command."""
 
 
+class UnsupportedDialectError(RadioLinkError):
+    """Raised when the gateway firmware cannot speak the requested dialect."""
+
+
 @dataclass(frozen=True)
 class GatewayInfo:
     """Fields parsed from the gateway's ``# Q ...`` status line."""
@@ -55,6 +59,7 @@ class GatewayInfo:
     station_id: int | None
     mac: str | None
     raw: str
+    dialect: str | None = None  # None: firmware without runtime dialects (dialect A)
 
 
 @dataclass(frozen=True)
@@ -128,6 +133,7 @@ def parse_query_line(line: str) -> GatewayInfo | None:
         station_id=_int_or_none(station, 16) if station is not None else None,
         mac=fields.get("mac"),
         raw=line,
+        dialect=fields.get("dialect"),
     )
 
 
@@ -234,6 +240,12 @@ class RadioLink:
             raise
         info = parse_query_line(query_line)
         assert info is not None  # the waiter only matches Q lines
+        if info.dialect is None and self._dialect.firmware_mode != 0:
+            await self.close()
+            raise UnsupportedDialectError(
+                f"firmware does not support dialect {self._dialect.name}; "
+                "update the nanoCUL firmware"
+            )
         self.gateway_info = info
         self._established = True
         expected_sync = self._dialect.sync.hex().upper()

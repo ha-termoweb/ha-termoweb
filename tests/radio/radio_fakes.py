@@ -22,7 +22,12 @@ NET = bytes.fromhex("1234")
 
 BANNER = "# termoweb_rx 3.5 freq=869.525 rate=9.6k sync=2DD4 mode=dynamic tx=paC0"
 Q_LINE = (
-    "# Q termoweb_rx 3.5 freq=869.525 pa=C0 sync=2DD4 mode=dynamic autoack=on id=01"
+    "# Q termoweb_rx 3.6-esp32 freq=869.525 pa=C0 sync=2DD4 mode=dynamic autoack=on "
+    "id=01 dialect=B net=1234"
+)
+# Stock AVR nanoCUL firmware: no runtime dialects, no MAC (dialect A only).
+Q_LINE_NANOCUL = (
+    "# Q termoweb_rx 3.5 freq=869.525 pa=C0 sync=2DE5 mode=dynamic autoack=on id=01"
 )
 
 

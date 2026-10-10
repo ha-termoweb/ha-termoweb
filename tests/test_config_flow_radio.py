@@ -67,8 +67,9 @@ def gateway(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             raise result
         return result
 
-    async def fake_discover(host, port, dialect, network_id):
+    async def fake_discover(host, port, dialect, network_id, **kwargs):
         state["calls"].append(("discover", host, port, dialect, network_id))
+        state["discover_kwargs"] = kwargs
         result = state["discover"]
         if isinstance(result, Exception):
             raise result
@@ -95,7 +96,7 @@ async def test_user_step_offers_cloud_or_radio() -> None:
     assert result == {
         "type": "menu",
         "step_id": "user",
-        "menu_options": ["cloud", "radio"],
+        "menu_options": ["cloud", "radio", "nanocul"],
     }
 
 
@@ -117,6 +118,7 @@ async def test_radio_form_then_discovery_creates_entry(gateway) -> None:
     assert result["title"] == "Radio gateway (10.0.0.5)"
     assert result["data"] == {
         "brand": "radio",
+        "radio_type": "esp32",
         "host": "10.0.0.5",
         "port": 2323,
         "dialect": "B",
@@ -187,7 +189,7 @@ async def test_progress_step_reports_running_task(gateway, monkeypatch) -> None:
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def slow(*_args):
+    async def slow(*_args, **_kwargs):
         started.set()
         await release.wait()
         return NetworkSighting(DIALECT_B, NET), {6: object()}
@@ -307,11 +309,11 @@ async def test_discover_radio_paths(monkeypatch) -> None:
     calls: list[Any] = []
     sighting_b = NetworkSighting(DIALECT_B, NET, frozenset({40}))
 
-    async def fake_discover(host, port, *, dialects):
+    async def fake_discover(host, port, *, dialects, link_factory):
         calls.append(("listen", tuple(d.name for d in dialects)))
         return calls_result["sighting"]
 
-    async def fake_probe(host, port, dialect, network_id, candidates):
+    async def fake_probe(host, port, dialect, network_id, candidates, link_factory):
         calls.append(
             ("probe", dialect.name, network_id, 40 in candidates, 2 in candidates)
         )

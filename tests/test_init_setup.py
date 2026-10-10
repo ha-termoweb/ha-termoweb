@@ -791,6 +791,47 @@ def test_async_setup_entry_radio_gateway_unreachable(
     assert power.power_limit == 1800
 
 
+def test_async_setup_entry_nanocul_builds_a_serial_client(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    class UnreachableStick(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            raise termoweb_init.RadioLinkError("unplugged")
+
+    def fake_create(*args: Any, **kwargs: Any) -> Any:
+        created.append((args, kwargs))
+        return UnreachableStick(None, "", "")
+
+    monkeypatch.setattr(termoweb_init, "create_radio_client", fake_create)
+    entry = ConfigEntry(
+        "nanocul",
+        data={
+            "brand": "radio",
+            "radio_type": "nanocul",
+            "device": "/dev/ttyUSB0",
+            "radio_device_id": "nanocul-a1b2c3",
+            "dialect": "A",
+            "network_id": "1B30",
+            "nodes": [],
+        },
+    )
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> None:
+        await termoweb_init.async_setup_entry(stub_hass, entry)
+
+    with pytest.raises(ConfigEntryNotReady):
+        asyncio.run(_run())
+    ((args, kwargs),) = created
+    assert args[:2] == ("/dev/ttyUSB0", 0)
+    assert kwargs["serial_url"] == "/dev/ttyUSB0"
+    assert kwargs["device_id"] == "nanocul-a1b2c3"
+
+
 def test_async_setup_entry_no_devices(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
