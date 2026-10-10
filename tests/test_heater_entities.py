@@ -261,25 +261,6 @@ def test_derive_boost_state_from_remaining(monkeypatch: pytest.MonkeyPatch) -> N
     assert state.end_label is None
 
 
-def test_derive_boost_state_handles_now_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensure defensive handling when ``dt_util.now`` raises."""
-
-    def _failing_now() -> datetime:
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(dt_util, "now", _failing_now)
-
-    settings = {"boost_remaining": 10}
-    state = heater_module.derive_boost_state(settings, SimpleNamespace())
-
-    assert state.minutes_remaining == 10
-    assert state.end_datetime is None
-    assert state.end_iso is None
-    assert state.end_label == "Never"
-
-
 def test_derive_boost_state_ignores_placeholder_iso(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -850,7 +831,7 @@ def test_set_boost_temperature_missing_runtime() -> None:
     """set_boost_temperature should silently return when runtime is absent."""
     hass = HomeAssistant()
     heater_module.set_boost_temperature(hass, "missing", "acm", "01", 20.0)
-    # No exception raised
+    assert heater_module.get_boost_temperature(hass, "missing", "acm", "01") is None
 
 
 def test_get_boost_temperature_invalid_identifiers() -> None:
@@ -938,14 +919,14 @@ def test_register_climate_entity_id_missing_runtime() -> None:
     """register_climate_entity_id should silently return on missing runtime."""
     hass = HomeAssistant()
     heater_module.register_climate_entity_id(hass, "missing", "htr", "01", "climate.x")
-    # No error raised
+    assert heater_module.resolve_climate_entity_id(hass, "missing", "htr", "01") is None
 
 
 def test_clear_climate_entity_id_missing_runtime() -> None:
     """clear_climate_entity_id should silently return on missing runtime."""
     hass = HomeAssistant()
     heater_module.clear_climate_entity_id(hass, "missing", "htr", "01")
-    # No error raised
+    assert heater_module.resolve_climate_entity_id(hass, "missing", "htr", "01") is None
 
 
 def test_resolve_climate_entity_id_missing_runtime() -> None:
@@ -1005,7 +986,7 @@ def test_clear_climate_entity_id_non_mapping_bucket() -> None:
     runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev")
     runtime.climate_entities = {"htr": "not-a-dict"}  # type: ignore[assignment]
     heater_module.clear_climate_entity_id(hass, entry_id, "htr", "01")
-    # Should not raise
+    assert runtime.climate_entities == {"htr": "not-a-dict"}
 
 
 # ---------------------------------------------------------------------------

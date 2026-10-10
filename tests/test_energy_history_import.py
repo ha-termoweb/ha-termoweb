@@ -4,6 +4,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -1088,9 +1089,14 @@ async def test_enforce_monotonic_sum_no_dot_in_entity_id(
 ) -> None:
     """_enforce_monotonic_sum should return early if no dot in entity_id (line 175)."""
 
+    collect = AsyncMock(return_value=[])
+    monkeypatch.setattr(energy, "_collect_statistics", collect)
+
     await energy._enforce_monotonic_sum(
         object(), "nope", datetime.now(UTC), datetime.now(UTC)
     )
+
+    collect.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1101,10 +1107,14 @@ async def test_enforce_monotonic_sum_no_rows(monkeypatch: pytest.MonkeyPatch) ->
         return []
 
     monkeypatch.setattr(energy, "_collect_statistics", _empty_collect)
+    registry_get = MagicMock()
+    monkeypatch.setattr(energy.er, "async_get", registry_get, raising=False)
 
     await energy._enforce_monotonic_sum(
         object(), "sensor.test", datetime.now(UTC), datetime.now(UTC)
     )
+
+    registry_get.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1366,6 +1376,8 @@ async def test_import_energy_history_no_entity_id(
     monkeypatch.setattr(energy, "datetime", _FixedDatetime, raising=False)
     # Return None for all entity lookups
     monkeypatch.setattr(energy.er, "async_get", lambda hass: None, raising=False)
+    period = AsyncMock(return_value={})
+    monkeypatch.setattr(energy, "_statistics_during_period", period)
 
     await energy.async_import_energy_history(
         stub_hass,
@@ -1373,6 +1385,8 @@ async def test_import_energy_history_no_entity_id(
         rate_limit=_ImmediateRateLimiter(),
         max_days=1,
     )
+
+    period.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1412,6 +1426,8 @@ async def test_import_energy_history_no_valid_timestamps(
     monkeypatch.setattr(
         energy.er, "async_get", lambda hass: _FakeRegistry(), raising=False
     )
+    period = AsyncMock(return_value={})
+    monkeypatch.setattr(energy, "_statistics_during_period", period)
 
     await energy.async_import_energy_history(
         stub_hass,
@@ -1419,6 +1435,8 @@ async def test_import_energy_history_no_valid_timestamps(
         rate_limit=_ImmediateRateLimiter(),
         max_days=1,
     )
+
+    period.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1506,3 +1524,6 @@ async def test_import_energy_history_no_runtime(
         entry,
         rate_limit=_ImmediateRateLimiter(),
     )
+
+    assert stub_hass.config_entries.updated_entries == []
+    assert entry.options == {}

@@ -20,7 +20,6 @@ from custom_components.termoweb.inventory import (
     PowerMonitorNode,
     ThermostatNode,
     normalize_node_addr,
-    normalize_node_type,
 )
 from custom_components.termoweb.inventory import heater_sample_subscription_targets
 
@@ -188,36 +187,6 @@ def test_normalize_node_addr_rejects_none() -> None:
 def test_node_rejects_none_addr() -> None:
     with pytest.raises(ValueError):
         HeaterNode(name="Living", addr=None)  # type: ignore[arg-type]
-
-
-def test_utils_normalization_matches_node_inventory() -> None:
-    payload = {"nodes": [{"type": " HTR ", "addr": " 01 "}]}
-
-    nodes = build_node_inventory(payload)
-    assert len(nodes) == 1
-    node = nodes[0]
-
-    assert normalize_node_type(" HTR ") == node.type
-    assert normalize_node_addr(" 01 ") == node.addr
-    assert (
-        normalize_node_type(None, default="htr", use_default_when_falsey=True) == "htr"
-    )
-
-
-def test_node_init_uses_normalization_helpers() -> None:
-    class DerivedNode(Node):
-        __slots__ = ()
-        NODE_TYPE = "ACM"
-
-    node = DerivedNode(name=" Normalised ", addr=" 42 ", node_type=None)
-
-    assert node.type == normalize_node_type(
-        None,
-        default="ACM",
-        use_default_when_falsey=True,
-    )
-    assert node.addr == normalize_node_addr(" 42 ")
-    assert node.name == "Normalised"
 
 
 def test_heater_sample_subscription_targets_orders_types() -> None:

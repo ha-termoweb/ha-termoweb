@@ -484,9 +484,11 @@ def test_accumulator_boost_cancel_button_handles_missing_hass() -> None:
             coordinator, context, _metadata_for("cancel"),
         )
         button.hass = None
+        button._async_boost_request = AsyncMock()
 
-        # Should not raise
         await button.async_press()
+
+        button._async_boost_request.assert_not_awaited()
 
     asyncio.run(_run())
 
@@ -564,8 +566,13 @@ def test_flash_display_button_handles_press_error(
     asyncio.run(_run())
 
 
-def test_flash_display_button_skips_press_without_hass() -> None:
+def test_flash_display_button_skips_press_without_hass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """DisplayFlashButton.async_press should do nothing when hass is None."""
+
+    require_runtime = MagicMock()
+    monkeypatch.setattr(entities_button_module, "require_runtime", require_runtime)
 
     async def _run() -> None:
         coordinator = types.SimpleNamespace(hass=None, _inventory=Inventory("dev", []))
@@ -575,10 +582,10 @@ def test_flash_display_button_skips_press_without_hass() -> None:
         button = DisplayFlashButton(coordinator, context)
         button.hass = None
 
-        # Should not raise
         await button.async_press()
 
     asyncio.run(_run())
+    require_runtime.assert_not_called()
 
 
 def test_flash_display_button_available_depends_on_inventory() -> None:
@@ -800,8 +807,11 @@ def test_accumulator_boost_button_ignores_press_without_hass() -> None:
         context = _make_boost_context("entry-guard", "dev-guard", addr="8")
         button = AccumulatorBoostButton(coordinator, context, _metadata_for("start"))
         button.hass = None
+        button._async_boost_request = AsyncMock()
 
         await button.async_press()
+
+        button._async_boost_request.assert_not_awaited()
 
     asyncio.run(_run())
 

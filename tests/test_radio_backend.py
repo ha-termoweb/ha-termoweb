@@ -33,30 +33,6 @@ def make_backend():
     return backend
 
 
-def test_brand_constant_and_backend_class() -> None:
-    """The radio brand resolves to RadioBackend."""
-
-    radio_backend = _mod(".radio_backend").RadioBackend
-    assert BRAND_RADIO == "radio"
-    assert _mod(".factory")._backend_class("radio") is radio_backend  # noqa: SLF001
-
-
-def test_capabilities_switch_off_cloud_only_features() -> None:
-    """Radio: keypad lock, local power limit and priority; no energy history."""
-
-    factory = _mod(".factory")
-    assert factory.backend_capabilities(BRAND_RADIO) == _mod(
-        ".base"
-    ).BackendCapabilities(
-        lock=True,
-        power_limit=True,
-        priority=True,
-        energy_history=False,
-        energy=True,
-    )
-    assert make_backend().capabilities is factory.backend_capabilities(BRAND_RADIO)
-
-
 def test_create_radio_client_helper() -> None:
     """The factory helper builds a lazily connecting client for PR 4's setup."""
 

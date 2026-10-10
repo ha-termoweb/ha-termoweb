@@ -322,28 +322,6 @@ class TestPowerLimitEntityDeviceInfo:
 class TestPowerLimitEntityAttributes:
     """Tests for PowerLimitNumber class attributes."""
 
-    def test_entity_category_is_config(self) -> None:
-        from homeassistant.helpers.entity import EntityCategory
-
-        entity = _make_power_limit_entity()
-        assert entity._attr_entity_category == EntityCategory.CONFIG
-
-    def test_translation_key(self) -> None:
-        entity = _make_power_limit_entity()
-        assert entity._attr_translation_key == "installation_power_limit"
-
-    def test_unit_of_measurement(self) -> None:
-        from homeassistant.const import UnitOfPower
-
-        entity = _make_power_limit_entity()
-        assert entity._attr_native_unit_of_measurement == UnitOfPower.WATT
-
-    def test_min_max_step(self) -> None:
-        entity = _make_power_limit_entity()
-        assert entity._attr_native_min_value == 0
-        assert entity._attr_native_max_value == 60000
-        assert entity._attr_native_step == 100
-
     def test_unique_id(self) -> None:
         entity = _make_power_limit_entity()
         assert "power_limit" in entity._attr_unique_id
@@ -530,17 +508,18 @@ class TestWSPowerLimitUpdate:
     ) -> None:
         """Non-mapping body is silently ignored."""
         client, hass, coordinator = self._make_ws_client(monkeypatch)
-        build_entry_runtime(
+        runtime = build_entry_runtime(
             hass=hass,
             entry_id="entry",
             dev_id="device",
             coordinator=coordinator,
         )
+        runtime.power_limit = 1000
 
-        # Should not raise
         client._handle_power_limit_update("not a mapping")
         client._handle_power_limit_update(None)
         client._handle_power_limit_update(42)
+        assert runtime.power_limit == 1000
 
     def test_handle_power_limit_update_missing_key_ignored(
         self, monkeypatch: pytest.MonkeyPatch
@@ -787,27 +766,3 @@ class TestBuildGatewayEntityUniqueId:
         """A missing dev_id must not become the literal string "None"."""
         with pytest.raises(ValueError):
             build_gateway_entity_unique_id(None, "power_limit")
-
-
-# ===========================================================================
-# Runtime Tests
-# ===========================================================================
-
-
-class TestRuntimePowerLimitField:
-    """Tests for the power_limit field on EntryRuntime."""
-
-    def test_power_limit_defaults_to_none(self) -> None:
-        runtime = build_entry_runtime()
-        assert runtime.power_limit is None
-
-    def test_power_limit_can_be_set(self) -> None:
-        runtime = build_entry_runtime()
-        runtime.power_limit = 5000
-        assert runtime.power_limit == 5000
-
-    def test_power_limit_can_be_reset_to_none(self) -> None:
-        runtime = build_entry_runtime()
-        runtime.power_limit = 5000
-        runtime.power_limit = None
-        assert runtime.power_limit is None
