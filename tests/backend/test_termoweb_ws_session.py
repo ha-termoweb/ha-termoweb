@@ -33,7 +33,7 @@ from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from tests.fakes.cloud import DEV_ID, FakeCloud
 from tests.fakes.ws_harness import (
     FakeResponse,
-    FakeSession,
+    WSFakeSession,
     FakeWS,
     VirtualClock,
     install_clock,
@@ -86,7 +86,7 @@ class Env:
 
     def client(
         self,
-        session: FakeSession,
+        session: WSFakeSession,
         *,
         dev_id: str = DEV_ID,
         inventory: Inventory | None = None,
@@ -188,7 +188,7 @@ async def test_handshake_failures_back_off_and_recover(
         ws.closed = next(sockets)
         return ws
 
-    session = FakeSession(get=lambda _url: next(script), ws_factory=_ws)
+    session = WSFakeSession(get=lambda _url: next(script), ws_factory=_ws)
     client = env.client(session)
 
     client.start()
@@ -196,7 +196,7 @@ async def test_handshake_failures_back_off_and_recover(
         lambda: len(session.sockets) == 2 and env.status() == "connected", step=5
     )
 
-    assert len(session.requests) == 7
+    assert len(session.get_calls) == 7
     dead, live = session.sockets
     assert dead.sent == []  # never joined a socket the server already closed
     assert live.sent[:2] == [JOIN, SNAPSHOT_REQUEST]
@@ -220,7 +220,7 @@ async def test_session_frames_reach_store_and_keepalives_run(
     env: Env, cloud: FakeCloud, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Snapshot, batched pushes, junk frames and keep-alives over two sessions."""
-    session = FakeSession(get=_ok_handshake)
+    session = WSFakeSession(get=_ok_handshake)
     client = env.client(session)
     cloud.get_rtc_time.reset_mock()
     cloud.get_rtc_time.side_effect = [aiohttp.ClientError("rtc down"), {}, {}, {}, {}]
@@ -292,7 +292,7 @@ async def test_session_frames_reach_store_and_keepalives_run(
 
 async def test_idle_session_is_restarted(env: Env) -> None:
     """Payload silence beyond the idle window recycles the websocket."""
-    session = FakeSession(get=_ok_handshake)
+    session = WSFakeSession(get=_ok_handshake)
     client = env.client(session)
     client.start()
     await until(lambda: len(session.sockets) == 1, "socket")
@@ -327,8 +327,8 @@ async def test_write_after_idle_restarts_only_that_gateway(
     env: Env, hass: HomeAssistant, write_mock: AsyncMock
 ) -> None:
     """A heater write after a silent period restarts that gateway's socket only."""
-    session_a = FakeSession(get=_ok_handshake)
-    session_b = FakeSession(get=_ok_handshake)
+    session_a = WSFakeSession(get=_ok_handshake)
+    session_b = WSFakeSession(get=_ok_handshake)
     inventory_b = Inventory(
         DEV_B,
         build_node_inventory({"nodes": [{"type": "htr", "addr": "1", "name": "B"}]}),
@@ -382,7 +382,7 @@ async def test_write_after_idle_restarts_only_that_gateway(
 
 async def test_silent_first_session_is_restarted(env: Env) -> None:
     """A session that never delivers a payload is recycled after the idle window."""
-    session = FakeSession(get=_ok_handshake)
+    session = WSFakeSession(get=_ok_handshake)
     client = env.client(session)
     client.start()
     await until(lambda: len(session.sockets) == 1, "socket")
@@ -405,7 +405,7 @@ async def test_silent_first_session_is_restarted(env: Env) -> None:
 
 async def test_slow_snapshot_after_reconnect_is_not_restarted(env: Env) -> None:
     """A new session is judged on its own payloads, not the previous session's."""
-    session = FakeSession(get=_ok_handshake)
+    session = WSFakeSession(get=_ok_handshake)
     client = env.client(session)
     client.start()
     await until(lambda: len(session.sockets) == 1, "socket")

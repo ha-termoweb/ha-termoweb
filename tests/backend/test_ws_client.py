@@ -27,7 +27,13 @@ from custom_components.termoweb.backend.ws_health import WsHealthTracker
 from custom_components.termoweb.const import signal_ws_status
 from custom_components.termoweb.domain.ids import NodeId, NodeType
 from custom_components.termoweb.runtime import EntryRuntime
-from tests.fakes.ws import DEV_ID, ENTRY_ID, DummyREST, make_inventory, make_runtime
+from tests.fakes.ws_harness import (
+    DEV_ID,
+    ENTRY_ID,
+    DummyREST,
+    make_inventory,
+    make_runtime,
+)
 
 _CLIENT_CLASSES = {
     "termoweb": termoweb_ws.TermoWebWSClient,
