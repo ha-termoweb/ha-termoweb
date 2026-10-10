@@ -497,6 +497,7 @@ def test_async_setup_entry_happy_path(
     ]
     assert stub_hass.services.has_service(termoweb_init.DOMAIN, "import_energy_history")
     assert not stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_survey")
+    assert not stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_pair")
     assert import_mock.await_count == 0
 
 
@@ -827,6 +828,10 @@ def test_async_setup_entry_radio_registers_survey_service(
 
     assert asyncio.run(_run()) is True
     assert stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_survey")
+    assert stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_pair")
+    assert stub_hass.services.has_service(
+        termoweb_init.DOMAIN, "radio_factory_reset"
+    )
 
 
 def test_async_setup_entry_nanocul_builds_a_serial_client(

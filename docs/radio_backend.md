@@ -269,6 +269,17 @@ are set through the usual number entities; each heater's power in watts is set
 in the integration's options (**Configure**). Dialect-A heaters report their
 own power in `BE`, which is used when no power is entered.
 
+## Pairing and factory reset
+
+| Service | What it does |
+|---|---|
+| `termoweb.radio_pair` | Pairs one heater: back to its old address (then restores its mode, presets and program), or as a new heater (added to the entry, which reloads). |
+| `termoweb.radio_factory_reset` | Saves a heater's settings, then factory-resets it (dialect B only; dialect A raises `RadioUnsupportedError`). Destructive: the heater also leaves the network. |
+
+Both run in the client (`async_pair`, `async_factory_reset`,
+`async_restore`). Pairing holds the exchange lock, so heater commands wait.
+Protocol details: [radio protocol §7-8](radio_protocol.md#7-pairing).
+
 ## Known gaps
 
 - Keypad lock on dialect B: acked; whether the keypad locks is not yet confirmed.

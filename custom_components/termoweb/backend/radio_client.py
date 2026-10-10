@@ -45,6 +45,7 @@ from .radio.link import (
     RadioLinkError,
     supports_survey,
 )
+from .radio.pairing import PairedHeater, pair_heaters
 from .radio.survey import RawBurst
 from .radio_power import EnergyEstimator, PowerManager
 
@@ -261,6 +262,76 @@ class RadioClient:
             )
         async with self._exchange_lock:
             return await link.survey(seconds)
+
+    async def async_pair(
+        self,
+        window_s: float,
+        *,
+        wanted_id: int | None = None,
+        max_heaters: int | None = None,
+        idle_stop_s: float | None = None,
+    ) -> list[PairedHeater]:
+        """Pair heaters into this network; heater commands wait meanwhile.
+
+        New heaters get the lowest id not used by a stored node; ``wanted_id``
+        pairs one heater to that id (one re-paired after a factory reset).
+        """
+
+        link = await self.async_connect()
+        existing: set[int] = set()
+        for node in self._nodes:
+            try:
+                existing.add(radio_addr(node.get("addr")))
+            except ValueError:
+                continue
+        async with self._exchange_lock:
+            paired = await pair_heaters(
+                link,
+                window_s=window_s,
+                idle_stop_s=idle_stop_s,
+                existing_ids=existing,
+                wanted_id=wanted_id,
+                max_heaters=max_heaters,
+            )
+        for heater in paired:
+            self._forget(heater.node_id)
+        return paired
+
+    async def async_factory_reset(self, addr: int) -> None:
+        """Factory-reset a heater (dialect B ``C8 01 D0``): settings and pairing are wiped."""
+
+        try:
+            payload = protocol.factory_reset(self._dialect)
+        except ValueError as err:
+            raise RadioUnsupportedError(
+                f"Factory reset in dialect {self._dialect.name}"
+            ) from err
+        await self._write(addr, payload)
+        self._forget(addr)
+        _LOGGER.info("Heater %s was factory reset", addr)
+
+    async def async_restore(
+        self,
+        addr: int,
+        *,
+        mode: str | None = None,
+        stemp: float | None = None,
+        ptemp: list[float] | None = None,
+        prog: list[int] | None = None,
+    ) -> None:
+        """Give a freshly paired heater its clock, then presets, mode and program back."""
+
+        # Right after pairing the heater takes the clock but may not answer 53.
+        clock = protocol.sync_clock(_local_now(), True, self._dialect)
+        await self.async_send(addr, clock)
+        await self._write_settings(addr, mode=mode, stemp=stemp, ptemp=ptemp, prog=prog)
+        _LOGGER.info("Heater %s settings restored", addr)
+
+    def _forget(self, addr: int) -> None:
+        """Drop what this client remembers about a heater's program and lock."""
+
+        self._programs.pop(addr, None)
+        self._locks.pop(addr, None)
 
     # --- radio exchanges -----------------------------------------------------
 

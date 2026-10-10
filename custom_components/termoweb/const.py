@@ -42,6 +42,9 @@ RADIO_TYPE_NANOCUL: Final = "nanocul"
 CONF_RADIO_POWER: Final = (
     "radio_power"  # options: power manager limit/priority/rated power
 )
+CONF_RADIO_RESTORE: Final = (
+    "radio_restore"  # options: heater settings saved before a factory reset
+)
 RADIO_GATEWAY_LABEL: Final = "Radio gateway"
 
 BRAND_LABELS: Final[Mapping[str, str]] = {

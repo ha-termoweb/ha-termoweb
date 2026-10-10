@@ -1254,6 +1254,10 @@ def _install_stubs() -> None:
             ] = []
             self.forwarded: list[tuple[ConfigEntry, tuple[str, ...]]] = []
             self.unloaded: list[tuple[ConfigEntry, tuple[str, ...]]] = []
+            self.scheduled_reloads: list[str] = []
+
+        def async_schedule_reload(self, entry_id: str) -> None:
+            self.scheduled_reloads.append(entry_id)
 
         def add_entry(self, entry: ConfigEntry) -> None:
             self._entries[entry.entry_id] = entry

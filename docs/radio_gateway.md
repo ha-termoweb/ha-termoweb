@@ -198,6 +198,45 @@ heater does not show up, or when a developer asks for a report.
 The survey needs gateway firmware 3.7-esp32 or newer (step 3). The nanoCUL
 stick cannot record surveys.
 
+### Pair a heater
+
+Home Assistant can pair a heater with the gateway itself. You need this for
+a new heater, or for a heater that you reset (below).
+
+1. Go to **Developer tools → Actions**.
+2. Choose **TermoWeb: Radio pair**.
+3. Choose your radio gateway.
+   - For a **new heater**, leave **Heater number** empty.
+   - For a heater that you **reset**, enter its old number. For "Heater 6",
+     enter 6.
+4. Press **Perform action**. You have 5 minutes for the next step.
+5. On the heater, start pairing mode. The heater's manual tells you which
+   buttons to press. Put **only one** heater into pairing mode at a time.
+6. When the action finishes, the response shows the heater number.
+   - A new heater appears under **Devices** after the integration reloads.
+   - A heater with its old number gets its settings back: mode, preset
+     temperatures and weekly program.
+
+Heater control pauses while pairing runs. If the action says that no heater
+was paired, move the gateway closer to the heater and try again.
+
+### Reset a heater to factory settings
+
+**Warning: this deletes all settings on the heater.** The heater forgets its
+mode, preset temperatures, weekly program, clock and its radio pairing. It
+stops talking to Home Assistant until you pair it again. Home Assistant saves
+the settings first, so the pairing can give them back.
+
+1. Go to **Developer tools → Actions**.
+2. Choose **TermoWeb: Radio factory reset**.
+3. Choose your radio gateway and enter the heater number.
+4. Press **Perform action**.
+5. Pair the heater again with **TermoWeb: Radio pair** and the same heater
+   number (see above).
+
+Only heaters that use radio dialect B can be reset. The integration's
+diagnostics download shows the dialect.
+
 If you added or removed a heater later, open the integration, choose
 **Reconfigure**, and tick **Scan for heaters again**.
 

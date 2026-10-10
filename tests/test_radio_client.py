@@ -786,3 +786,72 @@ async def test_survey_needs_survey_firmware_and_returns_bursts() -> None:
     with pytest.raises(RadioError, match="unknown has no raw survey"):
         await client.async_survey(30)
     assert links[0].surveys == [30]
+
+
+# --- pairing, factory reset, restore --------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pair_runs_under_the_exchange_lock_and_skips_stored_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pairing holds heater commands back and never hands out a stored id."""
+
+    client, links, _ = make_client()
+    client._programs[8] = (0.0, None)  # noqa: SLF001
+    client._locks[8] = True  # noqa: SLF001
+    seen: dict = {}
+
+    async def fake_pair(link, **kwargs):
+        seen.update(kwargs, link=link, locked=client._exchange_lock.locked())  # noqa: SLF001
+        return [SimpleNamespace(node_id=8)]
+
+    monkeypatch.setattr(rc, "pair_heaters", fake_pair)
+    paired = await client.async_pair(120, wanted_id=8, max_heaters=1, idle_stop_s=5)
+
+    assert [h.node_id for h in paired] == [8]
+    assert seen["link"] is links[0] and seen["locked"] is True
+    assert seen["existing_ids"] == {6, 7}  # "bogus" is skipped
+    assert (seen["window_s"], seen["wanted_id"], seen["max_heaters"]) == (120, 8, 1)
+    assert seen["idle_stop_s"] == 5
+    assert 8 not in client._programs and 8 not in client._locks  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_factory_reset_sends_c8_and_needs_c9_55() -> None:
+    """Dialect B resets with ``C8 01 D0``; a rejection raises."""
+
+    client, links, _ = make_client()
+    await client.async_connect()
+    links[0].reply(0xC8, bytes.fromhex("C955"), bytes.fromhex("C956"))
+    client._locks[HEATER] = True  # noqa: SLF001
+    await client.async_factory_reset(HEATER)
+    assert links[0].sent == [(HEATER, bytes.fromhex("C801D0"))]
+    assert HEATER not in client._locks  # noqa: SLF001
+    with pytest.raises(RadioCommandError, match="rejected"):
+        await client.async_factory_reset(HEATER)
+
+
+@pytest.mark.asyncio
+async def test_factory_reset_is_unsupported_in_dialect_a() -> None:
+    client, links, _ = make_client("A")
+    with pytest.raises(RadioUnsupportedError, match="Factory reset in dialect A"):
+        await client.async_factory_reset(HEATER)
+    assert links == []  # nothing connected, nothing sent
+
+
+@pytest.mark.asyncio
+async def test_restore_syncs_the_clock_then_writes_settings() -> None:
+    """Clock (ack only), then the B6 presets+mode write and the B2 program."""
+
+    client, links, _ = make_client()
+    await client.async_connect()
+    links[0].replies.pop(0x51)  # right after pairing the heater does not answer 53
+    await client.async_restore(
+        HEATER, mode="manual", stemp=21.5, ptemp=[7.0, 17.0, 20.0], prog=[1] * 168
+    )
+    payloads = links[0].payloads()
+    assert payloads[0] == bytes.fromhex("511A0A0905103409")
+    assert payloads[1] == bytes([0xB8])
+    assert payloads[2] == bytes.fromhex("B60E222802" + "2B")
+    assert payloads[3][0] == 0xB2 and len(payloads[3]) == 43
