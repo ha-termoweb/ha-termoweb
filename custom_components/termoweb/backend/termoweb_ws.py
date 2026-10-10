@@ -61,14 +61,10 @@ class TermoWebWSClient(_WSCommon):
         self._client = api_client
         self._coordinator = coordinator
         self._session = session or getattr(api_client, "_session", None)
-        if self._session is None:
-            raise RuntimeError("aiohttp session required for websocket client")
         self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
         self._task: asyncio.Task | None = None
         self._namespace = WS_NAMESPACE
         self._ws: aiohttp.ClientWebSocketResponse | None = None
-        self._disconnected = asyncio.Event()
-        self._disconnected.set()
 
         self._closing = False
         self._healthy_since: float | None = None
@@ -138,8 +134,6 @@ class TermoWebWSClient(_WSCommon):
         self._closing = False
         self._stop_event = asyncio.Event()
         self._handshake_logged = False
-        self._subscription_refresh_failed = False
-
 
     # ------------------------------------------------------------------
     # Payload handlers
@@ -155,10 +149,7 @@ class TermoWebWSClient(_WSCommon):
             }
             state = self._ws_state_bucket()
             state["last_handshake_at"] = now
-            if keys:
-                state["handshake_keys"] = keys
-            elif "handshake_keys" in state:
-                state.pop("handshake_keys")
+            state["handshake_keys"] = keys
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug("WS: dev_handshake payload keys: %s", ", ".join(keys))
             self._update_status("connected")
@@ -187,14 +178,7 @@ class TermoWebWSClient(_WSCommon):
 
     def _apply_nodes_payload(self, payload: Any, *, merge: bool, event: str) -> None:
         """Update cached nodes from the websocket payload and notify listeners."""
-        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
-        if not isinstance(inventory, Inventory):
-            _LOGGER.error(
-                "WS: missing inventory for node payload on %s",
-                mask_identifier(self.dev_id),
-            )
-            return
-
+        inventory = self._inventory
         deltas: list[NodeSettingsDelta] = []
 
         nodes = self._extract_nodes(payload)
@@ -227,22 +211,12 @@ class TermoWebWSClient(_WSCommon):
             nodes, allowed_types=inventory.energy_sample_types
         )
         if merge and _LOGGER.isEnabledFor(logging.DEBUG):
-            inventory = (
-                self._inventory if isinstance(self._inventory, Inventory) else None
+            pairs = ", ".join(
+                f"{node_type}/{addr}"
+                for node_type, addresses in inventory.addresses_by_type.items()
+                for addr in addresses
             )
-            pairs = ""
-            if inventory is not None:
-                pairs = ", ".join(
-                    f"{node_type}/{addr}"
-                    for node_type, addresses in inventory.addresses_by_type.items()
-                    if isinstance(node_type, str) and addresses
-                    for addr in addresses
-                    if isinstance(addr, str) and addr
-                )
-            if pairs:
-                _LOGGER.debug("WS: update event for %s", pairs)
-            else:
-                _LOGGER.debug("WS: update event without address changes")
+            _LOGGER.debug("WS: update event for %s", pairs)
         if sample_updates:
             self._mark_ws_payload(
                 timestamp=time.time(),
@@ -403,25 +377,14 @@ class TermoWebWSClient(_WSCommon):
                     watchers_for_dev = hooks.get(dev_id_arg)
                     if watchers_for_dev:
                         for ws_client in list(watchers_for_dev):
-                            maybe = getattr(
-                                ws_client, "maybe_restart_after_write", None
-                            )
-                            if maybe is None or not callable(maybe):
-                                continue
                             try:
-                                await maybe()
-                            except (
-                                asyncio.CancelledError
-                            ):  # pragma: no cover - passthrough
-                                raise
-                            except Exception:
+                                await ws_client.maybe_restart_after_write()
+                            except Exception:  # the write itself already succeeded
                                 _LOGGER.debug(
                                     "WS: maybe_restart_after_write failed: %s",
                                     ws_client.dev_id,
                                     exc_info=True,
                                 )
-                        if not watchers_for_dev:
-                            hooks.pop(dev_id_arg, None)
                 return result
 
             setattr(client, "set_node_settings", _wrapped_set_node_settings)
@@ -475,7 +438,6 @@ class TermoWebWSClient(_WSCommon):
             with suppress(asyncio.CancelledError):
                 await self._idle_monitor_task
             self._idle_monitor_task = None
-        self._subscription_refresh_failed = False
         await self._disconnect(reason="client stop")
         if self._task:
             self._task.cancel()
@@ -531,14 +493,9 @@ class TermoWebWSClient(_WSCommon):
                 await self._subscribe_htr_samples()
                 self._healthy_since = None
                 self._update_status("connected")
-                if self._idle_monitor_task is None or self._idle_monitor_task.done():
-                    _LOGGER.debug("WS: starting legacy idle monitor")
-                    self._idle_monitor_task = self._loop.create_task(
-                        self._idle_monitor()
-                    )
+                _LOGGER.debug("WS: starting legacy idle monitor")
+                self._idle_monitor_task = self._loop.create_task(self._idle_monitor())
                 self._hb_task = self._loop.create_task(self._heartbeat_loop())
-                if self._rtc_keepalive_task and not self._rtc_keepalive_task.done():
-                    self._rtc_keepalive_task.cancel()
                 self._rtc_keepalive_task = self._loop.create_task(
                     self._rtc_keepalive_loop()
                 )
@@ -585,7 +542,6 @@ class TermoWebWSClient(_WSCommon):
                         with suppress(asyncio.CancelledError):
                             await self._idle_monitor_task
                     self._idle_monitor_task = None
-                self._subscription_refresh_failed = False
                 if self._ws:
                     with suppress(aiohttp.ClientError, RuntimeError):
                         await self._ws.close()
@@ -683,31 +639,14 @@ class TermoWebWSClient(_WSCommon):
     async def _subscribe_htr_samples(self) -> None:
         """Subscribe to heater sample updates."""
 
-        try:
-            for target in self._heater_sample_subscription_targets():
-                if target is None:
-                    continue
-                try:
-                    node_type, addr = target
-                except (TypeError, ValueError):
-                    continue
-                if not isinstance(node_type, str) or not isinstance(addr, str):
-                    continue
-                node_type = node_type.strip()
-                addr = addr.strip()
-                if not node_type or not addr:
-                    continue
-                payload = {
-                    "name": "subscribe",
-                    "args": [f"/{node_type}/{addr}/samples"],
-                }
-                await self._send_text(
-                    f"5::{self._namespace}:{json.dumps(payload, separators=(',', ':'))}"
-                )
-        except asyncio.CancelledError:  # pragma: no cover - task lifecycle
-            raise
-        except Exception:
-            _LOGGER.debug("WS: sample subscription setup failed", exc_info=True)
+        for node_type, addr in self._heater_sample_subscription_targets():
+            payload = {
+                "name": "subscribe",
+                "args": [f"/{node_type}/{addr}/samples"],
+            }
+            await self._send_text(
+                f"5::{self._namespace}:{json.dumps(payload, separators=(',', ':'))}"
+            )
 
     async def _heartbeat_loop(self) -> None:
         """Send periodic heartbeat frames to keep the connection alive."""
@@ -729,8 +668,6 @@ class TermoWebWSClient(_WSCommon):
             while not self._closing:
                 try:
                     await self._client.get_rtc_time(self.dev_id)
-                except asyncio.CancelledError:
-                    raise
                 except Exception as err:
                     if _LOGGER.isEnabledFor(logging.DEBUG):
                         _LOGGER.debug(
@@ -750,17 +687,10 @@ class TermoWebWSClient(_WSCommon):
     async def _read_loop(self) -> None:
         """Consume websocket frames and route events for the legacy protocol."""
 
-        ws = self._ws
-        if ws is None:
-            return
-        async for data in self._ws_payload_stream(ws, context="websocket"):
+        async for data in self._ws_payload_stream(self._ws, context="websocket"):
             if data.startswith("2::"):
                 self._record_heartbeat(source="socketio09")
-                try:
-                    await self._send_text("2::")
-                except Exception:
-                    _LOGGER.debug("WS: failed to send heartbeat ack", exc_info=True)
-                    raise
+                await self._send_text("2::")
                 continue
             if data.startswith(f"1::{self._namespace}"):
                 continue
@@ -796,56 +726,11 @@ class TermoWebWSClient(_WSCommon):
             self._handle_legacy_data_batch(payload)
             return
 
-    def _handle_legacy_data_batch(self, payload: Any) -> None:
-        """Route legacy Socket.IO ``data`` batches to domain handlers."""
+    def _handle_legacy_data_batch(self, payload: list[Mapping[str, Any]]) -> None:
+        """Route each ``{"path", "body"}`` item of a ``data`` batch as an update."""
 
-        if not isinstance(payload, list):
-            return
         for item in payload:
-            if not isinstance(item, Mapping):
-                continue
-            path = item.get("path")
-            body = item.get("body")
-            if not isinstance(path, str):
-                continue
-            if path.rstrip("/").endswith("/mgr/nodes"):
-                if isinstance(body, Mapping):
-                    self._handle_dev_data({"nodes": body})
-                continue
-            # Check for system-level power_limit updates
-            if "/htr_system/power_limit" in path:
-                if isinstance(body, Mapping):
-                    self._handle_power_limit_update(body)
-                continue
             self._handle_update(item)
-
-    async def _refresh_subscription(self, *, reason: str) -> None:
-        """Replay subscription calls to keep the legacy websocket active."""
-
-        async with self._subscription_refresh_lock:
-            ws = self._ws
-            if ws is None or getattr(ws, "closed", False):
-                raise RuntimeError("websocket not connected")
-            _LOGGER.debug("WS: refreshing websocket lease (%s)", reason)
-            try:
-                await self._send_snapshot_request()
-                await self._subscribe_session_metadata()
-                await self._subscribe_htr_samples()
-            except asyncio.CancelledError:  # pragma: no cover - task lifecycle
-                raise
-            except Exception as err:
-                self._subscription_refresh_failed = True
-                _LOGGER.info(
-                    "WS: legacy lease refresh failed (%s: %s)",
-                    type(err).__name__,
-                    err,
-                    exc_info=True,
-                )
-                self._schedule_idle_restart(
-                    idle_for=self._payload_idle_window, source="lease refresh failure"
-                )
-                raise
-            self._subscription_refresh_failed = False
 
     async def _send_text(self, data: str) -> None:
         """Send a websocket text frame."""
@@ -884,24 +769,7 @@ class TermoWebWSClient(_WSCommon):
                 raise RuntimeError(f"{context} error: {ws.exception()}")
             elif msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED}:
                 raise RuntimeError(f"{context} closed")
-        code = getattr(ws, "close_code", None)
-        reason: str | None = None
-        raw_reason = getattr(ws, "close_reason", None) or getattr(
-            ws, "close_message", None
-        )
-        if isinstance(raw_reason, bytes):
-            try:
-                reason = raw_reason.decode("utf-8", errors="ignore")
-            except Exception:
-                reason = repr(raw_reason)
-        elif raw_reason is not None:
-            reason = str(raw_reason)
-        _LOGGER.debug(
-            "WS: %s payload stream ended code=%s reason=%s",
-            context,
-            code,
-            reason,
-        )
+        _LOGGER.debug("WS: %s payload stream ended code=%s", context, ws.close_code)
         raise RuntimeError(f"{context} closed")
 
     def _record_heartbeat(self, *, source: str) -> None:
@@ -920,41 +788,24 @@ class TermoWebWSClient(_WSCommon):
         while not self._closing:
             await asyncio.sleep(60)
             ws = self._ws
-            if ws is None or getattr(ws, "closed", True):
-                if self._disconnected.is_set():
-                    break
-                continue
+            if ws is None or ws.closed:
+                break
             tracker = self._ws_health_tracker()
             last_payload = tracker.last_payload_at or tracker.last_heartbeat_at
             if not last_payload:
-                last_payload = self._stats.last_event_ts or self._last_event_at
+                continue
             now = time.time()
-            idle_for: float | None = None
-            if last_payload:
-                idle_for = now - last_payload
-                self._refresh_ws_payload_state(now=now, reason="idle_monitor")
-                if idle_for >= self._payload_idle_window:
-                    _LOGGER.debug(
-                        "WS: no payloads for %.0f s; scheduling websocket restart",
-                        idle_for,
-                    )
-                    self._schedule_idle_restart(
-                        idle_for=idle_for, source="idle monitor payload timeout"
-                    )
-                    break
-            if self._subscription_refresh_failed:
-                try:
-                    await self._refresh_subscription(reason="idle monitor retry")
-                except asyncio.CancelledError:  # pragma: no cover - task lifecycle
-                    raise
-                except Exception:
-                    fallback_idle = (
-                        idle_for if idle_for is not None else self._payload_idle_window
-                    )
-                    self._schedule_idle_restart(
-                        idle_for=fallback_idle, source="idle monitor retry failed"
-                    )
-                    break
+            idle_for = now - last_payload
+            self._refresh_ws_payload_state(now=now, reason="idle_monitor")
+            if idle_for >= self._payload_idle_window:
+                _LOGGER.debug(
+                    "WS: no payloads for %.0f s; scheduling websocket restart",
+                    idle_for,
+                )
+                self._schedule_idle_restart(
+                    idle_for=idle_for, source="idle monitor payload timeout"
+                )
+                break
 
     async def _run_heartbeat(
         self, interval: float, send: Callable[[], Awaitable[Any]]

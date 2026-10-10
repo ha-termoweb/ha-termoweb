@@ -133,8 +133,6 @@ class DucaheatWSClient(_WSCommon):
         self._client = api_client
         self._coordinator = coordinator
         self._session = session or getattr(api_client, "_session", None)
-        if self._session is None:
-            raise RuntimeError("aiohttp session required")
         self._namespace = namespace or WS_NAMESPACE
         self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
 
@@ -224,12 +222,7 @@ class DucaheatWSClient(_WSCommon):
         """Increment a numeric counter in the websocket state bucket."""
 
         state = self._ws_state_bucket()
-        current = state.get(key, 0)
-        try:
-            value = int(current)
-        except (TypeError, ValueError):
-            value = 0
-        value += delta
+        value = state.get(key, 0) + delta
         state[key] = value
         return value
 
@@ -434,43 +427,26 @@ class DucaheatWSClient(_WSCommon):
         self._ws = await self._open_websocket(ws_url, ws_headers)
 
         await self._send_str("2probe", context="probe", ws=self._ws)
-        probe_deadline = time.monotonic() + _PROBE_ACK_TIMEOUT
-        probe_ack = False
-        while True:
-            remaining = probe_deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            try:
-                async with asyncio.timeout(remaining):
-                    probe = await self._ws.receive_str()
-            except TimeoutError:
-                break
-            if probe == "3probe":
-                probe_ack = True
-                break
-            if probe == "2":
-                await self._send_str("3", context="probe-pong", ws=self._ws)
-                continue
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug("WS: unexpected probe frame: %r", probe)
-        if not probe_ack:
-            raise HandshakeError(408, ws_url, "probe ack timeout")
+        try:
+            async with asyncio.timeout(_PROBE_ACK_TIMEOUT):
+                while (probe := await self._ws.receive_str()) != "3probe":
+                    if probe == "2":
+                        await self._send_str("3", context="probe-pong", ws=self._ws)
+                    elif _LOGGER.isEnabledFor(logging.DEBUG):
+                        _LOGGER.debug("WS: unexpected probe frame: %r", probe)
+        except TimeoutError as err:
+            raise HandshakeError(408, ws_url, "probe ack timeout") from err
         await self._send_str("5", context="upgrade", ws=self._ws)
 
-        upgrade_deadline = time.monotonic() + _UPGRADE_DRAIN_TIMEOUT
         with contextlib.suppress(TimeoutError):
-            while True:
-                remaining = upgrade_deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                async with asyncio.timeout(remaining):
+            async with asyncio.timeout(_UPGRADE_DRAIN_TIMEOUT):
+                while True:
                     frame = await self._ws.receive_str()
-                if frame == "2":
+                    if frame != "2":
+                        break
                     await self._send_str("3", context="upgrade-pong", ws=self._ws)
-                    continue
-                if _LOGGER.isEnabledFor(logging.DEBUG):
-                    _LOGGER.debug("WS: discarding frame after upgrade: %r", frame)
-                break
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("WS: discarding frame after upgrade: %r", frame)
 
         await self._send_str(
             f"40{self._namespace}", context="namespace-open", ws=self._ws
@@ -504,13 +480,7 @@ class DucaheatWSClient(_WSCommon):
         """Return the idle detection threshold in seconds."""
 
         tracker = self._ws_health
-        payload_window = (
-            tracker.payload_stale_after or self._payload_stale_after or 60.0
-        )
-        try:
-            base = float(payload_window)
-        except (TypeError, ValueError):
-            base = 60.0
+        base = tracker.payload_stale_after or self._payload_stale_after or 60.0
         base = base if math.isfinite(base) and base > 0 else 60.0
         return max(30.0, base * 1.2)
 
@@ -531,10 +501,6 @@ class DucaheatWSClient(_WSCommon):
     def _start_idle_monitor(self) -> None:
         """Start the idle monitor when the websocket is ready."""
 
-        if self._idle_monitor_task and not self._idle_monitor_task.done():
-            return
-        if self._ws is None or self._ws.closed:
-            return
         self._idle_monitor_task = self._loop.create_task(
             self._idle_monitor(),
             name=f"{DOMAIN}-ws-idle-{self.dev_id}",
@@ -635,16 +601,13 @@ class DucaheatWSClient(_WSCommon):
         self._refresh_ws_payload_state(now=now, reason="idle_monitor")
         await self._maybe_refresh_leases(now=now)
         threshold = self._idle_threshold()
-        update_idle_for: float | None
-        if last_update is not None:
-            update_idle_for = now - last_update
-        elif last_payload is not None:
-            update_idle_for = now - last_payload
-        else:
-            update_idle_for = threshold
-        should_recover = tracker.payload_stale or self._idle_timeout_flag
-        if not should_recover and update_idle_for is not None:
-            should_recover = update_idle_for >= threshold
+        # A payload is always recorded together with an update event.
+        update_idle_for = now - last_update if last_update is not None else threshold
+        should_recover = (
+            tracker.payload_stale
+            or self._idle_timeout_flag
+            or update_idle_for >= threshold
+        )
         if should_recover:
             await self._recover_from_idle(
                 now=now,
@@ -718,8 +681,6 @@ class DucaheatWSClient(_WSCommon):
                 or tracker.last_payload_at
                 or tracker.last_heartbeat_at
             )
-            if last_event is None:
-                last_event = tracker.last_heartbeat_at
             idle_after = now - last_event if isinstance(last_event, (int, float)) else 0
             window_age = now - self._idle_recovery_window_start
             should_disconnect = (
@@ -910,15 +871,15 @@ class DucaheatWSClient(_WSCommon):
                             break
 
                         if evt == "dev_data" and args:
+                            # The extractor only returns payloads whose nodes
+                            # are already a mapping.
                             payload_map = self._extract_dev_data_payload(args)
-                            nodes_map: Mapping[str, typing.Any] | None = None
-                            if isinstance(payload_map, Mapping):
-                                nodes_candidate = payload_map.get("nodes")
-                                if isinstance(nodes_candidate, Mapping):
-                                    nodes_map = nodes_candidate
-                                else:
-                                    nodes_map = self._coerce_nodes_list(nodes_candidate)
-                            if isinstance(nodes_map, Mapping):
+                            nodes_map = (
+                                payload_map["nodes"]
+                                if payload_map is not None
+                                else None
+                            )
+                            if nodes_map is not None:
                                 self._log_nodes_summary(nodes_map)
                                 normalised = self._normalise_nodes(nodes_map)
                                 inventory = (
@@ -945,9 +906,7 @@ class DucaheatWSClient(_WSCommon):
                                     stale_after=self._payload_stale_after,
                                 )
                                 self._record_update_event(timestamp=now)
-                                subs = await self._maybe_subscribe(now)
-                                if subs:
-                                    _LOGGER.debug("WS: subscribed %d feeds", subs)
+                                await self._maybe_subscribe(now)
                                 self._update_status("healthy")
                             break
 
@@ -974,12 +933,6 @@ class DucaheatWSClient(_WSCommon):
                                         self._apply_deltas_to_store(
                                             deltas,
                                             replace=False,
-                                        )
-                                    if not isinstance(inventory, Inventory):
-                                        inventory = (
-                                            self._inventory
-                                            if isinstance(self._inventory, Inventory)
-                                            else None
                                         )
                                     allowed_types = (
                                         inventory.energy_sample_types
@@ -1157,8 +1110,6 @@ class DucaheatWSClient(_WSCommon):
         seen: set[int] = set()
         while stack:
             current = stack.pop()
-            if not isinstance(current, Mapping):
-                continue
             obj_id = id(current)
             if obj_id in seen:
                 continue
@@ -1286,12 +1237,6 @@ class DucaheatWSClient(_WSCommon):
 
         updates = super()._collect_sample_updates(nodes, allowed_types=allowed_types)
         for update in updates.values():
-            sample_lease = update["samples"].get("lease_seconds")
-            if sample_lease is not None:
-                self._apply_payload_window_hint(
-                    source="sample_section",
-                    lease_seconds=sample_lease,
-                )
             if update["lease_seconds"] is not None:
                 self._apply_payload_window_hint(
                     source="sample_updates",
@@ -1304,27 +1249,12 @@ class DucaheatWSClient(_WSCommon):
     ) -> None:
         """Mark payload freshness and relay sample updates to the energy coordinator."""
 
-        has_payload = False
-        for node_payload in updates.values():
-            if not isinstance(node_payload, Mapping):
-                continue
-            samples = node_payload.get("samples")
-            if isinstance(samples, Mapping) and any(samples):
-                has_payload = True
-                break
-            if node_payload.get("lease_seconds") is not None:
-                has_payload = True
-                break
-        if updates:
-            self._update_payload_window_from_mapping(
-                updates,
-                source="forward_samples",
-            )
-        if has_payload:
-            self._mark_ws_payload(
-                timestamp=time.time(),
-                stale_after=self._payload_stale_after,
-            )
+        # Every entry from ``_collect_sample_updates`` carries samples or a lease.
+        self._update_payload_window_from_mapping(updates, source="forward_samples")
+        self._mark_ws_payload(
+            timestamp=time.time(),
+            stale_after=self._payload_stale_after,
+        )
         super()._forward_sample_updates(updates)
 
     async def _subscribe_feeds(self, *, now: float | None = None) -> int:
@@ -1406,9 +1336,6 @@ class DucaheatWSClient(_WSCommon):
         if not self._pending_subscribe:
             self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
             return result
-        if result > 0 or self._subscription_paths:
-            self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
-            return result
 
         self._subscribe_backoff_s = min(
             max(self._subscribe_backoff_s * 1.5, _SUBSCRIBE_BACKOFF_INITIAL),
@@ -1480,5 +1407,6 @@ class DucaheatWSClient(_WSCommon):
                 reason=reason,
                 payload_changed=True,
             )
+
 
 __all__ = ["DucaheatWSClient"]

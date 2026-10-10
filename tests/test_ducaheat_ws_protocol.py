@@ -682,20 +682,6 @@ def test_decode_polling_packets_additional_paths(
     assert ducaheat_ws._decode_polling_packets(b"\x1f\x8bbad") == []
 
 
-def test_client_requires_session(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Constructing without an aiohttp session should fail."""
-
-    hass = SimpleNamespace(loop=asyncio.new_event_loop(), data={})
-    with pytest.raises(RuntimeError):
-        ducaheat_ws.DucaheatWSClient(
-            hass,
-            entry_id="entry",
-            dev_id="device",
-            api_client=SimpleNamespace(_session=None),  # type: ignore[arg-type]
-            coordinator=SimpleNamespace(),
-        )
-
-
 @pytest.mark.asyncio
 async def test_start_and_runner_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     """_runner should cycle through connect, read, and disconnect before stopping."""

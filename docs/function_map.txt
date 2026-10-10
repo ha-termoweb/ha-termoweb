@@ -425,9 +425,7 @@ custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._read_loop
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_event
     Process a Socket.IO 0.9 event payload.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_legacy_data_batch
-    Route legacy Socket.IO ``data`` batches to domain handlers.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._refresh_subscription
-    Replay subscription calls to keep the legacy websocket active.
+    Route each ``{"path", "body"}`` item of a ``data`` batch as an update.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._send_text
     Send a websocket text frame.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._disconnect

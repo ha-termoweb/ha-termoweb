@@ -821,7 +821,6 @@ async def test_termoweb_stop_cancels_background_tasks(
     client._idle_monitor_task = asyncio.create_task(asyncio.sleep(0))
     client._task = asyncio.create_task(asyncio.sleep(0))
     client._idle_restart_pending = True
-    client._subscription_refresh_failed = True
 
     await asyncio.sleep(0)
     await client.stop()
@@ -830,7 +829,6 @@ async def test_termoweb_stop_cancels_background_tasks(
     assert client._idle_monitor_task is None
     assert client._task is None
     assert client._idle_restart_pending is False
-    assert client._subscription_refresh_failed is False
     client._disconnect.assert_awaited()  # type: ignore[attr-defined]
 
 
