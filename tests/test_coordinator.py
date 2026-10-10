@@ -77,6 +77,31 @@ def test_resolve_boost_end_from_fields_variants(
     assert derived_minutes == 1500
 
 
+def test_node_ids_from_inventory_skips_unknown_types(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """Only known node types seed the domain state store."""
+
+    inventory = inventory_builder(
+        "dev",
+        {"nodes": [{"type": "htr", "addr": "1"}, {"type": "zzz", "addr": "2"}]},
+    )
+    coordinator = coord_module.StateCoordinator(
+        HomeAssistant(),
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        inventory=inventory,
+    )
+
+    assert coordinator._node_ids_from_inventory(inventory) == [
+        NodeId(NodeType.HEATER, "1")
+    ]
+
+
 def test_rtc_payload_to_datetime(monkeypatch: pytest.MonkeyPatch) -> None:
     """RTC payload helper should construct timezone-aware datetimes."""
 

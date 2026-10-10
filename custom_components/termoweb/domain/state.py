@@ -398,7 +398,7 @@ class DomainStateStore:
     def _resolve_node_id(self, node_type: NodeType | str, addr: Any) -> NodeId | None:
         """Return a canonical NodeId when permitted by the inventory."""
 
-        normalized_type = _normalize_node_type(node_type)
+        normalized_type = NodeType.coerce(node_type)
         if normalized_type is None:
             return None
 
@@ -547,21 +547,6 @@ class DomainStateStore:
             raise TypeError(msg)
 
         self._states[node_id] = state
-
-
-def _normalize_node_type(node_type: NodeType | str) -> NodeType | None:
-    """Return a canonical ``NodeType`` when possible."""
-
-    if isinstance(node_type, NodeType):
-        return node_type
-
-    try:
-        return NodeType(str(node_type))
-    except ValueError:
-        try:
-            return NodeType(str(node_type).lower())
-        except ValueError:
-            return None
 
 
 def _copy_state_field_value(value: Any) -> Any:

@@ -29,17 +29,13 @@ def _default_open() -> SerialOpen:
     return serial_asyncio_fast.open_serial_connection
 
 
-def serial_opener(
-    url: str, open_serial: SerialOpen | None = None
-) -> Callable[[str, int], Awaitable[StreamPair]]:
+def serial_opener(url: str) -> Callable[[str, int], Awaitable[StreamPair]]:
     """Return an ``open_connection(host, port)`` that opens serial ``url`` instead."""
 
     async def _open(_host: str, _port: int) -> StreamPair:
         """Open the serial port; RadioLink's host and port are only labels."""
         # The first import of pyserial reads many files: keep it off the loop.
-        opener = open_serial or await asyncio.get_running_loop().run_in_executor(
-            None, _default_open
-        )
+        opener = await asyncio.get_running_loop().run_in_executor(None, _default_open)
         return await opener(url=url, baudrate=BAUDRATE)
 
     return _open

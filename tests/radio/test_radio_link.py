@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fake_radio_link import build_ack
+
 import asyncio
 import logging
 
@@ -20,7 +22,6 @@ from custom_components.termoweb.backend.radio import link as link_mod, protocol 
 from custom_components.termoweb.backend.radio.dialect import (
     DIALECT_A,
     DIALECT_B,
-    build_ack,
     build_frame,
 )
 from custom_components.termoweb.backend.radio.link import (
@@ -362,10 +363,10 @@ async def test_frames_from_another_network_are_ignored() -> None:
         build_frame(DIALECT_B, HEATER, 1, b"\xb9\x21\x25\x2a\x02", network_id=foreign)
     )
     gw.responder = lambda air: [own_ack, foreign_reply]
-    reply = await link.request(
+    acked, reply = await link.request(
         HEATER, p.request_status(), p.reply_predicate(p.OP_STATUS)
     )
-    assert reply is None
+    assert acked and reply is None
     await link.close()
 
 
@@ -469,10 +470,10 @@ async def test_request_returns_matching_reply() -> None:
     """A status request returns the heater's B9 reply frame."""
     gw, ft, link = await connected()
     gw.responder = heater(DIALECT_B, HEATER, {p.OP_STATUS: bytes.fromhex("B921252A02")})
-    frame = await link.request(
+    acked, frame = await link.request(
         HEATER, p.request_status(), p.reply_predicate(p.OP_STATUS)
     )
-    assert frame is not None and frame.src == HEATER
+    assert acked and frame is not None and frame.src == HEATER
     assert p.decode_status(frame.payload).comfort_c == 21.0
     assert gw.transmitted() == [
         build_frame(DIALECT_B, 1, HEATER, b"\xb8", network_id=NET)
@@ -497,7 +498,7 @@ async def test_request_reply_before_ack_and_filtering() -> None:
         rx_line(reply),
         rx_line(build_ack(DIALECT_B, HEATER, 1, NET)),
     ]
-    frame = await link.request(
+    _acked, frame = await link.request(
         HEATER, p.request_program(), p.reply_predicate(p.OP_PROGRAM_READ, 43)
     )
     assert frame.air == reply
@@ -508,9 +509,11 @@ async def test_request_reply_before_ack_and_filtering() -> None:
 async def test_request_without_ack_or_reply() -> None:
     """No ack gives None without waiting for a reply; no reply times out to None."""
     gw, ft, link = await connected()
-    assert await link.request(HEATER, b"\xb8", lambda f: True, retries=1) is None
+    no_ack = await link.request(HEATER, b"\xb8", lambda f: True, retries=1)
+    assert no_ack == (False, None)
     gw.responder = heater(DIALECT_B, HEATER)
-    assert await link.request(HEATER, b"\xb8", lambda f: True, timeout=0.5) is None
+    no_reply = await link.request(HEATER, b"\xb8", lambda f: True, timeout=0.5)
+    assert no_reply == (True, None)
     assert 0.5 in ft.sleeps
     await link.close()
 

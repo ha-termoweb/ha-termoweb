@@ -1774,6 +1774,14 @@ def test_node_id_for_invalid_addr() -> None:
     assert EnergyStateCoordinator._node_id_for("htr", "") is None
 
 
+def test_node_id_for_is_case_insensitive() -> None:
+    """_node_id_for uses the shared case-insensitive node-type contract."""
+
+    node_id = EnergyStateCoordinator._node_id_for("HTR", "1")
+    assert node_id is not None
+    assert node_id.node_type is DomainNodeType.HEATER
+
+
 # ---------------------------------------------------------------------------
 # _prefill_energy_buckets from cached last (line 1335, 1344)
 # ---------------------------------------------------------------------------

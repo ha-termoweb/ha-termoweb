@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fake_radio_link import build_ack
+
 import pytest
 from radio_fakes import NET, FakeGateway, FakeTime, heater, rx_line
 
@@ -9,7 +11,6 @@ from custom_components.termoweb.backend.radio import discovery as d, protocol as
 from custom_components.termoweb.backend.radio.dialect import (
     DIALECT_A,
     DIALECT_B,
-    build_ack,
     build_frame,
 )
 from custom_components.termoweb.backend.radio.link import RadioLink

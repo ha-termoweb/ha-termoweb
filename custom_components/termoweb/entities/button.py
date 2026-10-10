@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from ..const import DOMAIN
 from ..domain import DomainStateView
+from ..domain.ids import HEATING_NODE_TYPES
 from ..domain.state import DomainState
 from ..identifiers import build_heater_unique_id
 from ..inventory import (
@@ -36,9 +37,6 @@ from .heater import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-_FLASHABLE_NODE_TYPES: tuple[str, ...] = ("htr", "acm")
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +67,7 @@ def _iter_display_flash_contexts(
 ) -> Iterator[DisplayFlashContext]:
     """Yield flash-button contexts for flash-capable inventory nodes."""
 
-    for metadata in inventory.iter_nodes_metadata(node_types=_FLASHABLE_NODE_TYPES):
+    for metadata in inventory.iter_nodes_metadata(node_types=HEATING_NODE_TYPES):
         node_type = normalize_node_type(
             metadata.node_type, use_default_when_falsey=True
         )

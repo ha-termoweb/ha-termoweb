@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 from conftest import _install_stubs
+from fake_radio_link import ProbeLink
 
 _install_stubs()
 
@@ -225,30 +226,16 @@ def test_parse_network_id() -> None:
             config_flow.parse_network_id(bad)
 
 
-class FakeLink:
-    """RadioLink stand-in that reports a configurable MAC."""
-
-    mac: str | None = "0A:0B:0C:0D:0E:0F"
-    created: list[dict[str, Any]] = []
-
-    def __init__(self, host, port, dialect, **kwargs) -> None:
-        FakeLink.created.append({"host": host, "port": port, **kwargs})
-
-    async def connect(self) -> GatewayInfo:
-        return GatewayInfo("3.6", "869.525", "2DE5", False, 1, FakeLink.mac, "")
-
-    async def close(self) -> None:
-        return None
-
-
 @pytest.mark.asyncio
 async def test_probe_gateway_listens_without_acking(monkeypatch) -> None:
-    monkeypatch.setattr(config_flow, "RadioLink", FakeLink)
-    monkeypatch.setattr(FakeLink, "created", [])
+    monkeypatch.setattr(config_flow, "RadioLink", ProbeLink)
+    monkeypatch.setattr(ProbeLink, "created", [])
     assert await config_flow.probe_gateway("gw", 2323) == DEV_ID
-    assert FakeLink.created[-1]["auto_ack"] is False
+    assert ProbeLink.created[-1]["auto_ack"] is False
 
-    monkeypatch.setattr(FakeLink, "mac", None)
+    monkeypatch.setattr(
+        ProbeLink, "info", dataclasses.replace(ProbeLink.info, mac=None)
+    )
     with pytest.raises(config_flow.RadioSetupError, match="no_gateway_mac"):
         await config_flow.probe_gateway("gw", 2323)
 

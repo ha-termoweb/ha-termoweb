@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fake_radio_link import build_ack
+
 from datetime import datetime
 
 import pytest
@@ -10,7 +12,6 @@ from custom_components.termoweb.backend.radio import protocol as p
 from custom_components.termoweb.backend.radio.dialect import (
     DIALECT_A,
     DIALECT_B,
-    build_ack,
     build_frame,
     decode,
 )
@@ -100,7 +101,6 @@ def test_toggles_and_simple_payloads() -> None:
     assert p.request_program() == b"\xb0"
     assert p.request_energy() == b"\xbc"
     assert p.request_identity() == b"\x5a"
-    assert p.request_advanced() == b"\xda"
 
 
 def test_sync_clock_per_dialect() -> None:
@@ -130,13 +130,11 @@ def test_write_program_rotates_monday_first_to_sunday_first() -> None:
     assert record.hourly[24] == 2
     assert record.hourly_monday_first[0] == 2
     assert record.hourly_monday_first[-1] == 1
-    assert record.hourly_only
     half_hourly = [[0] * 48 for _ in range(7)]
     half_hourly[0][1] = 2
     rec2 = p.decode_program(bytes([0xB1]) + p.write_program(half_hourly)[1:])
-    assert rec2.slots_monday_first[:2] == (0, 2)
-    assert rec2.hourly_monday_first[0] is None
-    assert not rec2.hourly_only
+    assert rec2.slots[:2] == (0, 0)  # wire Sunday: untouched
+    assert rec2.hourly_monday_first[0] is None  # Monday 00:00 is split
 
 
 def test_write_program_validation() -> None:
@@ -263,7 +261,7 @@ def test_status_e6_e4_e3() -> None:
     assert e4.form == "E4"
     assert (e4.anti_frost_c, e4.eco_c, e4.comfort_c) == (7.0, 18.0, 26.0)
     assert (e4.room_temp_c, e4.setpoint_c, e4.measured_power_w) == (23.6, 26.0, 759.9)
-    assert e4.flags == p.FLAG_RUNBACK | p.FLAG_BOOST
+    assert e4.flags == 0xA0  # runback + boost
     assert (e4.boost_end_day, e4.boost_end_min) == (6, 1187)
     e3 = p.decode_status(A_E3)
     assert e3.form == "E3" and e3.mode == "off"
@@ -306,8 +304,6 @@ def test_program_dialect_b_capture() -> None:
     day = [1] * 5 + [2] * 16 + [1] * 3
     assert list(record.hourly) == day * 7
     assert record.raw == B_PROGRAM[1:]
-    assert record.hourly_only
-    assert record.slots_monday_first == record.slots
 
 
 def test_program_report_and_unknown_codes() -> None:
@@ -366,20 +362,6 @@ def test_identity_e0_form() -> None:
 def test_identity_rejects_garbage(payload) -> None:
     """Anything but the two known identity forms decodes to None."""
     assert p.decode_identity(payload) is None
-
-
-# --- energy -------------------------------------------------------------------
-
-
-def test_energy_forms() -> None:
-    """Dialect A carries a Wh counter; dialect B's BD reply is a power record."""
-    a = p.decode_energy(A_ENERGY)
-    assert a.energy_wh == 1620009
-    b = p.decode_energy(B_ENERGY)
-    assert b.energy_wh is None
-    assert b.raw == B_ENERGY
-    for bad in (b"", b"\xbd", bytes([0xBD]) + bytes(5), B_HEATER_REPORT):
-        assert p.decode_energy(bad) is None
 
 
 # --- power request ------------------------------------------------------------

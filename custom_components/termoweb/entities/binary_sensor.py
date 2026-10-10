@@ -17,6 +17,7 @@ from custom_components.termoweb.boost import supports_boost
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import StateCoordinator
 from custom_components.termoweb.domain import DomainStateView, GatewayConnectionState
+from custom_components.termoweb.domain.ids import HEATER_NODE_TYPES
 from custom_components.termoweb.entities.heater import (
     BoostState,
     SettingsResolver,
@@ -26,7 +27,6 @@ from custom_components.termoweb.entities.heater import (
 )
 from custom_components.termoweb.identifiers import build_heater_unique_id
 from custom_components.termoweb.inventory import (
-    HEATER_NODE_TYPES,
     Inventory,
     normalize_node_addr,
     normalize_node_type,

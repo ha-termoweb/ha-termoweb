@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from typing import Any
 
 from custom_components.termoweb.backend.radio.dialect import (
+    ACK_FLAGS,
     DIALECT_B,
     Dialect,
-    build_ack,
     build_frame,
     decode,
+    encode,
 )
 from custom_components.termoweb.backend.radio.link import (
     AckResult,
@@ -34,6 +36,18 @@ POWER_REQUEST = bytes.fromhex("BEDA002CA9390B0100")
 POWER_RECORD_IDLE = bytes.fromhex("BDDC002C783A000000")  # BC reply: not heating
 POWER_RECORD_HEATING = bytes.fromhex("BDDB002CE43A0C0100")  # granted, heating
 CLOCK_ACCEPTED = bytes.fromhex("5355")
+
+
+def build_ack(
+    dialect: Dialect, acker: int, sender: int, network_id: bytes | None = None
+) -> bytes:
+    """Return on-air bytes for the ack ``acker`` sends for a frame from ``sender``.
+
+    The gateway firmware sends acks itself; tests use this to play the heater.
+    """
+
+    net = dialect.network_id if network_id is None else network_id
+    return encode(dialect, bytes(net) + bytes([acker, sender, ACK_FLAGS]))
 
 
 def gateway_info(
@@ -73,6 +87,24 @@ def received_ack(src: int, dst: int = STATION) -> ReceivedFrame:
     return ReceivedFrame(
         decode(DIALECT_B, build_ack(DIALECT_B, src, dst, NET)), -60.0, 0, 1
     )
+
+
+class ProbeLink:
+    """RadioLink stand-in for config-flow probes: records its arguments, returns ``info``."""
+
+    info = GatewayInfo("3.6", "869.525", "2DE5", False, 1, "0A:0B:0C:0D:0E:0F", "")
+    created: list[dict[str, Any]] = []
+
+    def __init__(self, host: str, port: int, dialect: Dialect, **kwargs: Any) -> None:
+        ProbeLink.created.append(
+            {"host": host, "port": port, "dialect": dialect, **kwargs}
+        )
+
+    async def connect(self) -> GatewayInfo:
+        return ProbeLink.info
+
+    async def close(self) -> None:
+        return None
 
 
 class FakeRadioLink:
@@ -200,6 +232,45 @@ class FakeRadioLink:
                 received(dst, payload, dialect=self.dialect, network_id=self.network_id)
             )
         return AckResult(True, 1, 100, received_ack(dst))
+
+    async def request(
+        self,
+        dst: int,
+        payload: bytes,
+        predicate: Callable[[Any], bool],
+        timeout: float = 0.3,
+        **_kwargs: Any,
+    ) -> tuple[bool, Any]:
+        """Like RadioLink.request: (acked, first matching reply from ``dst``)."""
+
+        future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+
+        def _on_frame(rx: ReceivedFrame) -> None:
+            frame = rx.frame
+            if (
+                not future.done()
+                and frame.ok
+                and not frame.is_ack
+                and frame.network_id == self.network_id
+                and frame.src == dst
+                and frame.dst == self.station_id
+                and predicate(frame)
+            ):
+                future.set_result(frame)
+
+        remove = self.add_listener(_on_frame)
+        try:
+            air = build_frame(
+                self.dialect, self.station_id, dst, payload, network_id=self.network_id
+            )
+            if not (await self.send_frame(dst, air)).ok:
+                return False, None
+            try:
+                return True, await asyncio.wait_for(future, timeout)
+            except TimeoutError:
+                return True, None
+        finally:
+            remove()
 
     async def set_network_id(self, network_id: bytes) -> None:
         self.network_id = bytes(network_id)

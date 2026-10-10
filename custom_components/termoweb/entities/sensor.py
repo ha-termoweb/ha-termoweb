@@ -24,6 +24,7 @@ from custom_components.termoweb.backend.factory import backend_capabilities
 from custom_components.termoweb.coerce import as_float, as_int, as_percentage
 from custom_components.termoweb.const import DOMAIN, signal_radio_frames
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
+from custom_components.termoweb.domain.ids import HEATING_NODE_TYPES
 from custom_components.termoweb.domain.view import DomainStateView
 from custom_components.termoweb.entities.heater import (
     HeaterNodeBase,
@@ -53,9 +54,6 @@ from custom_components.termoweb.utils import (
 )
 
 _WH_TO_KWH = 1 / 1000.0
-# Node types summed by the installation total (thermostats meter no energy).
-_TOTAL_ENERGY_NODE_TYPES = frozenset({"htr", "acm"})
-
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -1115,7 +1113,8 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
         total = 0.0
         found = False
         for node_type, addrs in self._details.addrs_by_type.items():
-            if node_type not in _TOTAL_ENERGY_NODE_TYPES:
+            # The installation total sums heating nodes; thermostats meter no energy.
+            if node_type not in HEATING_NODE_TYPES:
                 continue
             metrics_by_addr = view.get_energy_metrics_for_type(node_type)
             for addr in addrs:

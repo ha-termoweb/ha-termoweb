@@ -62,8 +62,12 @@ This map defines responsibilities for each module family in the final design.
 - `runtime.py` — `EntryRuntime` definition, `require_runtime(...)` accessor, and
   runtime invariants (single instance per entry).
 - `inventory.py` — immutable inventory models and lookup helpers.
+  `normalize_node_type` is the string form (stripped, lowercased, any value).
 - `domain/` — domain dataclasses, deltas, `DomainStateStore` (including energy
-  snapshots), and `DomainStateView`.
+  snapshots), and `DomainStateView`. `domain/ids.py` owns `NodeType`, the
+  node-type groups (`HEATER_NODE_TYPES`, `HEATING_NODE_TYPES`,
+  `ENERGY_NODE_TYPES`) and `NodeType.coerce` (case-insensitive, `None` for
+  unknown types); `NodeType(value)` is the strict, raising form.
 - `backend/` — vendor-specific REST/WS clients (including the REST client
   implementation), protocol details, and brand selection.
 - `coerce.py` — the only lenient value coercers (`as_float`, `as_number`,

@@ -28,20 +28,6 @@ from custom_components.termoweb.backend.radio_client import (
 
 
 @pytest.mark.asyncio
-async def test_serial_opener_passes_url_and_baudrate() -> None:
-    """RadioLink's host/port are ignored; the opener opens the serial URL."""
-    calls: list[dict] = []
-
-    async def fake_open(**kwargs):
-        calls.append(kwargs)
-        return "reader", "writer"
-
-    opener = serial_opener("/dev/ttyUSB0", open_serial=fake_open)
-    assert await opener("label", 0) == ("reader", "writer")
-    assert calls == [{"url": "/dev/ttyUSB0", "baudrate": BAUDRATE}]
-
-
-@pytest.mark.asyncio
 async def test_serial_opener_uses_pyserial_asyncio_fast(monkeypatch) -> None:
     """Without an injected opener the pyserial-asyncio-fast one is imported lazily."""
     calls: list[dict] = []
@@ -54,7 +40,7 @@ async def test_serial_opener_uses_pyserial_asyncio_fast(monkeypatch) -> None:
     module.open_serial_connection = open_serial_connection
     monkeypatch.setitem(sys.modules, "serial_asyncio_fast", module)
     assert await serial_opener("socket://gw:2323")("x", 0) == ("r", "w")
-    assert calls == [{"url": "socket://gw:2323", "baudrate": 115200}]
+    assert calls == [{"url": "socket://gw:2323", "baudrate": BAUDRATE}]
 
 
 def test_serial_device_id() -> None:
