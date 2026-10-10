@@ -767,6 +767,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             if self.hvac_mode in self._resume_modes:
                 self._resume_mode = self.hvac_mode
             self._pending_mode = HVACMode.OFF
+            # The latest choice wins: drop a setpoint still waiting in the batch.
+            self._pending_stemp = None
             _LOGGER.debug(
                 "Queue write: addr=%s mode=%s (batching %.1fs)",
                 self._addr,
@@ -778,6 +780,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
         if hvac_mode_norm == HVACMode.AUTO:
             self._pending_mode = HVACMode.AUTO
+            self._pending_stemp = None
             _LOGGER.debug(
                 "Queue write: addr=%s mode=%s (batching %.1fs)",
                 self._addr,
