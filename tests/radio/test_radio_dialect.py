@@ -8,7 +8,6 @@ from custom_components.termoweb.backend.radio import dialect as d
 from custom_components.termoweb.backend.radio.dialect import (
     DIALECT_A,
     DIALECT_B,
-    build_ack,
     build_frame,
     decode,
     detect_dialect,
@@ -81,14 +80,14 @@ def test_dialect_b_ack() -> None:
     assert frame.ok and frame.is_ack
     assert (frame.src, frame.dst, frame.flags) == (0x01, 0x06, 0x80)
     assert frame.path is None and frame.tag is None and frame.payload == b""
-    assert build_ack(DIALECT_B, 0x01, 0x06, NET) == B_ACK
+    assert encode(DIALECT_B, NET + bytes([0x01, 0x06, 0x80])) == B_ACK
 
 
 def test_dialect_a_worked_frames() -> None:
     """Dialect-A builders reproduce the proven worked frames."""
     assert build_frame(DIALECT_A, 0x01, 0x04, bytes([0xB4, 0x02, 0x33])) == A_SETPOINT
     assert build_frame(DIALECT_A, 0x01, 0x04, bytes([0xB4, 0x04])) == A_MODE_OFF
-    assert build_ack(DIALECT_A, 0x04, 0x01) == A_ACK
+    assert encode(DIALECT_A, DIALECT_A.network_id + bytes([0x04, 0x01, 0x80])) == A_ACK
     relay = decode(DIALECT_A, A_RELAY_PROBE)
     assert relay.ok and relay.tag == 0x06 and relay.path == bytes([4, 2, 1, 1, 1])
     assert (
@@ -194,12 +193,8 @@ def test_builder_validation() -> None:
         build_frame(DIALECT_B, 1, 6, b"", path=(1, 6), network_id=NET)
     with pytest.raises(ValueError, match="two bytes"):
         build_frame(DIALECT_B, 1, 6, b"", network_id=b"\x01")
-    with pytest.raises(ValueError, match="two bytes"):
-        build_ack(DIALECT_A, 1, 6, network_id=b"\x01\x02\x03")
     with pytest.raises(ValueError, match="explicit network_id"):
         build_frame(DIALECT_B, 1, 6, b"")
-    with pytest.raises(ValueError, match="explicit network_id"):
-        build_ack(DIALECT_B, 1, 6)
     with pytest.raises(ValueError, match="does not fit"):
         encode(DIALECT_B, bytes(253))
     with pytest.raises(ValueError, match="does not fit"):

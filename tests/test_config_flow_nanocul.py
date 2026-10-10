@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 from conftest import _install_stubs
+from fake_radio_link import ProbeLink
 
 _install_stubs()
 
@@ -158,34 +159,21 @@ async def test_discovery_failure_returns_to_the_manual_form(stick) -> None:
     assert result["errors"] == {"base": "cannot_connect_nanocul"}
 
 
-class FakeLink:
-    """RadioLink stand-in recording its arguments and returning a set Q status."""
-
-    info = GatewayInfo("3.5", "869.525", "2DE5", False, 1, None, "")
-    created: list[dict[str, Any]] = []
-
-    def __init__(self, host, port, dialect, **kwargs) -> None:
-        FakeLink.created.append({"host": host, "dialect": dialect, **kwargs})
-
-    async def connect(self) -> GatewayInfo:
-        return FakeLink.info
-
-    async def close(self) -> None:
-        return None
-
-
 @pytest.mark.asyncio
 async def test_probe_nanocul(monkeypatch) -> None:
-    monkeypatch.setattr(config_flow, "RadioLink", FakeLink)
-    monkeypatch.setattr(FakeLink, "created", [])
+    monkeypatch.setattr(config_flow, "RadioLink", ProbeLink)
+    monkeypatch.setattr(ProbeLink, "created", [])
+    monkeypatch.setattr(
+        ProbeLink, "info", GatewayInfo("3.5", "869.525", "2DE5", False, 1, None, "")
+    )
     dev_id, capable = await config_flow.probe_nanocul("/dev/ttyUSB0", "A1B2C3")
     assert (dev_id, capable) == ("nanocul-a1b2c3", False)
-    made = FakeLink.created[-1]
+    made = ProbeLink.created[-1]
     assert made["auto_ack"] is False and made["dialect"] is DIALECT_A
     assert callable(made["open_connection"])
 
     monkeypatch.setattr(
-        FakeLink,
+        ProbeLink,
         "info",
         GatewayInfo("3.6", "869.525", "2DE5", True, 1, "0A:0B:0C:0D:0E:0F", "", "A"),
     )

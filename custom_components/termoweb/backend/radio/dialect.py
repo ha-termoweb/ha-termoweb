@@ -216,14 +216,6 @@ def build_frame(
     return encode(dialect, body)
 
 
-def build_ack(
-    dialect: Dialect, acker: int, sender: int, network_id: bytes | None = None
-) -> bytes:
-    """Return on-air bytes for the ack ``acker`` sends for a frame from ``sender``."""
-    net = _network_id(dialect, network_id)
-    return encode(dialect, net + bytes([acker, sender, ACK_FLAGS]))
-
-
 def _network_id(dialect: Dialect, network_id: bytes | None) -> bytes:
     """Return a validated two-byte network id, defaulting to the dialect's own."""
     net = dialect.network_id if network_id is None else bytes(network_id)

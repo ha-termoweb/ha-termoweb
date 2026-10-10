@@ -84,10 +84,6 @@ class CrcSpec:
         """Return the CRC value for a register state."""
         return register ^ self.xorout
 
-    def compute(self, data: bytes) -> int:
-        """Return the CRC of ``data``."""
-        return self.finish(self.register_after(data)[-1])
-
 
 def _reflect16(value: int) -> int:
     """Return ``value`` with its 16 bits in reverse order."""
@@ -204,12 +200,6 @@ def find_preambles(runs: Sequence[tuple[int, int]]) -> list[Preamble]:
     return [_preamble(runs, start, end) for start, end in found]
 
 
-def find_preamble(runs: Sequence[tuple[int, int]]) -> Preamble | None:
-    """Return the longest preamble-like stretch, or None."""
-    preambles = find_preambles(runs)
-    return preambles[0] if preambles else None
-
-
 def _preamble(runs: Sequence[tuple[int, int]], start: int, end: int) -> Preamble:
     """Return the timing a preamble window implies."""
     window = runs[start:end]
@@ -221,31 +211,6 @@ def _preamble(runs: Sequence[tuple[int, int]], start: int, end: int) -> Preamble
         end=end,
         bit_us=median(pairs) / 2,
         bias_us=(median(highs) - median(lows)) / 2,
-    )
-
-
-def runs_to_bits(runs: Sequence[tuple[int, int]], preamble: Preamble) -> str:
-    """Return the bits from the preamble on, stopping at the first idle gap.
-
-    The preamble alone gives the bit period to about 2 %, too coarse for long
-    runs of equal bits, so the period is refined once over the whole frame.
-    """
-    frame: list[tuple[int, float]] = []
-    for level, micros in runs[preamble.start :]:
-        corrected = micros - preamble.bias_us if level else micros + preamble.bias_us
-        if corrected / preamble.bit_us > MAX_RUN_BITS + 0.5:
-            break
-        frame.append((level, corrected))
-    counts = [round(corrected / preamble.bit_us) for _level, corrected in frame]
-    total_bits = sum(counts)
-    bit_us = (
-        sum(corrected for _level, corrected in frame) / total_bits
-        if total_bits
-        else preamble.bit_us
-    )
-    return "".join(
-        ("1" if level else "0") * round(corrected / bit_us)
-        for level, corrected in frame
     )
 
 
@@ -384,14 +349,6 @@ def _invert(bits: str) -> str:
 def _sync_bits(sync: bytes) -> str:
     """Return a sync word as a bit string."""
     return "".join(f"{byte:08b}" for byte in sync)
-
-
-def preamble_break(bits: str) -> int:
-    """Return the index of the first bit equal to its predecessor (preamble end)."""
-    for index in range(1, len(bits)):
-        if bits[index] == bits[index - 1]:
-            return index
-    return len(bits)
 
 
 # --- decoding -------------------------------------------------------------------
@@ -766,14 +723,11 @@ __all__ = [
     "bit_preamble",
     "bits_to_bytes",
     "deglitch",
-    "find_preamble",
     "find_preambles",
     "merge_runs",
     "parse_run_tokens",
-    "preamble_break",
     "preamble_end",
     "redact",
     "refine_period",
-    "runs_to_bits",
     "slice_bits",
 ]

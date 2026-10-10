@@ -34,7 +34,7 @@ def make_backend():
 
 
 def test_create_radio_client_helper() -> None:
-    """The factory helper builds a lazily connecting client for PR 4's setup."""
+    """The factory helper builds a lazily connecting client."""
 
     client = _mod("").create_radio_client("10.0.0.5", 2323, "A", NODES, None)
     assert isinstance(client, _mod(".radio_client").RadioClient)

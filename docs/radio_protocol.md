@@ -59,7 +59,7 @@ bit-reverse of the table in TI DN509. Because the first keystream byte is
 ### Dialect B network id
 
 Each dialect-B installation has its own two-byte network id. There is no
-shared default, so the code never assumes one: `build_frame`, `build_ack` and
+shared default, so the code never assumes one: `build_frame` and
 `RadioLink` raise `ValueError` for dialect B unless a network id is passed.
 Learn the id from the heater's own traffic: every frame carries it in logical
 bytes 1-2, for example the registration and power-request frames a heater

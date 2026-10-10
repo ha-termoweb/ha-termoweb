@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fake_radio_link import build_ack
+
 from datetime import UTC, datetime, timedelta, timezone
 
 from radio_fakes import NET
@@ -10,7 +12,6 @@ from custom_components.termoweb.backend.radio import capture, protocol as p
 from custom_components.termoweb.backend.radio.dialect import (
     DIALECT_A,
     DIALECT_B,
-    build_ack,
     build_frame,
     decode,
     encode,
