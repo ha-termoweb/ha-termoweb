@@ -877,35 +877,6 @@ async def test_handshake_cache_resets_on_reconnect(
     assert len(refreshed_state) == baseline_len
 
 
-def test_forward_sample_updates_invokes_handler(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Sample update forwarding should call the energy coordinator hook."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    handler = MagicMock()
-    client.hass.data[module.DOMAIN]["entry"]["energy_coordinator"] = SimpleNamespace(
-        handle_ws_samples=handler
-    )
-    client._forward_sample_updates(
-        {"htr": {"samples": {"1": {"power": 10}}, "lease_seconds": 30}}
-    )
-    handler.assert_called_once()
-    assert handler.call_args.kwargs.get("lease_seconds") == 30
-
-
-def test_forward_sample_updates_handles_missing_handler(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Sample update forwarding should safely no-op when no handler exists."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    client.hass.data = {}
-    client._forward_sample_updates({"htr": {"samples": {"1": {}}}})
-    client.hass.data = {module.DOMAIN: {"entry": {}}}
-    client._forward_sample_updates({"htr": {"samples": {"1": {}}}})
-
-
 def test_apply_nodes_payload_debug_branches(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -1353,9 +1324,12 @@ def test_forward_sample_updates_invokes_handler(
         "custom_components.termoweb.runtime"
     ).require_runtime(client.hass, "entry")
     runtime.energy_coordinator = energy_handler
-    client._forward_sample_updates({"htr": {"samples": {"1": {"temp": 20}}}})
+    client._forward_sample_updates(
+        {"htr": {"samples": {"1": {"temp": 20}}, "lease_seconds": 30}}
+    )
     assert handler_called["dev_id"] == "device"
     assert handler_called["payload"]["htr"]["1"]["temp"] == 20
+    assert handler_called["lease"] == 30
 
 
 def test_extract_nodes_variants(monkeypatch: pytest.MonkeyPatch) -> None:

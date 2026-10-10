@@ -352,8 +352,12 @@ async def test_frames_without_usable_content() -> None:
 async def test_frame_before_connect_is_ignored() -> None:
     """A frame can only be handled once the client has a link."""
 
-    listener, *_ = build()
+    listener, client, links, coordinator, *_ = build()
     listener._on_frame(received(HEATER, REGISTRATION))  # noqa: SLF001
+
+    assert client.link is None
+    assert links == []
+    assert coordinator.deltas == []
 
 
 @pytest.mark.asyncio

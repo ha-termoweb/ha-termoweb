@@ -6,7 +6,7 @@ import datetime as dt
 from aiohttp import ClientError
 import logging
 from typing import Any, Callable, Iterable, Mapping
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -968,9 +968,11 @@ def test_apply_energy_snapshot_rejects_non_snapshot(
         device=build_device_metadata_payload("dev"),
         inventory=inventory,
     )
-    # Should not raise
+    coordinator.async_set_updated_data = MagicMock()
     coordinator.apply_energy_snapshot("not-a-snapshot")  # type: ignore[arg-type]
     coordinator.apply_energy_snapshot(None)  # type: ignore[arg-type]
+    assert coordinator.domain_view.get_energy_snapshot() is None
+    coordinator.async_set_updated_data.assert_not_called()
 
 
 def test_apply_energy_snapshot_wrong_dev_id(
@@ -992,8 +994,11 @@ def test_apply_energy_snapshot_wrong_dev_id(
         device=build_device_metadata_payload("dev"),
         inventory=inventory,
     )
+    coordinator.async_set_updated_data = MagicMock()
     snapshot = EnergySnapshot(dev_id="other", metrics={}, updated_at=1.0, ws_deadline=None)
     coordinator.apply_energy_snapshot(snapshot)
+    assert coordinator.domain_view.get_energy_snapshot() is None
+    coordinator.async_set_updated_data.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1253,8 +1258,15 @@ def test_handle_ws_deltas_wrong_dev_id(
         device=build_device_metadata_payload("dev"),
         inventory=inventory,
     )
-    coordinator.handle_ws_deltas("other", [])
-    # No error means it returned early
+    coordinator.async_set_updated_data = MagicMock()
+    delta = NodeSettingsDelta(
+        node_id=NodeId(NodeType.HEATER, "1"),
+        changes={"mode": "manual"},
+    )
+    coordinator.handle_ws_deltas("other", [delta])
+    state = _state_payload(coordinator, "htr", "1")
+    assert state is None or state.get("mode") != "manual"
+    coordinator.async_set_updated_data.assert_not_called()
 
 
 def test_handle_ws_deltas_skips_non_settings_delta(
@@ -1274,8 +1286,9 @@ def test_handle_ws_deltas_skips_non_settings_delta(
         device=build_device_metadata_payload("dev"),
         inventory=inventory,
     )
-    # Should not raise and should not publish (no applied deltas)
+    coordinator.async_set_updated_data = MagicMock()
     coordinator.handle_ws_deltas("dev", ["not-a-delta"])  # type: ignore[list-item]
+    coordinator.async_set_updated_data.assert_not_called()
 
 
 def test_handle_ws_deltas_replace_mode(

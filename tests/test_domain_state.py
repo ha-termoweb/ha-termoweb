@@ -407,6 +407,8 @@ def test_store_apply_delta_unknown_node_skips() -> None:
         changes={"mode": "auto"},
     )
     store.apply_delta(delta)
+    assert store.get_state("htr", "99") is None
+    assert store.get_state("htr", "1") is None
 
 
 def test_store_get_state_unknown_type() -> None:

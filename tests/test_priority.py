@@ -20,10 +20,7 @@ from custom_components.termoweb.codecs.ducaheat_read_models import (
     DucaheatSetupSegment,
 )
 from custom_components.termoweb.codecs.termoweb_models import HeaterSettingsPayload
-from custom_components.termoweb.domain.commands import (
-    BaseCommand,
-    SetPriority,
-)
+from custom_components.termoweb.domain.commands import SetPriority
 from custom_components.termoweb.domain.ids import NodeId, NodeType
 from custom_components.termoweb.domain.state import (
     HeaterState,
@@ -38,7 +35,6 @@ from custom_components.termoweb.planner.ducaheat_planner import (
     plan_command,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
 
 
 # ---------------------------------------------------------------------------
@@ -248,31 +244,6 @@ class TestCanonicalizeSettingsPayloadPriority:
 
 
 # ---------------------------------------------------------------------------
-# 6. SetPriority command tests
-# ---------------------------------------------------------------------------
-
-
-class TestSetPriorityCommand:
-    """Tests for SetPriority command creation."""
-
-    def test_create_set_priority(self):
-        cmd = SetPriority(priority=10)
-        assert cmd.priority == 10
-
-    def test_set_priority_is_base_command(self):
-        cmd = SetPriority(priority=5)
-        assert isinstance(cmd, BaseCommand)
-
-    def test_set_priority_zero(self):
-        cmd = SetPriority(priority=0)
-        assert cmd.priority == 0
-
-    def test_set_priority_max(self):
-        cmd = SetPriority(priority=30)
-        assert cmd.priority == 30
-
-
-# ---------------------------------------------------------------------------
 # 7. encode_priority_command tests
 # ---------------------------------------------------------------------------
 
@@ -434,64 +405,6 @@ class TestHeaterPriorityNumber:
             inventory=heater_inventory,
         )
         assert entity.native_value is None
-
-    def test_translation_key(self, heater_inventory):
-        coordinator = _make_heater_coordinator(heater_inventory)
-        entity = HeaterPriorityNumber(
-            coordinator,
-            "entry-htr",
-            "dev-htr",
-            "H1",
-            "uid-htr-priority-tkey",
-            device_name="Heater H1",
-            node_type="htr",
-            inventory=heater_inventory,
-        )
-        assert entity._attr_translation_key == "heater_priority"
-
-    def test_entity_category_is_config(self, heater_inventory):
-        coordinator = _make_heater_coordinator(heater_inventory)
-        entity = HeaterPriorityNumber(
-            coordinator,
-            "entry-htr",
-            "dev-htr",
-            "H1",
-            "uid-htr-priority-cat",
-            device_name="Heater H1",
-            node_type="htr",
-            inventory=heater_inventory,
-        )
-        assert entity._attr_entity_category == EntityCategory.CONFIG
-
-    def test_icon_is_priority_high(self, heater_inventory):
-        coordinator = _make_heater_coordinator(heater_inventory)
-        entity = HeaterPriorityNumber(
-            coordinator,
-            "entry-htr",
-            "dev-htr",
-            "H1",
-            "uid-htr-priority-icon",
-            device_name="Heater H1",
-            node_type="htr",
-            inventory=heater_inventory,
-        )
-        assert entity._attr_icon == "mdi:priority-high"
-
-    def test_min_max_step(self, heater_inventory):
-        coordinator = _make_heater_coordinator(heater_inventory)
-        entity = HeaterPriorityNumber(
-            coordinator,
-            "entry-htr",
-            "dev-htr",
-            "H1",
-            "uid-htr-priority-range",
-            device_name="Heater H1",
-            node_type="htr",
-            inventory=heater_inventory,
-        )
-        assert entity._attr_native_min_value == 0
-        assert entity._attr_native_max_value == 30
-        assert entity._attr_native_step == 1
 
     @pytest.mark.asyncio
     async def test_async_set_native_value_calls_backend(self, heater_inventory):

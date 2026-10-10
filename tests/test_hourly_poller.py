@@ -214,9 +214,15 @@ async def test_hourly_poller_shutdown_idempotent(inventory_from_map) -> None:
     backend = AsyncMock()
     coordinator = AsyncMock()
     poller = HourlySamplesPoller(hass, coordinator, backend, inventory)
+    remove_listener = MagicMock()
+    poller._remove_listener = remove_listener
 
     await poller.async_shutdown()
     await poller.async_shutdown()  # idempotent
+
+    remove_listener.assert_called_once_with()
+    assert poller._remove_listener is None
+    assert poller._active_task is None
 
 
 @pytest.mark.asyncio

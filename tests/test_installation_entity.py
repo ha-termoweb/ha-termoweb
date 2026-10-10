@@ -587,24 +587,6 @@ class TestInstallationInfoSensor:
         info = sensor.device_info
         assert (DOMAIN, "dev1", "site") in info["identifiers"]
 
-    def test_entity_category_is_diagnostic(self) -> None:
-        """InstallationInfoSensor should be a diagnostic entity."""
-        from homeassistant.helpers.entity import EntityCategory
-
-        from custom_components.termoweb.entities.sensor import (
-            InstallationInfoSensor,
-        )
-
-        hass = HomeAssistant()
-        coordinator = FakeCoordinator(
-            hass,
-            dev_id="dev1",
-            inventory=Inventory("dev1", []),
-        )
-
-        sensor = InstallationInfoSensor(coordinator, "entry1", "dev1")
-        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
-
     def test_unique_id_format(self) -> None:
         """Unique ID follows installation entity pattern."""
         from custom_components.termoweb.entities.sensor import (

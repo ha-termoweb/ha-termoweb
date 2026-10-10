@@ -1551,20 +1551,6 @@ def test_collect_sample_updates_updates_payload_window(
     assert state["payload_window_source"] == "sample_updates"
 
 
-def test_forward_sample_updates_handles_guard_paths(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Guard clauses in the sample forwarder should short-circuit cleanly."""
-
-    client = _make_client(monkeypatch)
-    client.hass.data = {}
-    client._forward_sample_updates({"htr": {"samples": {"1": {"power": 1}}}})
-
-    client = _make_client(monkeypatch)
-    client.hass.data[DOMAIN]["entry"].energy_coordinator = object()
-    client._forward_sample_updates({"htr": {"samples": {"1": {"power": 1}}}})
-
-
 def test_forward_sample_updates_handles_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1572,12 +1558,16 @@ def test_forward_sample_updates_handles_exception(
 
     client = _make_client(monkeypatch)
 
+    calls: list[Any] = []
+
     class FailingCoordinator:
-        def handle_ws_samples(self, *_: Any, **__: Any) -> None:
+        def handle_ws_samples(self, *args: Any, **__: Any) -> None:
+            calls.append(args)
             raise RuntimeError
 
     client.hass.data[DOMAIN]["entry"].energy_coordinator = FailingCoordinator()
     client._forward_sample_updates({"htr": {"samples": {"1": {"power": 1}}}})
+    assert calls == [("device", {"htr": {"1": {"power": 1}}})]
 
 
 @pytest.mark.asyncio
@@ -1688,8 +1678,11 @@ async def test_read_loop_returns_when_websocket_missing(
 
     client = _make_client(monkeypatch)
     client._ws = None
+    client._maybe_subscribe = AsyncMock()
 
     await _run_read_loop(client)
+
+    client._maybe_subscribe.assert_not_awaited()
 
 
 @pytest.mark.asyncio

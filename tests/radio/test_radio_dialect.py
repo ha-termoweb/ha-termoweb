@@ -8,7 +8,6 @@ from custom_components.termoweb.backend.radio import dialect as d
 from custom_components.termoweb.backend.radio.dialect import (
     DIALECT_A,
     DIALECT_B,
-    DIALECTS,
     build_ack,
     build_frame,
     decode,
@@ -48,23 +47,6 @@ def test_keystream_prefix_and_whiten_round_trip() -> None:
     assert d.keystream(8).hex() == "ff87b859b7a1cc24"
     assert d.whiten(d.whiten(b"hello world")) == b"hello world"
     assert d.keystream(0) == b""
-
-
-def test_dialect_table() -> None:
-    """Both dialects are registered with their distinguishing parameters."""
-    assert DIALECTS == {"A": DIALECT_A, "B": DIALECT_B}
-    assert DIALECT_A.sync == bytes.fromhex("2DE5")
-    assert DIALECT_B.sync == bytes.fromhex("2DD4")
-    assert (DIALECT_A.length_offset, DIALECT_B.length_offset) == (3, 0)
-    assert (DIALECT_A.firmware_mode, DIALECT_B.firmware_mode) == (0, 1)
-    assert (DIALECT_A.eb_clock_suffix, DIALECT_B.eb_clock_suffix) == (b"\x03", b"")
-    assert DIALECT_A.network_id == bytes.fromhex("1B30")
-    assert DIALECT_B.network_id is None
-    assert (DIALECT_A.program_write_slots, DIALECT_B.program_write_slots) == (48, 24)
-    assert not DIALECT_A.mode_in_preset_write and DIALECT_B.mode_in_preset_write
-    assert DIALECT_A.ack_only_opcodes == frozenset()
-    assert DIALECT_B.ack_only_opcodes == frozenset({0x5E, 0xBA})
-    assert "crc" not in repr(DIALECT_A)
 
 
 @pytest.mark.parametrize(

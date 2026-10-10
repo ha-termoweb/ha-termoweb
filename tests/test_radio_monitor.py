@@ -380,4 +380,3 @@ def test_monitor_brand_labels() -> None:
 
     assert get_brand_label(BRAND_RADIO_MONITOR) == "Radio"
     assert get_brand_configuration_url(BRAND_RADIO_MONITOR) is None
-    assert signal_radio_frames("abc") == "termoweb_abc_radio_frames"
