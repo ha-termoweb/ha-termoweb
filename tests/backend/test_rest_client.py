@@ -29,7 +29,7 @@ from custom_components.termoweb.const import (
     get_brand_user_agent,
 )
 from custom_components.termoweb.domain.state import GeoData
-from custom_components.termoweb.inventory import AccumulatorNode
+from custom_components.termoweb.nodes import AccumulatorNode
 from tests.fakes.rest import FakeSession, LatchedResponse, MockResponse
 
 

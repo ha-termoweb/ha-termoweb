@@ -50,7 +50,7 @@ from custom_components.termoweb.domain.commands import (
     StopBoost,
 )
 from custom_components.termoweb.domain.state import GeoData
-from custom_components.termoweb.inventory import (
+from custom_components.termoweb.nodes import (
     Node,
     NodeDescriptor,
     normalize_node_addr,

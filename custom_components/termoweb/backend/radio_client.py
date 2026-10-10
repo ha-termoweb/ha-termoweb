@@ -24,7 +24,7 @@ from custom_components.termoweb.codecs.radio_codec import (
     settings_from_status,
 )
 from custom_components.termoweb.domain.commands import SetLock
-from custom_components.termoweb.inventory import (
+from custom_components.termoweb.nodes import (
     NodeDescriptor,
     normalize_node_addr,
     normalize_node_type,

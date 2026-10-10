@@ -26,7 +26,8 @@ from .entity import (
     resolve_boost_runtime_minutes,
 )
 from .identifiers import build_gateway_entity_unique_id, build_heater_unique_id
-from .inventory import AccumulatorNode, Inventory
+from .inventory import Inventory
+from .nodes import AccumulatorNode
 from .runtime import require_runtime
 from .utils import build_gateway_device_info, build_node_device_info
 

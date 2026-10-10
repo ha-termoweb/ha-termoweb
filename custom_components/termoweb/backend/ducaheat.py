@@ -47,7 +47,8 @@ from custom_components.termoweb.domain.commands import (
     StopBoost,
 )
 from custom_components.termoweb.domain.ids import NodeId, NodeType
-from custom_components.termoweb.inventory import Inventory, NodeDescriptor
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import NodeDescriptor
 from custom_components.termoweb.planner.ducaheat_planner import plan_command
 
 _LOGGER = logging.getLogger(__name__)

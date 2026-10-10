@@ -18,7 +18,8 @@ from custom_components.termoweb.coordinator import (
 from custom_components.termoweb.coordinator.energy import EnergyStateCoordinator
 from custom_components.termoweb.coordinator.state import StateCoordinator
 from custom_components.termoweb.domain.state import state_to_dict
-from custom_components.termoweb.inventory import Inventory, build_node_inventory
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import build_node_inventory
 from tests.fakes.cloud import DEV_ID
 
 

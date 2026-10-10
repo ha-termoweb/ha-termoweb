@@ -1616,12 +1616,6 @@ custom_components/termoweb/inventory.py :: Inventory.sample_alias_map._merge_ali
     Insert a normalised alias pair into ``alias_map``.
 custom_components/termoweb/inventory.py :: Inventory.heater_names_by_type
     Return heater names by type, using ``default_factory`` for unnamed nodes.
-custom_components/termoweb/inventory.py :: _normalize_node_identifier
-    Return ``value`` as a normalised node identifier string.
-custom_components/termoweb/inventory.py :: normalize_node_type
-    Return ``value`` as a normalised node type string.
-custom_components/termoweb/inventory.py :: normalize_node_addr
-    Return ``value`` as a normalised node address string; ``None`` is invalid.
 custom_components/termoweb/inventory.py :: addresses_by_node_type
     Return mapping of node type to address list, tracking unknown types.
 custom_components/termoweb/inventory.py :: build_heater_address_map
@@ -1636,33 +1630,39 @@ custom_components/termoweb/inventory.py :: heater_sample_subscription_targets
     Return canonical heater sample subscription target pairs.
 custom_components/termoweb/inventory.py :: power_monitor_sample_subscription_targets
     Return canonical power monitor sample subscription target pairs.
-custom_components/termoweb/inventory.py :: Node.__init__
+custom_components/termoweb/nodes.py :: _normalize_node_identifier
+    Return ``value`` as a normalised node identifier string.
+custom_components/termoweb/nodes.py :: normalize_node_type
+    Return ``value`` as a normalised node type string.
+custom_components/termoweb/nodes.py :: normalize_node_addr
+    Return ``value`` as a normalised node address string; ``None`` is invalid.
+custom_components/termoweb/nodes.py :: Node.__init__
     Initialise a node with normalised metadata.
-custom_components/termoweb/inventory.py :: Node.name
+custom_components/termoweb/nodes.py :: Node.name
     Return the friendly name for the node.
-custom_components/termoweb/inventory.py :: Node.name
+custom_components/termoweb/nodes.py :: Node.name
     Update the stored friendly name for the node.
-custom_components/termoweb/inventory.py :: Node.as_dict
+custom_components/termoweb/nodes.py :: Node.as_dict
     Return a serialisable snapshot of core node metadata.
-custom_components/termoweb/inventory.py :: HeaterNode.__init__
+custom_components/termoweb/nodes.py :: HeaterNode.__init__
     Initialise a heater node.
-custom_components/termoweb/inventory.py :: HeaterNode.supports_boost
+custom_components/termoweb/nodes.py :: HeaterNode.supports_boost
     Return whether the node natively exposes boost/runback control.
-custom_components/termoweb/inventory.py :: AccumulatorNode.supports_boost
+custom_components/termoweb/nodes.py :: AccumulatorNode.supports_boost
     Return whether the accumulator exposes boost/runback.
-custom_components/termoweb/inventory.py :: PowerMonitorNode.__init__
+custom_components/termoweb/nodes.py :: PowerMonitorNode.__init__
     Initialise a power monitor node.
-custom_components/termoweb/inventory.py :: PowerMonitorNode.default_name
+custom_components/termoweb/nodes.py :: PowerMonitorNode.default_name
     Return the fallback friendly name for the power monitor.
-custom_components/termoweb/inventory.py :: PowerMonitorNode.sample_target
+custom_components/termoweb/nodes.py :: PowerMonitorNode.sample_target
     Return the canonical ``(node_type, addr)`` sample target.
-custom_components/termoweb/inventory.py :: ThermostatNode.__init__
+custom_components/termoweb/nodes.py :: ThermostatNode.__init__
     Initialise a thermostat node.
-custom_components/termoweb/inventory.py :: _iter_node_payload
+custom_components/termoweb/nodes.py :: _iter_node_payload
     Yield node dictionaries from a ``{"nodes": [...]}`` payload or a node list.
-custom_components/termoweb/inventory.py :: _resolve_node_class
+custom_components/termoweb/nodes.py :: _resolve_node_class
     Return the most appropriate node class for ``node_type``.
-custom_components/termoweb/inventory.py :: build_node_inventory
+custom_components/termoweb/nodes.py :: build_node_inventory
     Return a list of :class:`Node` instances for the provided payload.
 custom_components/termoweb/planner/ducaheat_planner.py :: plan_command
     Return the segmented write call plan for a single command.

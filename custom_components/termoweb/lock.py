@@ -22,11 +22,8 @@ from custom_components.termoweb.entity import (
     log_skipped_nodes,
 )
 from custom_components.termoweb.identifiers import build_heater_unique_id
-from custom_components.termoweb.inventory import (
-    Inventory,
-    normalize_node_addr,
-    normalize_node_type,
-)
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import normalize_node_addr, normalize_node_type
 from custom_components.termoweb.runtime import require_runtime
 from custom_components.termoweb.utils import build_node_device_info
 

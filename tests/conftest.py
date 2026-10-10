@@ -21,7 +21,8 @@ from custom_components.termoweb.backend import rest_client as rest_client_module
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.backend.termoweb import TermoWebBackend
 from custom_components.termoweb.const import BRAND_TERMOWEB, CONF_BRAND, DOMAIN
-from custom_components.termoweb.inventory import Inventory, build_node_inventory
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import build_node_inventory
 from tests.fakes.cloud import PASSWORD, USERNAME, FakeCloud
 
 

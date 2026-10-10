@@ -15,8 +15,8 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.termoweb.backend.sanitize import mask_identifier
 from custom_components.termoweb.coerce import as_float
-from custom_components.termoweb.inventory import (
-    Inventory,
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import (
     NodeDescriptor,
     normalize_node_addr,
     normalize_node_type,

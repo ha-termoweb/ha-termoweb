@@ -15,7 +15,8 @@ from custom_components.termoweb.backend.radio_power import (
     PowerManager,
 )
 from custom_components.termoweb.const import BRAND_RADIO
-from custom_components.termoweb.inventory import Inventory, build_node_inventory
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import build_node_inventory
 from tests.fakes.radio_link import NET, FakeRadioLink
 
 

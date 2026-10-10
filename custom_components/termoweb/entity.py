@@ -30,8 +30,8 @@ from custom_components.termoweb.domain.state import (
     ThermostatState,
 )
 from custom_components.termoweb.identifiers import build_heater_unique_id
-from custom_components.termoweb.inventory import (
-    Inventory,
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import (
     Node,
     normalize_node_addr,
     normalize_node_type,

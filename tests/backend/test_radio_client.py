@@ -19,7 +19,7 @@ from custom_components.termoweb.backend.radio_client import (
     RadioUnsupportedError,
     radio_addr,
 )
-from custom_components.termoweb.inventory import build_node_inventory
+from custom_components.termoweb.nodes import build_node_inventory
 from tests.fakes.radio_link import (
     CLOCK_ACCEPTED,
     HEATER,

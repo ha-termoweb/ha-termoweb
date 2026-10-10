@@ -20,7 +20,7 @@ from custom_components.termoweb.backend.base import (
 )
 from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
 from custom_components.termoweb.codecs.termoweb_codec import decode_samples
-from custom_components.termoweb.inventory import NodeDescriptor
+from custom_components.termoweb.nodes import NodeDescriptor
 
 
 class DummyWsClient:

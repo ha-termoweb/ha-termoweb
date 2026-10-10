@@ -25,7 +25,8 @@ from custom_components.termoweb.backend.radio_ws import RadioListener
 from custom_components.termoweb.const import BRAND_RADIO, signal_ws_status
 from custom_components.termoweb.coordinator.state import StateCoordinator
 from custom_components.termoweb.domain.ids import NodeType
-from custom_components.termoweb.inventory import Inventory, build_node_inventory
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import build_node_inventory
 from custom_components.termoweb.runtime import EntryRuntime
 from tests.fakes.radio_link import (
     CLOCK_ACCEPTED,

@@ -29,7 +29,8 @@ from .entity import (
     to_device_temperature,
 )
 from .identifiers import build_heater_unique_id, build_installation_entity_unique_id
-from .inventory import Inventory, normalize_node_addr, normalize_node_type
+from .inventory import Inventory
+from .nodes import normalize_node_addr, normalize_node_type
 from .runtime import require_runtime
 from .utils import build_installation_device_info
 

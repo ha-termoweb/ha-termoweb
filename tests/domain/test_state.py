@@ -30,7 +30,7 @@ from custom_components.termoweb.domain.state import (
     state_to_dict,
 )
 from custom_components.termoweb.domain.view import DomainStateView
-from custom_components.termoweb.inventory import build_node_inventory
+from custom_components.termoweb.nodes import build_node_inventory
 
 
 def test_accumulator_inherits_heater_state() -> None:
