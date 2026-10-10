@@ -1931,8 +1931,6 @@ custom_components/termoweb/backend/radio/dialect.py :: decode
     Decode on-air bytes, verifying length and CRC; never raises on bad input.
 custom_components/termoweb/backend/radio/dialect.py :: build_frame
     Return on-air bytes for a data frame; path defaults to (src, dst, 0, 0, 0).
-custom_components/termoweb/backend/radio/dialect.py :: build_ack
-    Return on-air bytes for the ack ``acker`` sends for a frame from ``sender``.
 custom_components/termoweb/backend/radio/dialect.py :: _network_id
     Return a validated two-byte network id, defaulting to the dialect's own.
 custom_components/termoweb/backend/radio/dialect.py :: detect_dialect
@@ -1941,8 +1939,6 @@ custom_components/termoweb/backend/radio/survey.py :: CrcSpec.register_after
     Return the register after each prefix of ``data`` (index = bytes fed).
 custom_components/termoweb/backend/radio/survey.py :: CrcSpec.finish
     Return the CRC value for a register state.
-custom_components/termoweb/backend/radio/survey.py :: CrcSpec.compute
-    Return the CRC of ``data``.
 custom_components/termoweb/backend/radio/survey.py :: _reflect16
     Return ``value`` with its 16 bits in reverse order.
 custom_components/termoweb/backend/radio/survey.py :: _make_table
@@ -1953,12 +1949,8 @@ custom_components/termoweb/backend/radio/survey.py :: merge_runs
     Join consecutive runs of the same level and drop empty ones.
 custom_components/termoweb/backend/radio/survey.py :: find_preambles
     Return stretches of one-bit runs with steady pair sums, longest first.
-custom_components/termoweb/backend/radio/survey.py :: find_preamble
-    Return the longest preamble-like stretch, or None.
 custom_components/termoweb/backend/radio/survey.py :: _preamble
     Return the timing a preamble window implies.
-custom_components/termoweb/backend/radio/survey.py :: runs_to_bits
-    Return the bits from the preamble on, stopping at the first idle gap.
 custom_components/termoweb/backend/radio/survey.py :: bits_to_bytes
     Pack whole bytes MSB first, at most ``limit`` of them.
 custom_components/termoweb/backend/radio/survey.py :: _pair_fits
@@ -1983,8 +1975,6 @@ custom_components/termoweb/backend/radio/survey.py :: _invert
     Return ``bits`` with every bit flipped.
 custom_components/termoweb/backend/radio/survey.py :: _sync_bits
     Return a sync word as a bit string.
-custom_components/termoweb/backend/radio/survey.py :: preamble_break
-    Return the index of the first bit equal to its predecessor (preamble end).
 custom_components/termoweb/backend/radio/survey.py :: _decode_known
     Return (dialect, inverted, logical frame, sync errors) for a known dialect.
 custom_components/termoweb/backend/radio/survey.py :: _search
@@ -2043,8 +2033,6 @@ custom_components/termoweb/backend/radio/protocol.py :: request_energy
     Return the ``BC`` energy counter request.
 custom_components/termoweb/backend/radio/protocol.py :: request_identity
     Return the ``5A`` identity request.
-custom_components/termoweb/backend/radio/protocol.py :: request_advanced
-    Return the ``DA`` advanced-setup record request.
 custom_components/termoweb/backend/radio/protocol.py :: reply_predicate
     Return a predicate matching a reply to ``opcode`` (first byte opcode + 1).
 custom_components/termoweb/backend/radio/protocol.py :: reply_predicate._matches
@@ -2055,12 +2043,8 @@ custom_components/termoweb/backend/radio/protocol.py :: StatusRecord.mode
     Return the mode name, or None for an unknown code.
 custom_components/termoweb/backend/radio/protocol.py :: decode_status
     Decode an E5/E3 report, E6/E4 status reply or short ``B9`` record.
-custom_components/termoweb/backend/radio/protocol.py :: ProgramRecord.slots_monday_first
-    Return ``slots`` rotated to Monday-first day order.
 custom_components/termoweb/backend/radio/protocol.py :: ProgramRecord.hourly_monday_first
     Return ``hourly`` rotated to Monday-first day order.
-custom_components/termoweb/backend/radio/protocol.py :: ProgramRecord.hourly_only
-    Return True when no hour is split into two different half hours.
 custom_components/termoweb/backend/radio/protocol.py :: rotate_week
     Rotate a flat week between Monday-first and the wire's Sunday-first order.
 custom_components/termoweb/backend/radio/protocol.py :: _unpack_slots
@@ -2073,8 +2057,6 @@ custom_components/termoweb/backend/radio/protocol.py :: IdentityRecord.ascii_ser
     Return the short form's trailing printable-ASCII run, or None.
 custom_components/termoweb/backend/radio/protocol.py :: decode_identity
     Decode a ``5B 77`` (E0) or ``5B 55`` (short) identity reply.
-custom_components/termoweb/backend/radio/protocol.py :: decode_energy
-    Decode ``BD`` + u32 Wh (5 bytes) or the 9-byte dialect-B ``BD`` power record.
 custom_components/termoweb/backend/radio/protocol.py :: _deciwatts
     Return big-endian deciwatts as watts.
 custom_components/termoweb/backend/radio/protocol.py :: decode_power_record
@@ -2093,6 +2075,8 @@ custom_components/termoweb/backend/radio/link.py :: parse_query_line
     Parse ``# Q termoweb_rx <ver> key=value ...`` into a GatewayInfo.
 custom_components/termoweb/backend/radio/link.py :: supports_survey
     Return True when the gateway firmware has the raw survey (ESP32 3.7+).
+custom_components/termoweb/backend/radio/link.py :: rotate_dialects
+    Call ``attempt(dialect, seconds left)`` round-robin until one returns a result.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.__init__
     Store connection parameters; nothing is opened until connect().
 custom_components/termoweb/backend/radio/link.py :: RadioLink.dialect
@@ -2128,7 +2112,7 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink.add_line_listener.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.send_frame
     Transmit ``air`` and wait for ``dst``'s ack, retrying up to ``retries`` times.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.request
-    Send ``payload`` to ``dst`` and return its first reply matching ``predicate``.
+    Send ``payload`` to ``dst``; return (acked, first reply matching ``predicate``).
 custom_components/termoweb/backend/radio/link.py :: RadioLink._transmit
     Write ``T<hex>`` and await ``TX``; resend once on a bad-hex TXERR.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._note_missed_confirm
@@ -2171,6 +2155,8 @@ custom_components/termoweb/backend/radio/discovery.py :: listen_once._on_frame
     Record the network id and sender of every valid data frame.
 custom_components/termoweb/backend/radio/discovery.py :: discover_network
     Alternate listening windows across ``dialects`` until a network is heard.
+custom_components/termoweb/backend/radio/discovery.py :: discover_network._listen
+    Listen for one window in ``dialect``.
 custom_components/termoweb/backend/radio/discovery.py :: survey_network
     Capture raw bursts of any dialect; None when the firmware has no survey.
 custom_components/termoweb/backend/radio/discovery.py :: probe_heaters
@@ -2195,6 +2181,8 @@ custom_components/termoweb/backend/radio/pairing.py :: pair_heaters._on_frame
     Queue every pairing announcement with the time it was heard.
 custom_components/termoweb/backend/radio/pairing.py :: pair_new_network
     Pair heaters into ``network_id``, alternating ``dialects`` until one answers.
+custom_components/termoweb/backend/radio/pairing.py :: pair_new_network._pair
+    Pair in ``dialect`` for one slice; None when no heater was paired.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.create_ws_client
     Return the radio listener that plays the websocket client's role.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.fetch_hourly_samples

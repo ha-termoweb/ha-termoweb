@@ -351,6 +351,59 @@
           "description": "How long to listen. Heaters send most when they start or stop heating."
         }
       }
+    },
+    "radio_factory_reset": {
+      "name": "Radio factory reset",
+      "description": "DESTRUCTIVE. Reset one radio heater to its factory settings. The heater loses all settings, its clock, its weekly program and its radio pairing, and stops talking to Home Assistant. Its last known settings are saved first. To use the heater again, run \"Radio pair\" with the same heater number and press the pairing button on the heater. Only dialect-B heaters can be reset.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "The radio gateway or nanoCUL config entry to use.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Heater number",
+          "description": "The heater's radio number (the number in \"Heater 6\")."
+        }
+      }
+    },
+    "radio_pair": {
+      "name": "Radio pair",
+      "description": "Pair one radio heater. Start this action, then press the pairing button on the heater. With a heater number, the heater gets that number back (use this after a factory reset) and its saved settings are restored. Without a heater number, a new heater is added and the integration reloads. Heater control pauses while pairing runs.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "The radio gateway or nanoCUL config entry to use.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Heater number",
+          "description": "Pair the heater back to this number. Leave empty to add a new heater."
+        },
+        "restore": {
+          "name": "Restore settings",
+          "description": "Give the heater back its presets, mode and weekly program after pairing."
+        },
+        "timeout": {
+          "name": "Wait time",
+          "description": "How long to wait for the heater's pairing button."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radio move heaters to own network",
+      "description": "Move all heaters of a radio entry onto this installation's own radio network. Each heater is reset first (its settings are saved), then you put the heaters into pairing mode one at a time. The heaters get new numbers from 2 upwards and their settings are restored. Only dialect-B heaters can be moved. Heater control pauses while this runs.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "The radio gateway or nanoCUL config entry to use.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Wait time",
+          "description": "How long to wait for the heaters' pairing buttons."
+        }
+      }
     }
   }
 }

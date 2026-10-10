@@ -30,7 +30,7 @@ import time
 
 from . import protocol
 from .dialect import DIALECT_A, DIALECT_B, Dialect, Frame, build_frame
-from .link import RadioLink, ReceivedFrame, UnsupportedDialectError
+from .link import RadioLink, ReceivedFrame, rotate_dialects
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ async def _read_identity(
     link: RadioLink, node_id: int
 ) -> tuple[bytes | None, str | None]:
     """Return ``(identity, serial)`` from the heater's ``5A`` reply, if it answers."""
-    reply = await link.request(
+    _acked, reply = await link.request(
         node_id,
         protocol.request_identity(),
         protocol.reply_predicate(protocol.OP_IDENTITY),
@@ -172,7 +172,7 @@ async def _confirm(
 ) -> PairedHeater | None:
     """Return the paired heater once ``node_id`` answers a status read, else None."""
     for _ in range(CONFIRM_ATTEMPTS):
-        reply = await link.request(
+        _acked, reply = await link.request(
             node_id,
             protocol.request_status(),
             protocol.reply_predicate(protocol.OP_STATUS),
@@ -322,37 +322,31 @@ async def pair_new_network(
     rotation. A dialect the gateway firmware cannot speak is dropped; if none
     is left, the UnsupportedDialectError is raised.
     """
-    remaining = list(dialects)
-    start = clock()
-    while clock() - start < total_s:
-        for dialect in list(remaining):
-            left = total_s - (clock() - start)
-            if left <= 0:
-                break
-            link = link_factory(host, port, dialect, network_id=network_id)
-            try:
-                await link.connect()
-            except UnsupportedDialectError as err:
-                _LOGGER.info("Skipping dialect %s: %s", dialect.name, err)
-                remaining.remove(dialect)
-                if not remaining:
-                    raise
-                continue
-            try:
-                paired = await pair_heaters(
-                    link,
-                    window_s=min(window_s, left),
-                    total_s=left,
-                    idle_stop_s=idle_stop_s,
-                    clock=clock,
-                    sleep=sleep,
-                )
-            finally:
-                await link.close()
-            if paired:
-                return dialect, paired
-    _LOGGER.info("No heater was paired on %s:%s", host, port)
-    return None, []
+
+    async def _pair(
+        dialect: Dialect, left: float
+    ) -> tuple[Dialect, list[PairedHeater]] | None:
+        """Pair in ``dialect`` for one slice; None when no heater was paired."""
+        link = link_factory(host, port, dialect, network_id=network_id)
+        await link.connect()
+        try:
+            paired = await pair_heaters(
+                link,
+                window_s=min(window_s, left),
+                total_s=left,
+                idle_stop_s=idle_stop_s,
+                clock=clock,
+                sleep=sleep,
+            )
+        finally:
+            await link.close()
+        return (dialect, paired) if paired else None
+
+    result = await rotate_dialects(dialects, _pair, total_s, clock)
+    if result is None:
+        _LOGGER.info("No heater was paired on %s:%s", host, port)
+        return None, []
+    return result
 
 
 __all__ = [

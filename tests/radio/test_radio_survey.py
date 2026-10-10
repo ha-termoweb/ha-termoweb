@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fake_radio_link import build_ack
+
 import asyncio
 import json
 import random
@@ -13,7 +15,6 @@ from custom_components.termoweb.backend.radio import link as link_mod, survey as
 from custom_components.termoweb.backend.radio.dialect import (
     DIALECT_A,
     DIALECT_B,
-    build_ack,
     build_frame,
 )
 from custom_components.termoweb.backend.radio.link import RadioLink
@@ -32,7 +33,7 @@ def dialect_c_frame(src: int, payload: bytes) -> bytes:
     body = NET + bytes([src, 1, 0, src, 1, 0, 0, 0, 0]) + payload
     total = 1 + len(body) + 2
     head = bytes([total - 1]) + body
-    return head + ARC.compute(head).to_bytes(2, "little")
+    return head + ARC.finish(ARC.register_after(head)[-1]).to_bytes(2, "little")
 
 
 def to_bits(data: bytes) -> str:
@@ -89,22 +90,16 @@ def test_runs_merge_parse_and_bits() -> None:
     ]
     assert s.bits_to_bytes("0010110111010100111") == bytes.fromhex("2DD4")
     assert s.bits_to_bytes("1" * 80, limit=2) == b"\xff\xff"
-    assert s.preamble_break("1010100") == 6
-    assert s.preamble_break("1010") == 4
-    assert s.find_preamble([(1, 104), (0, 104)]) is None
+    assert s.find_preambles([(1, 104), (0, 104)]) == []
 
 
 def test_preamble_timing_corrects_demodulator_bias() -> None:
     """The preamble gives the bit period and the high/low stretch to remove."""
     burst = capture(b_frame(), DIALECT_B.sync, seed=1)
     runs = s.merge_runs(burst.runs)
-    preamble = s.find_preamble(runs)
-    assert preamble is not None
+    preamble = s.find_preambles(runs)[0]
     assert 100 < preamble.bit_us < 108
     assert 12 < preamble.bias_us < 24
-    bits = s.runs_to_bits(runs, preamble)
-    assert bits.startswith("1010101010")
-    assert to_bits(DIALECT_B.sync) in bits
 
 
 def test_crc_catalogue_matches_reference_values() -> None:
@@ -126,7 +121,8 @@ def test_crc_catalogue_matches_reference_values() -> None:
     }
     for spec in s.CRC_SPECS:
         if spec.name in check:
-            assert spec.compute(b"123456789") == check[spec.name], spec.name
+            crc = spec.finish(spec.register_after(b"123456789")[-1])
+            assert crc == check[spec.name], spec.name
 
 
 # --- known dialects -------------------------------------------------------------

@@ -19,7 +19,7 @@ from .link import (
     DEFAULT_PORT,
     RadioLink,
     ReceivedFrame,
-    UnsupportedDialectError,
+    rotate_dialects,
     supports_survey,
 )
 from .survey import RawBurst
@@ -125,32 +125,23 @@ async def discover_network(
     dialect A) is dropped from the rotation; if none is left, RadioLinkError.
     """
 
-    remaining = list(dialects)
-    start = clock()
-    while clock() - start < total_s:
-        for dialect in list(remaining):
-            try:
-                sighting = await listen_once(
-                    host,
-                    port,
-                    dialect,
-                    window_s,
-                    link_factory=link_factory,
-                    sleep=sleep,
-                    clock=clock,
-                )
-            except UnsupportedDialectError as err:
-                _LOGGER.info("Skipping dialect %s: %s", dialect.name, err)
-                remaining.remove(dialect)
-                if not remaining:
-                    raise
-                continue
-            if sighting is not None:
-                return sighting
-            if clock() - start >= total_s:
-                break
-    _LOGGER.info("No heater traffic heard on %s:%s", host, port)
-    return None
+    async def _listen(dialect: Dialect, _left: float) -> NetworkSighting | None:
+        """Listen for one window in ``dialect``."""
+
+        return await listen_once(
+            host,
+            port,
+            dialect,
+            window_s,
+            link_factory=link_factory,
+            sleep=sleep,
+            clock=clock,
+        )
+
+    sighting = await rotate_dialects(dialects, _listen, total_s, clock)
+    if sighting is None:
+        _LOGGER.info("No heater traffic heard on %s:%s", host, port)
+    return sighting
 
 
 async def survey_network(
@@ -199,7 +190,7 @@ async def probe_heaters(
         for addr in sorted(set(candidates)):
             if not 0 < addr < 0xFF or addr == link.station_id:
                 continue
-            reply = await link.request(
+            _acked, reply = await link.request(
                 addr,
                 protocol.request_status(),
                 protocol.reply_predicate(protocol.OP_STATUS),

@@ -24,7 +24,6 @@ OP_STATUS = 0xB8
 OP_PROGRAM_READ = 0xB0
 OP_ENERGY = 0xBC
 OP_IDENTITY = 0x5A
-OP_ADVANCED_READ = 0xDA
 OP_POWER_REQUEST = 0xBE
 OP_POWER_VERDICT = 0xBF
 OP_REGISTRATION = 0x50
@@ -36,10 +35,9 @@ OP_FLASH_DISPLAY = 0x5E
 OP_WRITE_PARAMETER = 0xC8  # C8 <two argument bytes>; reply C9 55
 
 TOGGLE_BOOST = 0xD2
-TOGGLE_RUNBACK = 0xD4
-TOGGLE_EASY = 0xD6
 TOGGLE_LOCK = 0xBA
-TOGGLE_OPCODES = frozenset({TOGGLE_BOOST, TOGGLE_RUNBACK, TOGGLE_EASY, TOGGLE_LOCK})
+# D4 (runback) and D6 (EASY) toggle the same way; the integration never sends them.
+TOGGLE_OPCODES = frozenset({TOGGLE_BOOST, TOGGLE_LOCK})
 
 SUB_SETPOINT = 0x02
 SUB_OVERRIDE = 0x03
@@ -127,12 +125,8 @@ SETPOINT_MODES = frozenset({MODE_MANUAL, MODE_OVERRIDE})
 
 FLAG_ACTIVE = 0x01
 FLAG_LOCKED = 0x02
-FLAG_PRESENCE = 0x04
-FLAG_WINDOW_OPEN = 0x08
-FLAG_TRUE_RADIANT_ACTIVE = 0x10
-FLAG_BOOST = 0x20
-FLAG_EASY = 0x40
-FLAG_RUNBACK = 0x80
+# Unused here: 04 presence, 08 window open, 10 true radiant, 20 boost, 40 EASY,
+# 80 runback.
 
 MIN_SETPOINT_C = 7.0
 MAX_SETPOINT_C = 35.0
@@ -166,8 +160,6 @@ IDENTITY_MARKER = OP_IDENTITY + 1  # 5B
 IDENTITY_E0_FORM = 0x77
 IDENTITY_SHORT_FORM = 0x55
 
-ENERGY_A_LEN = 5
-ENERGY_B_LEN = 9
 ENERGY_MARKER = OP_ENERGY + 1  # BD
 
 POWER_REQUEST_A_LEN = 3
@@ -332,11 +324,6 @@ def request_identity() -> bytes:
     return bytes([OP_IDENTITY])
 
 
-def request_advanced() -> bytes:
-    """Return the ``DA`` advanced-setup record request."""
-    return bytes([OP_ADVANCED_READ])
-
-
 def reply_predicate(opcode: int, *payload_lens: int) -> Callable[[Frame], bool]:
     """Return a predicate matching a reply to ``opcode`` (first byte opcode + 1)."""
     expected = (opcode + 1) & 0xFF
@@ -443,23 +430,9 @@ class ProgramRecord:
     raw: bytes  # data bytes after the B1 opcode
 
     @property
-    def slots_monday_first(self) -> tuple[int | None, ...]:
-        """Return ``slots`` rotated to Monday-first day order."""
-        return tuple(rotate_week(list(self.slots), self.resolution, to_wire=False))
-
-    @property
     def hourly_monday_first(self) -> tuple[int | None, ...]:
         """Return ``hourly`` rotated to Monday-first day order."""
         return tuple(rotate_week(list(self.hourly), SLOTS_HOURLY, to_wire=False))
-
-    @property
-    def hourly_only(self) -> bool:
-        """Return True when no hour is split into two different half hours."""
-        if self.resolution == SLOTS_HOURLY:
-            return True
-        return all(
-            a == b for a, b in zip(self.slots[0::2], self.slots[1::2], strict=True)
-        )
 
 
 def rotate_week[T](slots: Sequence[T], resolution: int, to_wire: bool) -> list[T]:
@@ -553,29 +526,6 @@ def decode_identity(payload: bytes) -> IdentityRecord | None:
         return IdentityRecord("E0", payload[5], payload[6:18], payload)
     if len(payload) == IDENTITY_SHORT_LEN and payload[1] == IDENTITY_SHORT_FORM:
         return IdentityRecord("short", None, payload[2:], payload)
-    return None
-
-
-# --- energy ------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class EnergyRecord:
-    """A ``BD`` reply to ``BC``: a Wh counter (dialect A) or a power record (dialect B)."""
-
-    energy_wh: int | None  # dialect A only; dialect B's power record has no counter
-    raw: bytes
-
-
-def decode_energy(payload: bytes) -> EnergyRecord | None:
-    """Decode ``BD`` + u32 Wh (5 bytes) or the 9-byte dialect-B ``BD`` power record."""
-    payload = bytes(payload)
-    if not payload or payload[0] != ENERGY_MARKER:
-        return None
-    if len(payload) == ENERGY_A_LEN:
-        return EnergyRecord(int.from_bytes(payload[1:5], "big"), payload)
-    if len(payload) == ENERGY_B_LEN:
-        return EnergyRecord(None, payload)
     return None
 
 

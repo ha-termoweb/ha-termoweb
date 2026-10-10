@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fake_radio_link import build_ack
+
 import hashlib
 
 import pytest
@@ -11,7 +13,6 @@ from custom_components.termoweb.backend.radio import pairing as pr
 from custom_components.termoweb.backend.radio.dialect import (
     DIALECT_A,
     DIALECT_B,
-    build_ack,
     build_frame,
     decode,
 )

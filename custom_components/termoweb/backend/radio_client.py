@@ -454,50 +454,19 @@ class RadioClient:
         link = await self.async_connect()
         opcode = payload[0] if request_opcode is None else request_opcode
         matches = protocol.reply_predicate(opcode, *reply_lens)
+        _LOGGER.debug("Radio -> %02X: %s", addr, payload.hex(" ").upper())
         async with self._exchange_lock:
-            future: asyncio.Future[Frame] = asyncio.get_running_loop().create_future()
-
-            def _on_frame(received: Any) -> None:
-                """Resolve the reply future with the first matching heater frame."""
-
-                frame = received.frame
-                if (
-                    not future.done()
-                    and frame.ok
-                    and not frame.is_ack
-                    and frame.network_id == link.network_id
-                    and frame.src == addr
-                    and frame.dst == link.station_id
-                    and matches(frame)
-                ):
-                    future.set_result(frame)
-
-            remove = link.add_listener(_on_frame)
-            try:
-                air = build_frame(
-                    link.dialect,
-                    link.station_id,
-                    addr,
-                    payload,
-                    network_id=link.network_id,
-                )
-                _LOGGER.debug("Radio -> %02X: %s", addr, payload.hex(" ").upper())
-                result = await link.send_frame(addr, air)
-                if not result.ok:
-                    raise RadioCommandError(
-                        f"heater {addr} did not acknowledge command {opcode:02X}"
-                    )
-                try:
-                    reply = await asyncio.wait_for(future, self.reply_timeout)
-                except TimeoutError as err:
-                    raise RadioCommandError(
-                        f"heater {addr} acknowledged command {opcode:02X} "
-                        "but sent no reply"
-                    ) from err
-            finally:
-                remove()
-                if not future.done():
-                    future.cancel()
+            acked, reply = await link.request(
+                addr, payload, matches, self.reply_timeout
+            )
+        if not acked:
+            raise RadioCommandError(
+                f"heater {addr} did not acknowledge command {opcode:02X}"
+            )
+        if reply is None:
+            raise RadioCommandError(
+                f"heater {addr} acknowledged command {opcode:02X} but sent no reply"
+            )
         _LOGGER.debug("Radio <- %02X: %s", addr, reply.payload.hex(" ").upper())
         return reply
 
