@@ -39,10 +39,13 @@ from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
     HeaterPlatformDetails,
+    async_cancel_acm_boost,
+    async_start_acm_boost,
     clear_climate_entity_id,
     derive_boost_state_from_domain,
     log_skipped_nodes,
     register_climate_entity_id,
+    resolve_acm_boost_setpoint,
     resolve_boost_runtime_minutes,
 )
 
@@ -1308,10 +1311,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             validated_minutes = self._preferred_boost_minutes()
 
         state = self.accumulator_state()
-        boost_temp = float_or_none(getattr(state, "boost_temp", None))
-        if boost_temp is None:
-            boost_temp = float_or_none(getattr(state, "stemp", None))
-        if boost_temp is None:
+        if resolve_acm_boost_setpoint(state) is None:
             _LOGGER.error(
                 "Boost start requires a setpoint for type=%s addr=%s",
                 self._node_type,
@@ -1319,16 +1319,13 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             )
             return
 
-        units = self._units()
-
         async def _call(client: Any) -> None:
-            await client.set_acm_boost_state(
+            await async_start_acm_boost(
+                client,
                 self._dev_id,
                 self._addr,
-                boost=True,
-                boost_time=validated_minutes,
-                stemp=boost_temp,
-                units=units,
+                state,
+                minutes=validated_minutes,
             )
 
         success = await self._async_client_call(
@@ -1359,11 +1356,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         """Cancel the active accumulator boost session."""
 
         async def _call(client: Any) -> None:
-            await client.set_acm_boost_state(
-                self._dev_id,
-                self._addr,
-                boost=False,
-            )
+            await async_cancel_acm_boost(client, self._dev_id, self._addr)
 
         success = await self._async_client_call(
             log_context="Boost cancel",

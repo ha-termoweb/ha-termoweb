@@ -895,21 +895,6 @@ def test_get_boost_temperature_non_mapping_bucket() -> None:
     assert heater_module.get_boost_temperature(hass, "entry-nm", "acm", "01") is None
 
 
-def test_resolve_boost_temperature() -> None:
-    """resolve_boost_temperature should return stored or default."""
-    hass = HomeAssistant()
-    entry_id = "entry-rt"
-    runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev")
-
-    assert heater_module.resolve_boost_temperature(hass, entry_id, "acm", "01") is None
-    assert heater_module.resolve_boost_temperature(
-        hass, entry_id, "acm", "01", default=22.0
-    ) == 22.0
-
-    heater_module.set_boost_temperature(hass, entry_id, "acm", "01", 30.0)
-    assert heater_module.resolve_boost_temperature(hass, entry_id, "acm", "01") == 30.0
-
-
 # ---------------------------------------------------------------------------
 # Coverage expansion: Climate entity ID storage
 # ---------------------------------------------------------------------------

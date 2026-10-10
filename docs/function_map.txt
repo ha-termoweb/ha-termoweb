@@ -1286,8 +1286,6 @@ custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.__in
     Initialise an accumulator boost helper button.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.boost_context
     Return the inventory-derived context for this entity.
-custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase._service_minutes
-    Return the minutes payload passed to the helper service.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.available
     Return True when the inventory exposes this accumulator.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.async_added_to_hass
@@ -1300,12 +1298,12 @@ custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase._coo
     Return True when coordinator cache reports boost activity.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.device_info
     Return Home Assistant device metadata for the accumulator.
-custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.async_press
-    Invoke the helper service to update the accumulator boost state.
+custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase._async_boost_request
+    Run a boost backend request, raising HomeAssistantError on failure.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButton.__init__
     Initialise the boost helper button that uses stored presets.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButton.async_press
-    Trigger a boost using the persisted duration and temperature.
+    Start a boost for the stored duration at the device boost setpoint.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostCancelButton.__init__
     Initialise the boost cancellation helper button.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostCancelButton.available
@@ -1462,8 +1460,14 @@ custom_components/termoweb/entities/heater.py :: set_boost_temperature
     Persist ``temperature`` as the preferred boost setpoint.
 custom_components/termoweb/entities/heater.py :: resolve_boost_runtime_minutes
     Return the preferred boost runtime or ``default`` when unset.
-custom_components/termoweb/entities/heater.py :: resolve_boost_temperature
-    Return the preferred boost temperature for ``node`` or ``default``.
+custom_components/termoweb/entities/heater.py :: resolve_state_units
+    Return the temperature units (``C``/``F``) reported by ``state``.
+custom_components/termoweb/entities/heater.py :: resolve_acm_boost_setpoint
+    Return the device boost temperature, falling back to the setpoint.
+custom_components/termoweb/entities/heater.py :: async_start_acm_boost
+    Start an accumulator boost for ``minutes`` at the device boost setpoint.
+custom_components/termoweb/entities/heater.py :: async_cancel_acm_boost
+    Cancel an active accumulator boost.
 custom_components/termoweb/entities/heater.py :: _climate_entity_store
     Return the mutable climate entity ID store for ``runtime``.
 custom_components/termoweb/entities/heater.py :: register_climate_entity_id

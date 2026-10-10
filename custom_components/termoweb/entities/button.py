@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
 import logging
 from typing import Any
 
 from homeassistant.components.button import ButtonEntity
-from homeassistant.core import callback
-from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -28,18 +28,15 @@ from ..runtime import require_runtime
 from ..utils import build_gateway_device_info
 from .heater import (
     BOOST_BUTTON_METADATA,
-    DEFAULT_BOOST_TEMPERATURE,
     BoostButtonMetadata,
+    async_cancel_acm_boost,
+    async_start_acm_boost,
     derive_boost_state_from_domain,
     log_skipped_nodes,
     resolve_boost_runtime_minutes,
-    resolve_boost_temperature,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-_SERVICE_REQUEST_ACCUMULATOR_BOOST = "request_accumulator_boost"
-_SERVICE_CANCEL_ACCUMULATOR_BOOST = "cancel_accumulator_boost"
 
 
 _FLASHABLE_NODE_TYPES: tuple[str, ...] = ("htr", "acm")
@@ -248,12 +245,6 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
         return self._boost_context
 
     @property
-    def _service_minutes(self) -> int | None:
-        """Return the minutes payload passed to the helper service."""
-
-        return None
-
-    @property
     def available(self) -> bool:
         """Return True when the inventory exposes this accumulator."""
 
@@ -311,44 +302,37 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
             via_device=(DOMAIN, self.boost_context.dev_id),
         )
 
-    async def async_press(self) -> None:
-        """Invoke the helper service to update the accumulator boost state."""
+    async def _async_boost_request(
+        self,
+        hass: HomeAssistant,
+        action: str,
+        request: Callable[[Any], Awaitable[None]],
+    ) -> None:
+        """Run a boost backend request, raising HomeAssistantError on failure."""
 
-        hass = self.hass
-        if hass is None:
-            return
-
-        data: dict[str, Any] = {
-            "entry_id": self.boost_context.entry_id,
-            "dev_id": self.boost_context.dev_id,
-            "node_type": self.boost_context.node_type,
-            "addr": self.boost_context.addr,
-        }
-        minutes = self._service_minutes
-        if minutes is not None:
-            data["minutes"] = minutes
-
+        context = self.boost_context
+        runtime = require_runtime(hass, context.entry_id)
+        _LOGGER.info(
+            "Requesting boost %s for %s/%s node %s",
+            action,
+            context.dev_id,
+            context.node_type,
+            context.addr,
+        )
         try:
-            await hass.services.async_call(
-                DOMAIN,
-                _SERVICE_REQUEST_ACCUMULATOR_BOOST,
-                data,
-                blocking=True,
-            )
-        except ServiceNotFound as err:
+            await request(runtime.backend)
+        except Exception as err:
             _LOGGER.error(
-                "Boost helper service unavailable for %s (%s): %s",
-                self.boost_context.addr,
-                self.boost_context.node_type,
+                "Boost %s failed for %s/%s node %s: %s",
+                action,
+                context.dev_id,
+                context.node_type,
+                context.addr,
                 err,
             )
-        except HomeAssistantError as err:  # pragma: no cover - defensive logging
-            _LOGGER.error(
-                "Boost helper service failed for %s (%s): %s",
-                self.boost_context.addr,
-                self.boost_context.node_type,
-                err,
-            )
+            raise HomeAssistantError(
+                f"Unable to {action} the accumulator boost"
+            ) from err
 
 
 class AccumulatorBoostButton(AccumulatorBoostButtonBase):
@@ -375,71 +359,27 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
         )
 
     async def async_press(self) -> None:
-        """Trigger a boost using the persisted duration and temperature."""
+        """Start a boost for the stored duration at the device boost setpoint."""
 
         hass = self.hass
         if hass is None:
             return
 
+        context = self.boost_context
         minutes = resolve_boost_runtime_minutes(
             hass,
-            self.boost_context.entry_id,
-            self.boost_context.node_type,
-            self.boost_context.addr,
+            context.entry_id,
+            context.node_type,
+            context.addr,
         )
-        if minutes is None or minutes <= 0:
-            _LOGGER.error(
-                "Boost start requires a stored duration for %s (%s)",
-                self.boost_context.addr,
-                self.boost_context.node_type,
-            )
-            return
-
-        temperature = resolve_boost_temperature(
+        state = self._coordinator_state()
+        await self._async_boost_request(
             hass,
-            self.boost_context.entry_id,
-            self.boost_context.node_type,
-            self.boost_context.addr,
-            default=DEFAULT_BOOST_TEMPERATURE,
+            "start",
+            lambda backend: async_start_acm_boost(
+                backend, context.dev_id, context.addr, state, minutes=minutes
+            ),
         )
-        if temperature is None:
-            _LOGGER.error(
-                "Boost start requires a stored temperature for %s (%s)",
-                self.boost_context.addr,
-                self.boost_context.node_type,
-            )
-            return
-
-        data: dict[str, Any] = {
-            "entry_id": self.boost_context.entry_id,
-            "dev_id": self.boost_context.dev_id,
-            "node_type": self.boost_context.node_type,
-            "addr": self.boost_context.addr,
-            "minutes": minutes,
-            "temperature": round(float(temperature), 1),
-        }
-
-        try:
-            await hass.services.async_call(
-                DOMAIN,
-                _SERVICE_REQUEST_ACCUMULATOR_BOOST,
-                data,
-                blocking=True,
-            )
-        except ServiceNotFound as err:
-            _LOGGER.error(
-                "Boost helper service unavailable for %s (%s): %s",
-                self.boost_context.addr,
-                self.boost_context.node_type,
-                err,
-            )
-        except HomeAssistantError as err:  # pragma: no cover - defensive logging
-            _LOGGER.error(
-                "Boost helper service failed for %s (%s): %s",
-                self.boost_context.addr,
-                self.boost_context.node_type,
-                err,
-            )
 
 
 class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
@@ -480,34 +420,14 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
         if hass is None:
             return
 
-        data: dict[str, Any] = {
-            "entry_id": self.boost_context.entry_id,
-            "dev_id": self.boost_context.dev_id,
-            "node_type": self.boost_context.node_type,
-            "addr": self.boost_context.addr,
-        }
-
-        try:
-            await hass.services.async_call(
-                DOMAIN,
-                _SERVICE_CANCEL_ACCUMULATOR_BOOST,
-                data,
-                blocking=True,
-            )
-        except ServiceNotFound as err:
-            _LOGGER.error(
-                "Boost cancel service unavailable for %s (%s): %s",
-                self.boost_context.addr,
-                self.boost_context.node_type,
-                err,
-            )
-        except HomeAssistantError as err:  # pragma: no cover - defensive logging
-            _LOGGER.error(
-                "Boost cancel service failed for %s (%s): %s",
-                self.boost_context.addr,
-                self.boost_context.node_type,
-                err,
-            )
+        context = self.boost_context
+        await self._async_boost_request(
+            hass,
+            "cancel",
+            lambda backend: async_cancel_acm_boost(
+                backend, context.dev_id, context.addr
+            ),
+        )
 
 
 class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
