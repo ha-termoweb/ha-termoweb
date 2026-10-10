@@ -51,19 +51,41 @@ class EntryRuntime:
     _shutdown_complete: bool = False
 
 
-def require_runtime(hass: HomeAssistant, entry_id: str) -> EntryRuntime:
-    """Return the runtime container stored for ``entry_id``."""
+type TermoWebConfigEntry = ConfigEntry[EntryRuntime]
 
-    hass_data = getattr(hass, "data", None)
-    if not isinstance(hass_data, dict):
-        raise LookupError("TermoWeb runtime data is unavailable")  # noqa: TRY004
-    domain_data = hass_data.get(DOMAIN)
-    if not isinstance(domain_data, dict):
-        raise LookupError("TermoWeb runtime data is unavailable")  # noqa: TRY004
-    runtime = domain_data.get(entry_id)
-    if isinstance(runtime, EntryRuntime):
+
+def _live_runtime(entry: ConfigEntry | None) -> EntryRuntime | None:
+    """Return the entry's runtime unless the entry is missing or was shut down."""
+
+    runtime = getattr(entry, "runtime_data", None)
+    if isinstance(runtime, EntryRuntime) and not runtime._shutdown_complete:  # noqa: SLF001
         return runtime
+    return None
+
+
+def _domain_entries(hass: HomeAssistant) -> list[ConfigEntry]:
+    """Return the config entries of this integration."""
+
+    return hass.config_entries.async_entries(DOMAIN)
+
+
+def require_runtime(hass: HomeAssistant, entry_id: str) -> EntryRuntime:
+    """Return the running runtime of ``entry_id``; raise LookupError otherwise."""
+
+    for entry in _domain_entries(hass):
+        if entry.entry_id == entry_id and (runtime := _live_runtime(entry)):
+            return runtime
     raise LookupError("TermoWeb runtime data is unavailable")
 
 
-__all__ = ["EntryRuntime", "require_runtime"]
+def loaded_runtimes(hass: HomeAssistant) -> list[EntryRuntime]:
+    """Return the runtimes of every running TermoWeb entry."""
+
+    return [
+        runtime
+        for entry in _domain_entries(hass)
+        if (runtime := _live_runtime(entry)) is not None
+    ]
+
+
+__all__ = ["EntryRuntime", "TermoWebConfigEntry", "loaded_runtimes", "require_runtime"]

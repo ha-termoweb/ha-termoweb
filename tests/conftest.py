@@ -1039,6 +1039,18 @@ def _install_stubs() -> None:
     sys.modules["homeassistant.helpers.storage"] = storage_mod
     sys.modules["homeassistant.components.recorder.models"] = recorder_models_mod
 
+    cv_mod = types.ModuleType("homeassistant.helpers.config_validation")
+    cv_mod.config_entry_only_config_schema = lambda domain: lambda config: config
+    helpers_mod.config_validation = cv_mod
+    sys.modules["homeassistant.helpers.config_validation"] = cv_mod
+    typing_mod = sys.modules.get("homeassistant.helpers.typing") or types.ModuleType(
+        "homeassistant.helpers.typing"
+    )
+    typing_mod.ConfigType = getattr(typing_mod, "ConfigType", dict)
+    typing_mod.StateType = getattr(typing_mod, "StateType", Any)
+    helpers_mod.typing = typing_mod
+    sys.modules["homeassistant.helpers.typing"] = typing_mod
+
     sys.modules["homeassistant"] = homeassistant_pkg
     sys.modules["homeassistant.config_entries"] = config_entries_mod
     sys.modules["homeassistant.const"] = const_mod
@@ -1213,11 +1225,18 @@ def _install_stubs() -> None:
             self._on_unload.append(func)
             return func
 
-        def _call_unload_callbacks(self) -> None:
+        def async_create_background_task(
+            self, hass: Any, target: Any, name: str, eager_start: bool = True
+        ) -> asyncio.Task[Any]:
+            return hass.async_create_task(target)
+
+        async def _call_unload_callbacks(self) -> None:
             while self._on_unload:
                 callback = self._on_unload.pop()
                 try:
-                    callback()
+                    result = callback()
+                    if inspect.isawaitable(result):
+                        await result
                 except Exception:  # noqa: BLE001 - defensive logging
                     pass
 
@@ -1268,7 +1287,7 @@ def _install_stubs() -> None:
             self, entry: ConfigEntry, platforms: list[str] | tuple[str, ...]
         ) -> bool:
             self.unloaded.append((entry, tuple(platforms)))
-            entry._call_unload_callbacks()
+            await entry._call_unload_callbacks()
             return True
 
     class _ServiceRegistry:
@@ -2680,3 +2699,29 @@ def _no_rest_spacing(monkeypatch: pytest.MonkeyPatch) -> None:
     from custom_components.termoweb.backend import rest_client
 
     monkeypatch.setattr(rest_client, "REST_MIN_INTERVAL_S", 0.0)
+
+
+@pytest.fixture(autouse=True)
+def _runtime_from_hass_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let stub tests seed runtimes in ``hass.data[DOMAIN]`` as before.
+
+    Production code finds a runtime on ``entry.runtime_data`` of a config entry.
+    The stub hass objects here are mostly bare namespaces without a config entry
+    registry, so present each ``hass.data[DOMAIN]`` record as such an entry too.
+    """
+    from custom_components.termoweb import runtime as runtime_module
+    from custom_components.termoweb.const import DOMAIN
+
+    def _domain_entries(hass: Any) -> list[Any]:
+        registry = getattr(hass, "config_entries", None)
+        entries = list(registry.async_entries(DOMAIN)) if registry else []
+        data = getattr(hass, "data", None)
+        records = data.get(DOMAIN) if isinstance(data, dict) else None
+        if isinstance(records, dict):
+            entries.extend(
+                SimpleNamespace(entry_id=entry_id, runtime_data=record)
+                for entry_id, record in records.items()
+            )
+        return entries
+
+    monkeypatch.setattr(runtime_module, "_domain_entries", _domain_entries)

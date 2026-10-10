@@ -85,6 +85,9 @@ class BaseFakeClient:
         self.get_nodes_calls.append(dev_id)
         return {}
 
+    async def async_close(self) -> None:
+        self.closed = True
+
 
 class DiagnosticsConfigEntry(ConfigEntry):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -352,9 +355,6 @@ def test_async_setup_entry_happy_path(
     assert stub_hass.config_entries.forwarded == [
         (entry, tuple(termoweb_init.PLATFORMS))
     ]
-    assert stub_hass.services.has_service(termoweb_init.DOMAIN, "import_energy_history")
-    assert not stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_survey")
-    assert not stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_pair")
 
 
 def test_async_setup_entry_sets_supports_diagnostics(
@@ -645,47 +645,6 @@ def test_async_setup_entry_radio_gateway_unreachable(
     assert power.power_limit == 1800
 
 
-def test_async_setup_entry_radio_registers_survey_service(
-    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    class RadioLikeClient(BaseFakeClient):
-        async def list_devices(self) -> list[dict[str, Any]]:
-            return [{"dev_id": "aabbcc001122"}]
-
-        async def get_nodes(self, dev_id: str) -> dict[str, Any]:
-            return {"nodes": [{"addr": "6", "type": "htr"}]}
-
-    monkeypatch.setattr(
-        termoweb_init,
-        "create_radio_client",
-        lambda *args, **kwargs: RadioLikeClient(None, "", ""),
-    )
-    entry = ConfigEntry(
-        "radio-ok",
-        data={
-            "brand": "radio",
-            "host": "10.0.0.5",
-            "port": 2323,
-            "dialect": "B",
-            "network_id": "1234",
-            "nodes": [{"type": "htr", "addr": "6", "name": "Heater 6"}],
-        },
-    )
-    stub_hass.config_entries.add(entry)
-
-    async def _run() -> bool:
-        result = await termoweb_init.async_setup_entry(stub_hass, entry)
-        await _drain_tasks(stub_hass)
-        return result
-
-    assert asyncio.run(_run()) is True
-    assert stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_survey")
-    assert stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_pair")
-    assert stub_hass.services.has_service(
-        termoweb_init.DOMAIN, "radio_factory_reset"
-    )
-
-
 def test_async_setup_entry_nanocul_builds_a_serial_client(
     termoweb_init: Any,
     stub_hass: HomeAssistant,
@@ -827,9 +786,6 @@ def test_monitor_entry_sets_up_listen_only_and_unloads(
     assert type(ws_client).__name__ == "RadioMonitor" and running
     assert list(record.inventory.nodes) == []
     assert stub_hass.config_entries.forwarded == [(entry, ("binary_sensor", "sensor"))]
-    assert stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_capture")
-    assert stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_survey")
-    assert not stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_pair")
     assert unloaded is True and not (
         ws_client._task is not None and not ws_client._task.done()
     )
@@ -1491,7 +1447,7 @@ def test_async_unload_entry_handles_task_and_client_errors(
 
         assert await termoweb_init.async_unload_entry(stub_hass, entry)
         assert log_calls
-        assert entry.entry_id not in stub_hass.data.get(termoweb_init.DOMAIN, {})
+        assert record._shutdown_complete
 
     asyncio.run(_run())
 
@@ -1536,7 +1492,7 @@ def test_async_setup_entry_cleans_up_on_hass_stop(
     assert shutdown_flag is True
 
 
-def test_async_unload_entry_cleans_up(
+def test_async_shutdown_entry_cleans_up(
     termoweb_init: Any, stub_hass: HomeAssistant
 ) -> None:
     entry = ConfigEntry("unload", data={})
@@ -1572,9 +1528,10 @@ def test_async_unload_entry_cleans_up(
         record.unsub_ws_status = lambda: unsubscribed.append(True)
         record.recalc_poll = lambda: None
 
-        result = await termoweb_init.async_unload_entry(stub_hass, entry)
+        await termoweb_init._async_shutdown_entry(record)
+        await termoweb_init._async_shutdown_entry(record)  # runs once
         return (
-            result,
+            record._shutdown_complete,
             cancel_events,
             client.stop_calls,
             ws_task.cancelled(),
@@ -1588,10 +1545,7 @@ def test_async_unload_entry_cleans_up(
     assert cancel_events == [True]
     assert stop_calls == 1
     assert task_cancelled is True
-    assert stub_hass.config_entries.unloaded == [
-        (entry, tuple(termoweb_init.PLATFORMS))
-    ]
-    assert entry.entry_id not in stub_hass.data.get(termoweb_init.DOMAIN, {})
+    assert unsubscribed == [True]
 
 
 def test_async_unload_entry_missing_returns_true(

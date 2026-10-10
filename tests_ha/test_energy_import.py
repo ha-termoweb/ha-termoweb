@@ -210,7 +210,7 @@ async def test_import_writes_hourly_statistics(
     # HA >= 2026.11 rejects imports whose metadata omits unit_class.
     assert "doesn't specify unit_class" not in caplog.text
     assert _progress(hass_storage, config_entry) == {"htr:1": {"imported_from": start}}
-    summary = hass.data[DOMAIN][config_entry.entry_id].last_energy_import_summary
+    summary = config_entry.runtime_data.last_energy_import_summary
     assert summary["nodes"][0]["written"] == 48
     assert summary["nodes"][0]["requests"] == 2
 
@@ -250,7 +250,7 @@ async def test_consumption_is_booked_at_the_hour_it_happened(
     assert sums[t22 + 3 * HOUR] == pytest.approx(1.5)  # reset: no negative step
     assert sums[t22 + 4 * HOUR] == pytest.approx(1.8)
     assert sums[NOW_END - HOUR] == pytest.approx(1.8)  # carried to the window end
-    summary = hass.data[DOMAIN][config_entry.entry_id].last_energy_import_summary
+    summary = config_entry.runtime_data.last_energy_import_summary
     assert summary["nodes"][0]["resets"] == 1
 
 

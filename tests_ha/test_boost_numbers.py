@@ -17,7 +17,6 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.termoweb.backend.rest_client import RESTClient
-from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.entities import heater as heater_module
 from custom_components.termoweb.entities.heater import (
     get_boost_runtime_minutes,
@@ -109,7 +108,7 @@ async def test_boost_duration_follows_device_value(
     """A boost_time change reported by the device shows on the number."""
     await _setup(hass, config_entry)
     assert float(hass.states.get(BOOST_DURATION).state) == 2.0
-    coordinator = hass.data[DOMAIN][config_entry.entry_id].coordinator
+    coordinator = config_entry.runtime_data.coordinator
 
     def _mutate(state: Any) -> None:
         state.boost_time = 240
@@ -145,7 +144,7 @@ async def test_boost_buttons_listen_to_coordinator_once(
 ) -> None:
     """Each boost button registers a single coordinator listener."""
     await _setup(hass, config_entry)
-    coordinator = hass.data[DOMAIN][config_entry.entry_id].coordinator
+    coordinator = config_entry.runtime_data.coordinator
     buttons = [
         entity
         for entity in hass.data["button"].entities
@@ -164,7 +163,7 @@ async def test_boost_buttons_listen_to_coordinator_once(
 
 def _set_ws(hass: HomeAssistant, entry: MockConfigEntry, *, healthy: bool) -> None:
     """Report the WebSocket as healthy (recent payload) or disconnected."""
-    coordinator = hass.data[DOMAIN][entry.entry_id].coordinator
+    coordinator = entry.runtime_data.coordinator
     now = time.time()
     coordinator.update_gateway_connection(
         status="healthy" if healthy else "disconnected",
@@ -195,7 +194,7 @@ async def test_boost_write_refreshes_node_only_when_ws_down(
     """A boost write refreshes its node once after the delay, only if WS is down."""
     await _setup(hass, config_entry)
     _set_ws(hass, config_entry, healthy=healthy)
-    coordinator = hass.data[DOMAIN][config_entry.entry_id].coordinator
+    coordinator = config_entry.runtime_data.coordinator
     refresh = AsyncMock(return_value=None)
 
     with (

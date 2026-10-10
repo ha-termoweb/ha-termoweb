@@ -177,6 +177,7 @@ class RadioClient:
         self._clock = clock
         self._nodes = [dict(node) for node in nodes if isinstance(node, Mapping)]
         self._link: RadioLink | None = None
+        self._closed = False  # set by async_close: the owning entry is gone
         self._connect_lock = asyncio.Lock()
         self._exchange_lock = asyncio.Lock()
         self._disconnect_callbacks: list[Callable[[], None]] = []
@@ -230,6 +231,8 @@ class RadioClient:
         """Return the shared link, opening the gateway connection if needed."""
 
         async with self._connect_lock:
+            if self._closed:
+                raise RadioLinkError("radio client is closed")
             link = self._link
             if link is None:
                 listen: dict[str, bool] = (
@@ -252,8 +255,9 @@ class RadioClient:
             return link
 
     async def async_close(self) -> None:
-        """Close the gateway connection if one is open."""
+        """Close the gateway connection for good; later use raises RadioLinkError."""
 
+        self._closed = True
         if self._link is not None:
             await self._link.close()
 
