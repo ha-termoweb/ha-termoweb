@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from homeassistant.components.button import ButtonEntity
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -251,22 +251,6 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
         return self.boost_context.addr in forward_map.get(
             self.boost_context.node_type, ()
         )
-
-    async def async_added_to_hass(self) -> None:
-        """Register coordinator listener hooks once the entity is added."""
-
-        await super().async_added_to_hass()
-        add_listener = getattr(self.coordinator, "async_add_listener", None)
-        if callable(add_listener):
-            remove = add_listener(self._handle_coordinator_update)
-            if callable(remove):
-                self.async_on_remove(remove)
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Refresh entity state when the coordinator updates."""
-
-        self.async_write_ha_state()
 
     def _coordinator_state(self) -> DomainState | None:
         """Return cached coordinator state for this accumulator."""

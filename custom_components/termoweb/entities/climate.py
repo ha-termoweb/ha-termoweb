@@ -42,10 +42,8 @@ from .heater import (
     async_backend_write,
     async_cancel_acm_boost,
     async_start_acm_boost,
-    clear_climate_entity_id,
     derive_boost_state_from_domain,
     log_skipped_nodes,
-    register_climate_entity_id,
     resolve_acm_boost_setpoint,
     resolve_boost_runtime_minutes,
 )
@@ -350,34 +348,12 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         self._write_task: asyncio.Task | None = None
         self._resume_mode: HVACMode | None = None
 
-    async def async_added_to_hass(self) -> None:
-        """Register the entity ID for cross-platform helpers."""
-
-        await super().async_added_to_hass()
-        hass = self.hass
-        if hass is not None:
-            register_climate_entity_id(
-                hass,
-                self._entry_id,
-                self._node_type,
-                self._addr,
-                getattr(self, "entity_id", None),
-            )
-
     async def async_will_remove_from_hass(self) -> None:
         """Clean up pending tasks when the entity is removed."""
         if self._write_task:
             self._write_task.cancel()
             self._write_task = None
         self._refresh_fallback.cancel()
-        hass = self.hass
-        if hass is not None:
-            clear_climate_entity_id(
-                hass,
-                self._entry_id,
-                self._node_type,
-                self._addr,
-            )
         await super().async_will_remove_from_hass()
 
     @staticmethod

@@ -1174,10 +1174,6 @@ custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.boos
     Return the inventory-derived context for this entity.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.available
     Return True when the last update succeeded and the node is in inventory.
-custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase.async_added_to_hass
-    Register coordinator listener hooks once the entity is added.
-custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase._handle_coordinator_update
-    Refresh entity state when the coordinator updates.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase._coordinator_state
     Return cached coordinator state for this accumulator.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostButtonBase._coordinator_boost_active
@@ -1228,8 +1224,6 @@ custom_components/termoweb/entities/climate.py :: _require_accumulator
     Raise ServiceValidationError when an acm-only service targets another node.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.__init__
     Initialise the climate entity for a TermoWeb heater.
-custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.async_added_to_hass
-    Register the entity ID for cross-platform helpers.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.async_will_remove_from_hass
     Clean up pending tasks when the entity is removed.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._slot_label
@@ -1374,14 +1368,6 @@ custom_components/termoweb/entities/heater.py :: async_start_acm_boost
     Start an accumulator boost for ``minutes`` at the device boost setpoint.
 custom_components/termoweb/entities/heater.py :: async_cancel_acm_boost
     Cancel an active accumulator boost.
-custom_components/termoweb/entities/heater.py :: _climate_entity_store
-    Return the mutable climate entity ID store for ``runtime``.
-custom_components/termoweb/entities/heater.py :: register_climate_entity_id
-    Record the climate entity ID for ``(entry_id, node_type, addr)``.
-custom_components/termoweb/entities/heater.py :: clear_climate_entity_id
-    Remove the recorded climate entity ID for ``(entry_id, node_type, addr)``.
-custom_components/termoweb/entities/heater.py :: resolve_climate_entity_id
-    Return the recorded climate entity ID for ``(entry_id, node_type, addr)``.
 custom_components/termoweb/entities/heater.py :: iter_boost_button_metadata
     Yield the metadata describing boost helper buttons.
 custom_components/termoweb/entities/heater.py :: iter_boostable_heater_nodes
@@ -1446,6 +1432,8 @@ custom_components/termoweb/entities/heater.py :: HeaterNodeBase.device_info
     Expose Home Assistant device metadata for the heater.
 custom_components/termoweb/entities/number.py :: _restore_boost_value
     Restore a boost preference from cache, state, or settings.
+custom_components/termoweb/entities/number.py :: _async_write_boost_preset
+    Write accumulator boost defaults to the device and patch cached state.
 custom_components/termoweb/entities/number.py :: async_setup_entry
     Set up boost configuration number entities for accumulator nodes.
 custom_components/termoweb/entities/number.py :: async_setup_entry.default_name
@@ -1455,11 +1443,13 @@ custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber.async_added_to_hass
     Restore the preferred duration once the entity is added.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber.native_value
-    Return the preferred duration in hours for the UI slider.
+    Return the boost duration in hours for the UI slider.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber.async_set_native_value
     Handle slider updates from the user interface.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber.extra_state_attributes
-    Expose the preferred minutes as an attribute.
+    Expose the boost duration in minutes as an attribute.
+custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber._current_minutes
+    Return the device boost_time when known, else the stored preference.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber._initial_minutes_from_settings
     Return the bootstrap value sourced from cached settings.
 custom_components/termoweb/entities/number.py :: AccumulatorBoostDurationNumber._apply_minutes

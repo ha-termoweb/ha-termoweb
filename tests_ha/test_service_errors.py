@@ -380,15 +380,6 @@ async def test_boost_numbers_reject_invalid_values(
         await temperature.async_set_native_value(80)
     with pytest.raises(ServiceValidationError, match="boost duration"):
         await _entity(hass, BOOST_DURATION).async_set_native_value(0.5)
-
-    with (
-        patch(
-            "custom_components.termoweb.entities.number.resolve_climate_entity_id",
-            return_value=None,
-        ),
-        pytest.raises(HomeAssistantError, match="Cannot resolve climate entity"),
-    ):
-        await temperature.async_set_native_value(22)
     writes.extra_options.assert_not_awaited()
 
 

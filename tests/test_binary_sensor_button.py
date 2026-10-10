@@ -270,11 +270,8 @@ def test_accumulator_boost_cancel_button_tracks_availability() -> None:
         assert coordinator.apply_entity_patch(
             "acm", addr, lambda cur: setattr(cur, "boost_active", False)
         )
-        for listener in list(getattr(coordinator, "listeners", [])):
-            listener()
 
         assert button.available is False
-        button.async_write_ha_state.assert_called()
 
     asyncio.run(_run())
 

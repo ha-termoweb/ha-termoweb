@@ -9,14 +9,13 @@ from typing import Any, TypeVar
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.const import UnitOfPower, UnitOfTemperature, UnitOfTime
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from ..boost import ALLOWED_BOOST_MINUTES, coerce_boost_minutes
 from ..backend.factory import backend_capabilities
-from ..const import DOMAIN
 from ..domain.state import DomainState
 from ..identifiers import build_gateway_entity_unique_id, build_heater_unique_id
 from ..inventory import (
@@ -36,7 +35,6 @@ from .heater import (
     get_boost_runtime_minutes,
     get_boost_temperature,
     heater_platform_details_for_entry,
-    resolve_climate_entity_id,
     set_boost_runtime_minutes,
     set_boost_temperature,
     to_device_temperature,
@@ -69,6 +67,38 @@ async def _restore_boost_value(
     if value is None:
         value = settings_lookup()
     applier(value, persist=hass is not None)
+
+
+async def _async_write_boost_preset(
+    entity: HeaterNodeBase,
+    *,
+    boost_time: int | None = None,
+    boost_temp: float | None = None,
+) -> None:
+    """Write accumulator boost defaults to the device and patch cached state."""
+
+    runtime = require_runtime(entity.hass, entity._entry_id)  # noqa: SLF001
+    await async_backend_write(
+        "Boost preset write",
+        runtime.backend.set_acm_extra_options(
+            entity._dev_id,  # noqa: SLF001
+            entity._addr,  # noqa: SLF001
+            boost_time=boost_time,
+            boost_temp=boost_temp,
+        ),
+    )
+
+    def _mutate(state: DomainState) -> None:
+        if boost_time is not None:
+            state.boost_time = boost_time
+        if boost_temp is not None:
+            state.boost_temp = f"{boost_temp:.1f}"
+
+    entity.coordinator.apply_entity_patch(
+        entity._node_type,  # noqa: SLF001
+        entity._addr,  # noqa: SLF001
+        _mutate,
+    )
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -238,9 +268,9 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
 
     @property
     def native_value(self) -> float:
-        """Return the preferred duration in hours for the UI slider."""
+        """Return the boost duration in hours for the UI slider."""
 
-        return self._minutes / 60
+        return self._current_minutes() / 60
 
     async def async_set_native_value(self, value: float) -> None:
         """Handle slider updates from the user interface."""
@@ -251,14 +281,24 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
                 f"Invalid boost duration for {self._addr}: {value}"
             )
 
+        # A failed device write raises here, so the value is only kept once
+        # the device accepted it.
+        await _async_write_boost_preset(self, boost_time=minutes)
         self._apply_minutes(minutes, persist=True)
         self.async_write_ha_state()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose the preferred minutes as an attribute."""
+        """Expose the boost duration in minutes as an attribute."""
 
-        return {"preferred_minutes": self._minutes}
+        return {"preferred_minutes": self._current_minutes()}
+
+    def _current_minutes(self) -> int:
+        """Return the device boost_time when known, else the stored preference."""
+
+        state = self.accumulator_state()
+        device = coerce_boost_minutes(getattr(state, "boost_time", None))
+        return device if device in ALLOWED_BOOST_MINUTES else self._minutes
 
     def _initial_minutes_from_settings(self) -> int:
         """Return the bootstrap value sourced from cached settings."""
@@ -345,7 +385,6 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
             inventory=inventory,
         )
         self._temperature = self._default_temperature()
-        self._climate_entity_id: str | None = None
 
     async def async_added_to_hass(self) -> None:
         """Restore the preferred temperature once the entity is added."""
@@ -420,32 +459,9 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
                 f"Invalid boost temperature for {self._addr}: {value}"
             )
 
-        hass = self.hass
-        if hass is None:
-            return
-
-        entity_id = self._climate_entity_id or resolve_climate_entity_id(
-            hass,
-            self._entry_id,
-            self._node_type,
-            self._addr,
-        )
-        if not entity_id:
-            raise HomeAssistantError(
-                f"Cannot resolve climate entity for boost temperature on {self._addr}"
-            )
-        self._climate_entity_id = entity_id
-
         # A failed device write raises here, so the value is only kept once
         # the device accepted it.
-        data = {"entity_id": entity_id, "temperature": temperature}
-        await hass.services.async_call(
-            DOMAIN,
-            "set_acm_preset",
-            data,
-            blocking=True,
-        )
-
+        await _async_write_boost_preset(self, boost_temp=temperature)
         self._apply_temperature(temperature, persist=True)
         self.async_write_ha_state()
 
