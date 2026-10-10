@@ -9,30 +9,18 @@ from dataclasses import dataclass
 import logging
 import time
 import typing
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from custom_components.termoweb.backend.rest_client import RESTClient
-from custom_components.termoweb.const import (
-    BRAND_DUCAHEAT,
-    BRAND_TERMOWEB,
-    DOMAIN,
-    WS_NAMESPACE,
-    signal_ws_status,
-)
+from custom_components.termoweb.const import DOMAIN, signal_ws_status
 from custom_components.termoweb.inventory import (
     Inventory,
     normalize_node_addr,
     normalize_node_type,
 )
 from custom_components.termoweb.runtime import require_runtime
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .ducaheat_ws import DucaheatWSClient
-    from .termoweb_ws import TermoWebWSClient
 
 from .ws_health import WsHealthTracker
 
@@ -346,7 +334,6 @@ class WSStats:
     frames_total: int = 0
     events_total: int = 0
     last_event_ts: float = 0.0
-    last_paths: list[str] | None = None
 
 
 class HandshakeError(RuntimeError):
@@ -756,128 +743,6 @@ class _WSCommon(_WSStatusMixin):
         last_payload = self._ws_health_tracker().last_payload_at
         return last_payload is not None and last_payload >= started_at
 
-    def _ensure_type_bucket(
-        self,
-        nodes_by_type: Mapping[str, typing.Any] | MutableMapping[str, typing.Any],
-        node_type: str,
-        *,
-        dev_map: MutableMapping[str, typing.Any] | None = None,
-    ) -> Mapping[str, typing.Any]:
-        """Return the node bucket for ``node_type`` without cloning metadata."""
-
-        if not isinstance(nodes_by_type, Mapping):
-            return None
-
-        normalized_type = normalize_node_type(node_type)
-        if not normalized_type:
-            return None
-
-        existing = nodes_by_type.get(normalized_type)
-        if isinstance(existing, Mapping):
-            bucket: Mapping[str, typing.Any] = existing
-        else:
-            mutable: dict[str, Any] = {}
-            bucket = mutable
-            if isinstance(nodes_by_type, MutableMapping):
-                nodes_by_type[normalized_type] = mutable
-
-        if not isinstance(dev_map, MutableMapping):
-            return bucket
-
-        if isinstance(self._inventory, Inventory):
-            dev_map["inventory"] = self._inventory
-
-        settings_section = dev_map.get("settings")
-        if isinstance(settings_section, MutableMapping):
-            settings_section.setdefault(normalized_type, {})
-        elif settings_section is None or "settings" not in dev_map:
-            dev_map["settings"] = {normalized_type: {}}
-
-        return bucket
-
-
-class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
-    """Delegate to the correct backend websocket client."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        *,
-        entry_id: str,
-        dev_id: str,
-        api_client: RESTClient,
-        coordinator: Any,
-        session: aiohttp.ClientSession | None = None,
-        protocol: str | None = None,
-        namespace: str = WS_NAMESPACE,
-        inventory: Inventory | None = None,
-    ) -> None:
-        """Initialise a websocket client wrapper for the active backend."""
-        _WsLeaseMixin.__init__(self)
-        self.hass = hass
-        self.entry_id = entry_id
-        self.dev_id = dev_id
-        self._client = api_client
-        self._coordinator = coordinator
-        self._session = session or getattr(api_client, "_session", None)
-        self._protocol_hint = protocol
-        self._namespace = namespace or WS_NAMESPACE
-        self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
-        self._delegate: DucaheatWSClient | TermoWebWSClient | None = None
-        self._brand = (
-            BRAND_DUCAHEAT
-            if getattr(api_client, "_is_ducaheat", False)
-            else BRAND_TERMOWEB
-        )
-        self._inventory = inventory
-
-    def start(self) -> asyncio.Task:
-        """Start the backend-specific websocket client."""
-        if self._delegate is not None:
-            return self._delegate.start()
-        if self._brand == BRAND_DUCAHEAT:
-            from .ducaheat_ws import DucaheatWSClient  # noqa: PLC0415
-
-            self._delegate = DucaheatWSClient(
-                self.hass,
-                entry_id=self.entry_id,
-                dev_id=self.dev_id,
-                api_client=self._client,
-                coordinator=self._coordinator,
-                session=self._session,
-                namespace=DUCAHEAT_NAMESPACE,
-                inventory=self._inventory,
-            )
-        else:
-            from .termoweb_ws import TermoWebWSClient  # noqa: PLC0415
-
-            self._delegate = TermoWebWSClient(
-                self.hass,
-                entry_id=self.entry_id,
-                dev_id=self.dev_id,
-                api_client=self._client,
-                coordinator=self._coordinator,
-                session=self._session,
-                namespace=self._namespace,
-                inventory=self._inventory,
-            )
-        return self._delegate.start()
-
-    async def stop(self) -> None:
-        """Stop the backend-specific websocket client."""
-        if self._delegate is not None:
-            await self._delegate.stop()
-
-    def is_running(self) -> bool:
-        """Return True when the backend websocket client is running."""
-        return bool(self._delegate and self._delegate.is_running())
-
-    async def ws_url(self) -> str:
-        """Return the active websocket URL when available."""
-        if self._delegate and hasattr(self._delegate, "ws_url"):
-            return await self._delegate.ws_url()
-        return ""
-
 
 __all__ = [
     "CANONICAL_SETTING_KEYS",
@@ -885,7 +750,6 @@ __all__ = [
     "ConnectionRateLimiter",
     "HandshakeError",
     "WSStats",
-    "WebSocketClient",
     "WsHealthTracker",
     "build_settings_delta",
     "clone_payload_value",
@@ -893,17 +757,3 @@ __all__ = [
     "resolve_ws_update_section",
     "translate_path_update",
 ]
-
-
-def __getattr__(name: str) -> Any:
-    """Lazily expose backend websocket client implementations."""
-
-    if name == "DucaheatWSClient":
-        from .ducaheat_ws import DucaheatWSClient as _DucaheatWSClient  # noqa: PLC0415
-
-        return _DucaheatWSClient
-    if name == "TermoWebWSClient":
-        from .termoweb_ws import TermoWebWSClient as _TermoWebWSClient  # noqa: PLC0415
-
-        return _TermoWebWSClient
-    raise AttributeError(name)

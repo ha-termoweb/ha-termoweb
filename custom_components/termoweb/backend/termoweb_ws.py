@@ -29,10 +29,6 @@ from homeassistant.core import HomeAssistant
 import socketio
 
 from custom_components.termoweb.backend.rest_client import RESTClient
-from custom_components.termoweb.backend.sanitize import (
-    mask_identifier,
-    redact_token_fragment,
-)
 from custom_components.termoweb.const import (
     ACCEPT_LANGUAGE,
     API_BASE,
@@ -70,10 +66,10 @@ from .ws_client import (
 
 _LOGGER = logging.getLogger(__name__)
 
-_SENSITIVE_PLACEHOLDERS: Mapping[str, tuple[str, Callable[[str | None], str]]] = {
-    "token": ("{token}", redact_token_fragment),
-    "dev_id": ("{dev_id}", mask_identifier),
-    "sid": ("{sid}", mask_identifier),
+_SENSITIVE_PLACEHOLDERS: Mapping[str, str] = {
+    "token": "{token}",
+    "dev_id": "{dev_id}",
+    "sid": "{sid}",
 }
 
 
@@ -235,50 +231,6 @@ class WebSocketClient(_WSCommon):
             headers["Origin"] = origin
         return headers
 
-    def _sanitise_headers(self, headers: Mapping[str, typing.Any]) -> dict[str, Any]:
-        """Redact sensitive header values for logging."""
-
-        sanitised: dict[str, Any] = {}
-        for key, value in headers.items():
-            text: str
-            if isinstance(value, bytes):
-                text = value.decode(errors="ignore")
-            else:
-                text = str(value)
-            if key.lower() == "authorization":
-                prefix, _, token = text.partition(" ")
-                if token:
-                    text = f"{prefix} {redact_token_fragment(token)}".strip()
-                else:
-                    text = redact_token_fragment(text)
-            elif key.lower() in {"cookie", "set-cookie"}:
-                text = redact_token_fragment(text)
-            sanitised[key] = text
-        return sanitised
-
-    def _sanitise_placeholder(self, key: str, value: str | None) -> str | None:
-        """Return a placeholder for known sensitive values."""
-
-        entry = _SENSITIVE_PLACEHOLDERS.get(key)
-        if entry is None:
-            return None
-        placeholder, sanitizer = entry
-        text = None if value is None else str(value)
-        sanitizer(text)
-        return placeholder
-
-    def _sanitise_params(self, params: Mapping[str, str]) -> dict[str, str]:
-        """Redact sensitive query parameter values for logging."""
-
-        sanitised: dict[str, str] = {}
-        for key, value in params.items():
-            placeholder = self._sanitise_placeholder(key, value)
-            if placeholder is None:
-                sanitised[key] = value
-            else:
-                sanitised[key] = placeholder
-        return sanitised
-
     def _sanitise_url(self, url: str) -> str:
         """Return a redacted representation of the websocket URL."""
 
@@ -289,17 +241,15 @@ class WebSocketClient(_WSCommon):
         query_items = parse_qsl(parsed.query, keep_blank_values=True)
         sanitised_pairs = []
         for key, value in query_items:
-            placeholder = self._sanitise_placeholder(key, value)
+            placeholder = _SENSITIVE_PLACEHOLDERS.get(key)
             sanitised_pairs.append((key, value if placeholder is None else placeholder))
         sanitised_query = urlencode(sanitised_pairs, doseq=True)
         sanitised_path = parsed.path
         if sanitised_path:
             segments = sanitised_path.split("/")
             if len(segments) >= 2 and segments[-2] == "websocket":
-                placeholder = self._sanitise_placeholder("sid", segments[-1] or None)
-                if placeholder is not None:
-                    segments[-1] = placeholder
-                    sanitised_path = "/".join(segments)
+                segments[-1] = _SENSITIVE_PLACEHOLDERS["sid"]
+                sanitised_path = "/".join(segments)
         return urlunsplit(
             (
                 parsed.scheme,
@@ -365,16 +315,6 @@ class WebSocketClient(_WSCommon):
             self._task = None
         self._update_status("stopped")
         self._cleanup_ws_state()
-
-    def is_running(self) -> bool:
-        """Return True if the websocket client task is active."""
-        return bool(self._task and not self._task.done())
-
-    async def ws_url(self) -> str:
-        """Return the websocket URL using the API client's token helper."""
-
-        url, _ = await self._build_engineio_target()
-        return url
 
     async def debug_probe(self, inventory: Inventory | None = None) -> None:
         """Emit a dev_data probe for debugging purposes."""
@@ -498,9 +438,6 @@ class WebSocketClient(_WSCommon):
         netloc = parsed.netloc or parsed.path
         if not netloc:
             raise RuntimeError("invalid API base")
-        query = urlencode({"token": token, "dev_id": self.dev_id})
-        url = urlunsplit((scheme, netloc, "/socket.io", query, ""))
-        return url, "socket.io"
         query = urlencode({"token": token, "dev_id": self.dev_id})
         url = urlunsplit((scheme, netloc, "/socket.io", query, ""))
         return url, "socket.io"
@@ -843,7 +780,7 @@ class WebSocketClient(_WSCommon):
                 stale_after=self._payload_idle_window,
             )
             self._forward_sample_updates(sample_updates)
-        self._mark_event(paths=None, count_event=True)
+        self._mark_event(count_event=True)
 
     def _translate_path_update(self, payload: Any) -> dict[str, Any] | None:
         """Translate ``{"path": ..., "body": ...}`` frames into nodes."""
@@ -1066,26 +1003,14 @@ class WebSocketClient(_WSCommon):
         except Exception:
             _LOGGER.debug("WS: sample subscription setup failed", exc_info=True)
 
-    def _mark_event(
-        self, *, paths: list[str] | None, count_event: bool = False
-    ) -> None:
+    def _mark_event(self, *, count_event: bool = False) -> None:
         """Record receipt of a websocket event batch for health tracking."""
         now = time.time()
         self._cancel_idle_restart()
         self._stats.last_event_ts = now
         self._last_event_at = now
         self._mark_ws_payload(timestamp=now, stale_after=self._payload_idle_window)
-        if paths:
-            self._stats.events_total += 1
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                uniq: list[str] = []
-                for path in paths:
-                    if path not in uniq:
-                        uniq.append(path)
-                    if len(uniq) >= 5:
-                        break
-                self._stats.last_paths = uniq
-        elif count_event:
+        if count_event:
             self._stats.events_total += 1
         state: dict[str, Any] = self._ws_state_bucket()
         state["last_event_at"] = now
@@ -1172,7 +1097,6 @@ class TermoWebWSClient(WebSocketClient):
         coordinator: Any,
         session: aiohttp.ClientSession | None = None,
         handshake_fail_threshold: int = 5,
-        protocol: str | None = None,
         inventory: Inventory | None = None,
     ) -> None:
         """Initialise the legacy websocket client container."""
@@ -1188,7 +1112,6 @@ class TermoWebWSClient(WebSocketClient):
         self._session = session or getattr(api_client, "_session", None)
         if self._session is None:
             raise RuntimeError("aiohttp session required for websocket client")
-        self._protocol_hint = protocol
         self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
         self._task: asyncio.Task | None = None
         self._namespace = WS_NAMESPACE
@@ -1200,7 +1123,6 @@ class TermoWebWSClient(WebSocketClient):
         self._requested_with = get_brand_requested_with(BRAND_TERMOWEB)
 
         self._closing = False
-        self._connected_since: float | None = None
         self._healthy_since: float | None = None
         self._hb_send_interval: float = 27.0
         self._hb_task: asyncio.Task | None = None
@@ -1220,8 +1142,6 @@ class TermoWebWSClient(WebSocketClient):
         self._last_event_at: float | None = None
         self._last_heartbeat_at: float | None = None
 
-        self._handshake_payload: dict[str, Any] | None = None
-
         self._payload_idle_window: float = 240.0
         self._idle_restart_task: asyncio.Task | None = None
         self._idle_restart_pending = False
@@ -1229,8 +1149,6 @@ class TermoWebWSClient(WebSocketClient):
 
         self._subscription_refresh_lock = asyncio.Lock()
         self._subscription_refresh_failed = False
-        self._subscription_refresh_last_attempt: float = 0.0
-        self._subscription_refresh_last_success: float | None = None
 
         self._ws_state: dict[str, Any] | None = None
         state = self._ws_state_bucket()
@@ -1238,7 +1156,6 @@ class TermoWebWSClient(WebSocketClient):
         state.setdefault("idle_restart_pending", False)
 
         self._write_hook_installed = False
-        self._write_hook_original: Callable[..., Awaitable[Any]] | None = None
         self._install_write_hook()
 
     # ------------------------------------------------------------------
@@ -1305,7 +1222,6 @@ class TermoWebWSClient(WebSocketClient):
             setattr(client, "_tw_ws_write_wrapper", _wrapped_set_node_settings)
             setattr(client, "_tw_ws_write_original", original)
 
-        self._write_hook_original = getattr(client, "_tw_ws_write_original", original)
         self._write_hook_installed = True
 
     async def maybe_restart_after_write(self) -> None:
@@ -1388,7 +1304,6 @@ class TermoWebWSClient(WebSocketClient):
                 await self._send_snapshot_request()
                 await self._subscribe_session_metadata()
                 await self._subscribe_htr_samples()
-                self._connected_since = time.time()
                 self._healthy_since = None
                 self._update_status("connected")
                 if self._idle_monitor_task is None or self._idle_monitor_task.done():
@@ -1653,7 +1568,7 @@ class TermoWebWSClient(WebSocketClient):
         payload = args[0] if isinstance(args, list) and args else None
         if name == "dev_handshake":
             self._handle_handshake(payload)
-            self._mark_event(paths=None, count_event=True)
+            self._mark_event(count_event=True)
             return
         if name == "dev_data":
             self._handle_dev_data(payload)
@@ -1695,8 +1610,6 @@ class TermoWebWSClient(WebSocketClient):
             ws = self._ws
             if ws is None or getattr(ws, "closed", False):
                 raise RuntimeError("websocket not connected")
-            now = time.time()
-            self._subscription_refresh_last_attempt = now
             _LOGGER.info("WS: refreshing websocket lease (%s)", reason)
             try:
                 await self._send_snapshot_request()
@@ -1717,7 +1630,6 @@ class TermoWebWSClient(WebSocketClient):
                 )
                 raise
             self._subscription_refresh_failed = False
-            self._subscription_refresh_last_success = time.time()
 
     async def _send_text(self, data: str) -> None:
         """Send a websocket text frame."""

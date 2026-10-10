@@ -11,12 +11,9 @@ from conftest import _install_stubs
 
 _install_stubs()
 
-from custom_components.termoweb.backend import (  # noqa: E402
-    Backend,
-    DucaheatBackend,
-    TermoWebBackend,
-    create_backend,
-)
+from custom_components.termoweb.backend import Backend, create_backend  # noqa: E402
+from custom_components.termoweb.backend.ducaheat import DucaheatBackend  # noqa: E402
+from custom_components.termoweb.backend.termoweb import TermoWebBackend  # noqa: E402
 from custom_components.termoweb.const import BRAND_DUCAHEAT, WS_NAMESPACE  # noqa: E402
 from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient  # noqa: E402
 from custom_components.termoweb.backend.termoweb_ws import TermoWebWSClient  # noqa: E402
@@ -56,7 +53,6 @@ def test_backend_factory_returns_expected_clients() -> None:
             inventory=inventory,
         )
         assert isinstance(ws_client, TermoWebWSClient)
-        assert ws_client._protocol_hint is None
         assert getattr(ws_client, "_inventory", None) is inventory
         loop.run_until_complete(ws_client.stop())
     finally:
@@ -96,21 +92,6 @@ def test_backend_requires_create_override() -> None:
     client = DummyHttpClient()
     with pytest.raises(TypeError):
         InvalidBackend(brand="termoweb", client=client)
-
-
-def test_backend_module_exports_expected_classes() -> None:
-    """The backend module exposes the concrete backend implementations."""
-
-    backend_module = __import__(
-        Backend.__module__.rsplit(".", 1)[0],
-        fromlist=["DucaheatBackend", "TermoWebBackend"],
-    )
-
-    assert getattr(backend_module, "DucaheatBackend") is DucaheatBackend
-    assert getattr(backend_module, "TermoWebBackend") is TermoWebBackend
-
-    with pytest.raises(AttributeError):
-        getattr(backend_module, "MissingThing")
 
 
 @pytest.mark.asyncio

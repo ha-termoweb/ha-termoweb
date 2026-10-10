@@ -967,7 +967,7 @@ def test_monitor_entry_sets_up_listen_only_and_unloads(
             await asyncio.sleep(0)
         record = termoweb_init._test_helpers.get_record(stub_hass, entry)
         ws_client = record.ws_clients["aabbcc001122"]
-        running = ws_client.is_running()
+        running = ws_client._task is not None and not ws_client._task.done()
         unloaded = await termoweb_init.async_unload_entry(stub_hass, entry)
         return record, ws_client, running, unloaded
 
@@ -978,7 +978,9 @@ def test_monitor_entry_sets_up_listen_only_and_unloads(
     assert stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_capture")
     assert stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_survey")
     assert not stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_pair")
-    assert unloaded is True and not ws_client.is_running()
+    assert unloaded is True and not (
+        ws_client._task is not None and not ws_client._task.done()
+    )
     assert stub_hass.config_entries.unloaded == [(entry, ("binary_sensor", "sensor"))]
     (link,) = links
     assert link.kwargs == {"listen_only": True, "auto_ack": False}

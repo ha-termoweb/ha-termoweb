@@ -126,7 +126,7 @@ async def test_termoweb_backoff_resets_after_healthy_session(
 
     async def _read_loop() -> None:
         if healthy_sessions:
-            client._mark_event(paths=None, count_event=True)
+            client._mark_event(count_event=True)
         raise RuntimeError("server disconnect")
 
     monkeypatch.setattr(client, "_handshake", AsyncMock(return_value=("sid", 60)))

@@ -37,11 +37,11 @@ def _backend_class(brand: str) -> type[Backend]:
 
         return RadioMonitorBackend
     if uses_ducaheat_backend(brand):
-        from . import DucaheatBackend  # noqa: PLC0415
+        from .ducaheat import DucaheatBackend  # noqa: PLC0415
 
         return DucaheatBackend
 
-    from . import TermoWebBackend  # noqa: PLC0415
+    from .termoweb import TermoWebBackend  # noqa: PLC0415
 
     return TermoWebBackend
 

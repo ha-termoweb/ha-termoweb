@@ -256,28 +256,6 @@ async def test_connect_once_performs_full_handshake(
 
 
 @pytest.mark.asyncio
-async def test_request_resubscribe_kicks_immediate_subscribe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensure inventory_ready resubscribe triggers a prompt subscribe attempt."""
-
-    client = _make_client(monkeypatch)
-    client._ws = client._session._ws  # type: ignore[attr-defined]
-    client._status = "connected"
-    client._pending_dev_data = False
-    client._pending_subscribe = True
-    maybe_subscribe = AsyncMock(return_value=1)
-    monkeypatch.setattr(client, "_maybe_subscribe", maybe_subscribe)
-
-    client.request_resubscribe("inventory_ready")
-    await asyncio.sleep(0)
-    if client._resubscribe_kick_task:
-        await client._resubscribe_kick_task
-
-    assert maybe_subscribe.await_count == 1
-
-
-@pytest.mark.asyncio
 async def test_soft_refresh_triggers_before_payload_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -816,20 +794,6 @@ async def test_start_method_reuses_task(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert task_one is task_two
     await asyncio.wait_for(task_one, 0.1)
-
-
-def test_is_running_reflects_task_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    """is_running should track whether the background task is active."""
-
-    client = _make_client(monkeypatch)
-    monkeypatch.setattr(client, "_runner", AsyncMock(return_value=None))
-
-    assert client.is_running() is False
-    task = client.start()
-    assert client.is_running() is True
-    loop = client._loop
-    loop.run_until_complete(asyncio.sleep(0))
-    assert client.is_running() is False
 
 
 def test_extract_dev_data_payload_variants(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2116,21 +2080,6 @@ async def test_subscribe_feeds_defers_when_inventory_missing(
 
     assert client._pending_subscribe is False
     emit_mock.assert_not_awaited()
-
-
-def test_request_resubscribe_sets_pending(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Public resubscribe requests should flag pending subscriptions."""
-
-    client = _make_client(monkeypatch)
-    client._pending_subscribe = False
-    client._subscribe_backoff_s = 2.0
-
-    client.request_resubscribe("inventory_ready")
-
-    assert client._pending_subscribe is True
-    assert client._subscribe_backoff_s == pytest.approx(
-        ducaheat_ws._SUBSCRIBE_BACKOFF_INITIAL
-    )
 
 
 @pytest.mark.asyncio
