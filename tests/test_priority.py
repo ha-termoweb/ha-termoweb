@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -442,6 +442,8 @@ class TestHeaterPriorityNumber:
         hass.data[DOMAIN]["entry-htr"] = runtime
 
         entity.hass = hass
+        coordinator.apply_entity_patch = MagicMock(return_value=True)
+        entity._refresh_fallback = MagicMock()
 
         await entity.async_set_native_value(10.0)
 
@@ -450,7 +452,8 @@ class TestHeaterPriorityNumber:
             ("htr", "H1"),
             priority=10,
         )
-        coordinator.async_request_refresh.assert_awaited()
+        coordinator.apply_entity_patch.assert_called_once()
+        entity._refresh_fallback.schedule.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_async_set_native_value_rejects_out_of_range(self, heater_inventory):

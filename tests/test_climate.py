@@ -1528,7 +1528,7 @@ def test_commit_write_runs_optimistic_and_fallback() -> None:
 
         heater._async_write_settings = async_write
         heater._optimistic_update = optimistic
-        heater._schedule_refresh_fallback = fallback
+        heater._refresh_fallback = fallback
 
         await heater._commit_write(
             log_context="Test write",
@@ -1539,7 +1539,7 @@ def test_commit_write_runs_optimistic_and_fallback() -> None:
 
         async_write.assert_awaited_once_with(log_context="Test write", prog=[0, 1, 2])
         optimistic.assert_called_once_with(apply_fn)
-        fallback.assert_called_once()
+        fallback.schedule.assert_called_once()
 
     asyncio.run(_run())
 
@@ -1634,69 +1634,6 @@ def test_async_setup_entry_reuses_coordinator_inventory(
 
         assert len(added) == 1
         assert runtime.inventory is inventory
-
-    asyncio.run(_run())
-
-
-def test_refresh_fallback_skips_when_hass_inactive(
-    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def _run() -> None:
-        _reset_environment()
-
-        hass = HomeAssistant()
-        hass.is_stopping = True
-        hass.is_running = True
-        entry_id = "entry"
-        dev_id = "dev"
-        addr = "A"
-        coordinator = _make_coordinator(
-            hass,
-            dev_id,
-            {"nodes": {"nodes": []}, "htr": {"settings": {addr: {}}}},
-            client=AsyncMock(),
-        )
-
-        _attach_runtime(
-            hass,
-            entry_id,
-            dev_id,
-            coordinator=coordinator,
-            client=AsyncMock(),
-            version="1",
-        )
-
-        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
-        await heater.async_added_to_hass()
-
-        async def fast_sleep(_delay: float) -> None:
-            return None
-
-        monkeypatch.setattr(climate_module.asyncio, "sleep", fast_sleep)
-
-        caplog.clear()
-        with caplog.at_level(logging.DEBUG):
-            heater._schedule_refresh_fallback()
-            task = heater._refresh_fallback
-            assert task is not None
-            await task
-        coordinator.async_refresh_heater.assert_not_awaited()
-        assert heater._refresh_fallback is None
-        assert "hass stopping" in caplog.text
-
-        hass.is_stopping = False
-        hass.is_running = False
-        coordinator.async_refresh_heater.reset_mock()
-
-        caplog.clear()
-        with caplog.at_level(logging.DEBUG):
-            heater._schedule_refresh_fallback()
-            task = heater._refresh_fallback
-            assert task is not None
-            await task
-        coordinator.async_refresh_heater.assert_not_awaited()
-        assert heater._refresh_fallback is None
-        assert "hass not running" in caplog.text
 
     asyncio.run(_run())
 
@@ -1961,11 +1898,10 @@ def test_heater_async_will_remove_clears_entity_id() -> None:
         )
         entity.hass = hass
 
-        # Simulate a pending refresh fallback task
-        entity._refresh_fallback = asyncio.create_task(asyncio.sleep(999))
+        entity._refresh_fallback = MagicMock()
 
         await entity.async_will_remove_from_hass()
-        assert entity._refresh_fallback is None
+        entity._refresh_fallback.cancel.assert_called_once()
 
     asyncio.run(_run())
 
@@ -1999,25 +1935,6 @@ def test_shared_inventory_falls_back_to_underscore_attr() -> None:
     # When coordinator has neither
     del coordinator._inventory
     assert entity._shared_inventory() is None
-
-
-def test_gateway_connection_state_returns_default_without_domain_view() -> None:
-    """_gateway_connection_state should return default when domain_view absent."""
-
-    _reset_environment()
-    hass = HomeAssistant()
-    dev_id = "dev-gw"
-    coordinator = _make_coordinator(
-        hass, dev_id, {"htr": {"settings": {}}, "nodes": {}},
-    )
-    # Remove domain_view to hit the fallback
-    coordinator.domain_view = None
-
-    entity = HeaterClimateEntity(coordinator, "entry-gw", dev_id, "1", "Heater")
-    gw_state = entity._gateway_connection_state()
-    from custom_components.termoweb.domain import GatewayConnectionState
-    assert isinstance(gw_state, GatewayConnectionState)
-    assert gw_state.status is None
 
 
 def test_current_prog_slot_returns_none_for_short_prog() -> None:

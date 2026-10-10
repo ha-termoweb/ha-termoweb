@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from ..boost import ALLOWED_BOOST_MINUTES, coerce_boost_minutes
 from ..backend.factory import backend_capabilities
 from ..const import DOMAIN
+from ..domain.state import DomainState
 from ..identifiers import build_gateway_entity_unique_id, build_heater_unique_id
 from ..inventory import (
     Inventory,
@@ -30,6 +31,7 @@ from .heater import (
     DEFAULT_BOOST_DURATION,
     DEFAULT_BOOST_TEMPERATURE,
     HeaterNodeBase,
+    NodeRefreshFallback,
     async_backend_write,
     get_boost_runtime_minutes,
     get_boost_temperature,
@@ -534,6 +536,13 @@ class HeaterPriorityNumber(HeaterNodeBase, NumberEntity):
             node_type=node_type,
             inventory=inventory,
         )
+        self._refresh_fallback = NodeRefreshFallback(self, self._node_type, self._addr)
+
+    async def async_added_to_hass(self) -> None:
+        """Cancel a pending fallback refresh when the entity is removed."""
+
+        await super().async_added_to_hass()
+        self.async_on_remove(self._refresh_fallback.cancel)
 
     @property
     def native_value(self) -> int | None:
@@ -557,7 +566,13 @@ class HeaterPriorityNumber(HeaterNodeBase, NumberEntity):
                 priority=priority,
             ),
         )
-        await self.coordinator.async_request_refresh()
+
+        def _mutate(state: DomainState) -> None:
+            state.priority = priority
+
+        # Show the value now; the WebSocket echo (or fallback refresh) confirms it.
+        self.coordinator.apply_entity_patch(self._node_type, self._addr, _mutate)
+        self._refresh_fallback.schedule()
 
 
 class PowerLimitNumber(CoordinatorEntity, NumberEntity):
@@ -615,4 +630,4 @@ class PowerLimitNumber(CoordinatorEntity, NumberEntity):
         runtime = require_runtime(self.hass, self._entry_id)
         await runtime.client.set_power_limit(self._dev_id, power_limit=power_limit)
         runtime.power_limit = power_limit
-        await self.coordinator.async_request_refresh()
+        self.async_write_ha_state()
