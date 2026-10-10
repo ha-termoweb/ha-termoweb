@@ -9,7 +9,11 @@ from conftest import _install_stubs
 _install_stubs()
 
 import custom_components.termoweb.config_flow as config_flow
-from custom_components.termoweb.const import BRAND_TERMOWEB
+from custom_components.termoweb.const import (
+    BRAND_DUCAHEAT,
+    BRAND_TERMOWEB,
+    BRAND_TEVOLVE,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -67,11 +71,11 @@ def test_validate_login_uses_helper(monkeypatch: pytest.MonkeyPatch) -> None:
 
     asyncio.run(
         config_flow._validate_login(
-            hass, "user@example.com", "pw", config_flow.BRAND_DUCAHEAT
+            hass, "user@example.com", "pw", BRAND_DUCAHEAT
         )
     )
 
-    assert created == [(hass, "user@example.com", "pw", config_flow.BRAND_DUCAHEAT)]
+    assert created == [(hass, "user@example.com", "pw", BRAND_DUCAHEAT)]
     assert listed == [dummy_client]
 
 
@@ -79,8 +83,8 @@ def test_validate_login_uses_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     ("brand", "supported"),
     [
         (BRAND_TERMOWEB, False),
-        (config_flow.BRAND_DUCAHEAT, False),
-        (config_flow.BRAND_TEVOLVE, False),
+        (BRAND_DUCAHEAT, False),
+        (BRAND_TEVOLVE, False),
         (config_flow.BRAND_RADIO_MONITOR, False),
         (config_flow.BRAND_RADIO, True),
     ],

@@ -222,7 +222,6 @@ async def test_termoweb_socketio09_session_end_to_end(
         dev_id=DEV_ID,
         device=build_device_metadata_payload(DEV_ID),
         inventory=inventory,
-        entry_id=ENTRY_ID,
     )
     build_entry_runtime(
         hass=hass,

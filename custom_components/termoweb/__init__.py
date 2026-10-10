@@ -267,7 +267,6 @@ async def async_setup_entry(  # noqa: C901
         device_metadata,
         inventory,
         brand=brand,
-        entry_id=entry.entry_id,
     )
 
     energy_coordinator = EnergyStateCoordinator(

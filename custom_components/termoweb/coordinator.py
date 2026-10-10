@@ -183,7 +183,6 @@ class StateCoordinator(
         device: DeviceMetadata | Mapping[str, typing.Any] | None,
         inventory: Inventory,
         brand: str = BRAND_TERMOWEB,
-        entry_id: str = "",
     ) -> None:
         """Initialize the TermoWeb device coordinator."""
         super().__init__(
@@ -196,7 +195,6 @@ class StateCoordinator(
         self._base_interval = max(base_interval, MIN_POLL_INTERVAL)
         self._backoff = 0  # seconds
         self._dev_id = dev_id
-        self._entry_id = entry_id
         if isinstance(device, DeviceMetadata):
             metadata = device
         elif isinstance(device, Mapping) or device is None:
