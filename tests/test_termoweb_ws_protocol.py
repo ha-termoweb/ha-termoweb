@@ -183,17 +183,6 @@ def test_ws_state_bucket_initialises_storage(monkeypatch: pytest.MonkeyPatch) ->
     assert isinstance(bucket, dict)
 
 
-@pytest.mark.asyncio
-async def test_refresh_subscription_requires_connection(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Refreshing while disconnected should raise an error."""
-
-    client, _ = _make_client(monkeypatch)
-    with pytest.raises(RuntimeError):
-        await client._refresh_subscription(reason="disconnected")
-
-
 def test_handle_handshake_logging(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

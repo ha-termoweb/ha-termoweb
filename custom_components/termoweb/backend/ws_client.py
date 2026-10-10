@@ -10,7 +10,6 @@ from collections.abc import (
     Collection,
     Iterable,
     Mapping,
-    MutableMapping,
 )
 from dataclasses import dataclass
 import logging
@@ -134,32 +133,25 @@ def clone_payload_value(value: Any) -> Any:
         return dict(value)
     if isinstance(value, list):
         return list(value)
-    if isinstance(value, tuple):
-        return list(value)
     return value
 
 
 def build_settings_delta(section: str, payload: Any) -> dict[str, Any]:
     """Extract canonical settings keys from a websocket section payload."""
 
-    if section in {"samples", "status", "capabilities"}:
-        return {}
     if section == "prog":
         return {"prog": clone_payload_value(payload)} if payload is not None else {}
     if section == "prog_temps":
         return {"ptemp": clone_payload_value(payload)} if payload is not None else {}
-    if not isinstance(payload, Mapping):
-        return {}
-    if isinstance(payload, Mapping):
-        extra_ws_keys = set(payload.keys()) - set(CANONICAL_SETTING_KEYS)
-        if extra_ws_keys:
-            frozen = frozenset(extra_ws_keys)
-            if frozen not in _LOGGED_NON_CANONICAL:
-                _LOGGED_NON_CANONICAL.add(frozen)
-                _LOGGER.debug(
-                    "WS payload has non-canonical keys: %s",
-                    sorted(extra_ws_keys),
-                )
+    extra_ws_keys = set(payload.keys()) - set(CANONICAL_SETTING_KEYS)
+    if extra_ws_keys:
+        frozen = frozenset(extra_ws_keys)
+        if frozen not in _LOGGED_NON_CANONICAL:
+            _LOGGED_NON_CANONICAL.add(frozen)
+            _LOGGER.debug(
+                "WS payload has non-canonical keys: %s",
+                sorted(extra_ws_keys),
+            )
     return {
         key: clone_payload_value(payload[key])
         for key in CANONICAL_SETTING_KEYS
@@ -204,11 +196,6 @@ def forward_ws_sample_updates(
         return
 
     inventory = runtime.inventory
-    if not isinstance(inventory, Inventory):
-        active_logger = logger or _LOGGER
-        active_logger.error("%s: inventory unavailable", log_prefix)
-        return
-
     alias_map = inventory.sample_alias_map(
         base_aliases={"htr": "htr", "acm": "acm", "pmo": "pmo"}
     )
@@ -223,10 +210,7 @@ def forward_ws_sample_updates(
         if not node_type:
             continue
         canonical_type = alias_map.get(node_type, node_type)
-        if allowed_types is not None:
-            if canonical_type not in allowed_types:
-                continue
-        elif canonical_type == "thm":
+        if canonical_type not in allowed_types:
             continue
         samples_section: Mapping[str, typing.Any] | None = None
         lease_candidate: Any = None
@@ -248,8 +232,6 @@ def forward_ws_sample_updates(
                         if lease_seconds is not None
                         else lease_value
                     )
-        if not isinstance(samples_section, Mapping):
-            continue
         bucket = normalized_updates.setdefault(canonical_type, {})
         for raw_addr, payload in samples_section.items():
             if raw_addr == "lease_seconds":
@@ -395,14 +377,9 @@ class _WSStatusMixin:
     def _ws_bucket_sizes(self) -> tuple[int, int]:
         """Return the current websocket state and tracker bucket sizes."""
 
-        try:
-            runtime = require_runtime(self.hass, self.entry_id)
-        except LookupError:
-            ws_size = 0
-            trackers_size = 0
-        else:
-            ws_size = len(runtime.ws_state)
-            trackers_size = len(runtime.ws_trackers)
+        runtime = require_runtime(self.hass, self.entry_id)
+        ws_size = len(runtime.ws_state)
+        trackers_size = len(runtime.ws_trackers)
 
         footprint = getattr(self, "_ws_bucket_baseline", None)
         snapshot = (ws_size, trackers_size)
@@ -435,11 +412,7 @@ class _WSStatusMixin:
             setattr(self, "_ws_state", ws_state)
             return ws_state
 
-        ws_bucket = runtime.ws_state
-        if not isinstance(ws_bucket, dict):
-            runtime.ws_state = {}
-            ws_bucket = runtime.ws_state
-        ws_state = ws_bucket.setdefault(self.dev_id, {})
+        ws_state = runtime.ws_state.setdefault(self.dev_id, {})
         setattr(self, "_ws_state", ws_state)
         self._ws_bucket_sizes()
         return ws_state
@@ -459,9 +432,6 @@ class _WSStatusMixin:
             return tracker
 
         trackers = runtime.ws_trackers
-        if not isinstance(trackers, dict):
-            runtime.ws_trackers = {}
-            trackers = runtime.ws_trackers
         tracker = trackers.get(self.dev_id)
         if not isinstance(tracker, WsHealthTracker):
             tracker = WsHealthTracker(self.dev_id)
@@ -478,12 +448,8 @@ class _WSStatusMixin:
         except LookupError:
             return
 
-        ws_bucket = runtime.ws_state
-        if isinstance(ws_bucket, MutableMapping):
-            ws_bucket.pop(self.dev_id, None)
-        trackers = runtime.ws_trackers
-        if isinstance(trackers, MutableMapping):
-            trackers.pop(self.dev_id, None)
+        runtime.ws_state.pop(self.dev_id, None)
+        runtime.ws_trackers.pop(self.dev_id, None)
 
         setattr(self, "_ws_state", None)
         setattr(self, "_ws_tracker", None)
@@ -684,7 +650,6 @@ class _WSCommon(_WSStatusMixin):
         self._connect_limiter = ConnectionRateLimiter()
         self._payload_idle_window: float = 240.0
         self._subscription_refresh_lock = asyncio.Lock()
-        self._subscription_refresh_failed = False
         self._backoff_idx = 0
         self._unknown_nodes_logged: set[tuple[str, str]] = set()
 
@@ -877,10 +842,7 @@ class _WSCommon(_WSStatusMixin):
                         bucket.update(settings_delta)
 
             for addr, payload in per_addr.items():
-                try:
-                    node_id = DomainNodeId(node_type, addr)
-                except ValueError:
-                    continue
+                node_id = DomainNodeId(node_type, addr)
                 if not resolved_inventory.has_node(
                     node_id.node_type.value, node_id.addr
                 ):
