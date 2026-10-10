@@ -379,3 +379,26 @@ async def test_write_after_idle_restarts_only_that_gateway(
 
     await client_b.stop()
     await _stop(client_a)
+
+
+async def test_silent_first_session_is_restarted(env: Env) -> None:
+    """A session that never delivers a payload is recycled after the idle window."""
+    session = FakeSession(get=_ok_handshake)
+    client = env.client(session)
+    client.start()
+    await until(lambda: len(session.sockets) == 1, "socket")
+    ws = session.sockets[0]
+    await until(lambda: env.status() == "connected", "connected")
+    connected_at = env.clock.now
+
+    # No snapshot reply, no pushes: only server heartbeats arrive.
+    while len(session.sockets) == 1:
+        assert env.clock.now - connected_at < 600, "silent session never restarted"
+        ws.feed("2::")
+        await env.clock.advance(10)
+
+    assert ws.close_calls[0] == (aiohttp.WSCloseCode.GOING_AWAY, b"idle restart")
+    # Restarted at the first idle check at or after the 240 s window.
+    assert 240 <= env.clock.now - connected_at <= 240 + 60 + 30
+
+    await _stop(client)

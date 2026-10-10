@@ -494,7 +494,9 @@ class TermoWebWSClient(_WSCommon):
                 self._healthy_since = None
                 self._update_status("connected")
                 _LOGGER.debug("WS: starting legacy idle monitor")
-                self._idle_monitor_task = self._loop.create_task(self._idle_monitor())
+                self._idle_monitor_task = self._loop.create_task(
+                    self._idle_monitor(connected_at=time.time())
+                )
                 self._hb_task = self._loop.create_task(self._heartbeat_loop())
                 self._rtc_keepalive_task = self._loop.create_task(
                     self._rtc_keepalive_loop()
@@ -782,18 +784,17 @@ class TermoWebWSClient(_WSCommon):
         self._last_heartbeat_at = now
         self._mark_ws_heartbeat(timestamp=now)
 
-    async def _idle_monitor(self) -> None:
-        """Monitor payload idleness and restart stale websocket sessions."""
+    async def _idle_monitor(self, *, connected_at: float) -> None:
+        """Restart the session when it has had no payload for the idle window."""
 
         while not self._closing:
             await asyncio.sleep(60)
             ws = self._ws
             if ws is None or ws.closed:
                 break
-            tracker = self._ws_health_tracker()
-            last_payload = tracker.last_payload_at or tracker.last_heartbeat_at
-            if not last_payload:
-                continue
+            # Silence since connecting counts as idle even when no payload
+            # has ever arrived.
+            last_payload = self._ws_health_tracker().last_payload_at or connected_at
             now = time.time()
             idle_for = now - last_payload
             self._refresh_ws_payload_state(now=now, reason="idle_monitor")
