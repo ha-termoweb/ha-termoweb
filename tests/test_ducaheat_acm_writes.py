@@ -112,93 +112,10 @@ async def test_ducaheat_acm_extra_options_segmented_post(
 
 
 @pytest.mark.asyncio
-async def test_ducaheat_acm_boost_metadata_fallback(
-    ducaheat_rest_harness: Callable[..., Any],
-) -> None:
-    """Verify boost metadata falls back when RTC collection fails."""
-
-    harness = ducaheat_rest_harness()
-    harness.client.get_rtc_time = AsyncMock(side_effect=RuntimeError("rtc down"))
-
-    result = await harness.client.set_acm_boost_state(
-        "dev", "4", boost=True, boost_time=120
-    )
-
-    assert result == {
-        "ok": True,
-        "boost_state": {
-            "boost_active": True,
-            "_fallback": True,
-            "boost_minutes_delta": 120,
-            "boost_end_day": None,
-            "boost_end_min": None,
-            "boost_end_timestamp": None,
-        },
-    }
-
-    boost_calls = [
-        call for call in harness.segmented_calls if call["path"].endswith("/boost")
-    ]
-    assert len(boost_calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_ducaheat_acm_boost_metadata_happy_path(
-    ducaheat_rest_harness: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Ensure boost writes validate minutes and merge metadata."""
-
-    minutes_calls: list[int | None] = []
-
-    def fake_validate(value: int | None) -> int:
-        minutes_calls.append(value)
-        return 180
-
-    monkeypatch.setattr(
-        "custom_components.termoweb.backend.sanitize.validate_boost_minutes",
-        fake_validate,
-    )
-    monkeypatch.setattr(
-        "custom_components.termoweb.backend.ducaheat.validate_boost_minutes",
-        fake_validate,
-    )
-
-    harness = ducaheat_rest_harness(
-        rtc_payload={"y": 2024, "n": 1, "d": 1, "h": 5, "m": 30, "s": 0}
-    )
-
-    result = await harness.client.set_acm_boost_state(
-        "dev", "5", boost=True, boost_time=600, stemp=21.5, units="C"
-    )
-
-    assert minutes_calls == [600, 600]
-    boost_call = next(
-        call for call in harness.segmented_calls if call["path"].endswith("/boost")
-    )
-    assert boost_call["payload"] == {
-        "boost": True,
-        "boost_time": 180,
-        "stemp": "21.5",
-        "units": "C",
-    }
-    assert harness.rtc_calls == ["dev"]
-
-    assert result["ok"] is True
-    boost_state = result.get("boost_state")
-    assert boost_state == {
-        "boost_active": True,
-        "boost_end_day": 1,
-        "boost_end_min": 510,
-        "boost_minutes_delta": 180,
-        "boost_end_timestamp": "2024-01-01T08:30:00",
-    }
-
-
-@pytest.mark.asyncio
 async def test_ducaheat_acm_settings_boost_flow(
     ducaheat_rest_harness: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Cover the boost branch of segmented ACM writes including metadata collection."""
+    """Cover the boost branch of segmented ACM writes."""
 
     harness = ducaheat_rest_harness()
 
@@ -219,10 +136,10 @@ async def test_ducaheat_acm_settings_boost_flow(
         prog=[1] * 168,
         ptemp=[10.0, 15.0, 20.0],
         units="c",
-        boost_time=45,
+        boost_time=60,
     )
 
-    assert {"status", "prog", "prog_temps", "boost_state"} <= responses.keys()
+    assert {"status", "prog", "prog_temps"} <= responses.keys()
     status_call = next(
         call for call in harness.segmented_calls if call["path"].endswith("/status")
     )
@@ -230,79 +147,9 @@ async def test_ducaheat_acm_settings_boost_flow(
         "stemp": "22.0",
         "units": "C",
         "mode": "boost",
+        "boost_time": 60,
     }
     assert not any(call["path"].endswith("/mode") for call in harness.segmented_calls)
-    assert responses["boost_state"]["boost_active"] is True
-
-
-@pytest.mark.asyncio
-async def test_ducaheat_acm_settings_mode_only_collects_custom_rtc(
-    ducaheat_rest_harness: Callable[..., Any],
-) -> None:
-    """Ensure non-boost mode writes run metadata collection when RTC is patched."""
-
-    harness = ducaheat_rest_harness()
-
-    async def custom_rtc(dev_id: str) -> dict[str, Any]:
-        return {"y": 2024, "n": 2, "d": 3, "h": 4, "m": 5, "s": 6}
-
-    harness.client.get_rtc_time = custom_rtc
-
-    responses = await harness.client.set_node_settings(
-        "dev", ("acm", "17"), mode="auto"
-    )
-
-    assert "mode" in responses
-    assert responses["boost_state"]["boost_active"] is False
-
-
-@pytest.mark.asyncio
-async def test_ducaheat_acm_settings_cancel_boost_status_refresh(
-    ducaheat_rest_harness: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Ensure cancel boost requests emit status, mode, boost, and refresh calls."""
-
-    harness = ducaheat_rest_harness()
-
-    monkeypatch.setattr(harness.client, "_ensure_units", lambda units: f"unit:{units}")
-
-    async def fake_collect(
-        dev_id: str,
-        addr: str,
-        *,
-        boost_active: bool,
-        minutes: int | None,
-    ) -> dict[str, Any]:
-        """Return fallback metadata to trigger refresh dispatch."""
-
-        assert boost_active is False
-        assert minutes == 0
-        return {"_fallback": True, "boost_active": False, "boost_minutes_delta": 0}
-
-    monkeypatch.setattr(harness.client, "_collect_boost_metadata", fake_collect)
-
-    responses = await harness.client.set_node_settings(
-        "dev",
-        ("acm", "7"),
-        mode="auto",
-        units="C",
-        cancel_boost=True,
-    )
-
-    assert {"mode", "boost", "status_refresh", "boost_state"} <= responses.keys()
-    mode_call = next(
-        call
-        for call in harness.segmented_calls
-        if call["path"].endswith("/mode") and call["addr"] == "7"
-    )
-    assert mode_call["payload"] == {"mode": "auto"}
-    boost_call = next(
-        call
-        for call in harness.segmented_calls
-        if call["path"].endswith("/boost") and call["addr"] == "7"
-    )
-    assert boost_call["payload"] == {"boost": False}
-    assert responses["boost_state"] == {"boost_active": False, "boost_minutes_delta": 0}
 
 
 @pytest.mark.asyncio
@@ -320,7 +167,6 @@ async def test_ducaheat_acm_settings_cancel_only(
     )
 
     assert responses["boost"] == {"ok": True}
-    assert responses["boost_state"]["boost_active"] is False
 
 
 @pytest.mark.asyncio
@@ -339,7 +185,7 @@ async def test_ducaheat_acm_settings_cancel_with_units(
         cancel_boost=True,
     )
 
-    assert {"status", "boost", "boost_state"} <= responses.keys()
+    assert responses.keys() == {"status", "boost"}
     status_call = next(
         call
         for call in harness.segmented_calls
@@ -368,133 +214,6 @@ async def test_ducaheat_acm_settings_boost_mode_segment(
         call for call in harness.segmented_calls if call["path"].endswith("/mode")
     )
     assert mode_call["payload"] == {"mode": "boost", "boost_time": 120}
-
-
-@pytest.mark.asyncio
-async def test_collect_boost_metadata_rtc_exception_inactive(
-    ducaheat_rest_harness: Callable[..., Any],
-) -> None:
-    """RTC errors for inactive boosts should use fallback defaults."""
-
-    harness = ducaheat_rest_harness()
-    harness.client.get_rtc_time = AsyncMock(side_effect=RuntimeError("fail"))
-
-    metadata = await harness.client._collect_boost_metadata(
-        "dev", "9", boost_active=False, minutes=None
-    )
-
-    assert metadata == {
-        "boost_active": False,
-        "_fallback": True,
-        "boost_minutes_delta": 0,
-        "boost_end_day": None,
-        "boost_end_min": None,
-        "boost_end_timestamp": None,
-    }
-
-
-@pytest.mark.asyncio
-async def test_collect_boost_metadata_invalid_payload(
-    ducaheat_rest_harness: Callable[..., Any],
-) -> None:
-    """Invalid RTC payloads should mark metadata as fallback with minutes."""
-
-    harness = ducaheat_rest_harness(rtc_payload={"y": 2024})
-
-    metadata = await harness.client._collect_boost_metadata(
-        "dev", "10", boost_active=True, minutes=30
-    )
-
-    assert metadata["_fallback"] is True
-    assert metadata["boost_minutes_delta"] == 30
-
-
-@pytest.mark.asyncio
-async def test_collect_boost_metadata_invalid_payload_inactive(
-    ducaheat_rest_harness: Callable[..., Any],
-) -> None:
-    """Inactive boosts with invalid payloads should default minutes to zero."""
-
-    harness = ducaheat_rest_harness(rtc_payload={"y": 2024})
-
-    metadata = await harness.client._collect_boost_metadata(
-        "dev", "18", boost_active=False, minutes=None
-    )
-
-    assert metadata["_fallback"] is True
-    assert metadata["boost_minutes_delta"] == 0
-
-
-@pytest.mark.asyncio
-async def test_collect_boost_metadata_inactive_valid(
-    ducaheat_rest_harness: Callable[..., Any],
-) -> None:
-    """Inactive boosts should derive zeroed end metadata from RTC payloads."""
-
-    harness = ducaheat_rest_harness(
-        rtc_payload={"y": 2024, "n": 2, "d": 3, "h": 4, "m": 5, "s": 6}
-    )
-
-    metadata = await harness.client._collect_boost_metadata(
-        "dev", "11", boost_active=False, minutes=15
-    )
-
-    assert metadata == {
-        "boost_active": False,
-        "boost_end_day": None,
-        "boost_end_min": None,
-        "boost_minutes_delta": 15,
-        "boost_end_timestamp": None,
-    }
-
-
-@pytest.mark.asyncio
-async def test_ducaheat_acm_settings_non_mapping_metadata(
-    ducaheat_rest_harness: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Non-dict metadata should be attached verbatim to the response."""
-
-    harness = ducaheat_rest_harness()
-
-    async def fake_collect(*_: Any, **__: Any) -> list[str]:
-        return ["unexpected"]
-
-    monkeypatch.setattr(harness.client, "_collect_boost_metadata", fake_collect)
-
-    responses = await harness.client.set_node_settings(
-        "dev", ("acm", "19"), cancel_boost=True
-    )
-
-    assert responses["boost_state"] == ["unexpected"]
-
-
-def test_rtc_payload_to_datetime_non_mapping() -> None:
-    """Non-mapping RTC payloads should return ``None``."""
-
-    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
-
-    assert client._rtc_payload_to_datetime(None) is None
-
-
-def test_rtc_payload_to_datetime_invalid_values() -> None:
-    """String RTC fields should be rejected when parsing the timestamp."""
-
-    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
-
-    assert client._rtc_payload_to_datetime({"y": "bad"}) is None
-
-
-def test_rtc_payload_to_datetime_invalid_date() -> None:
-    """Impossible calendar dates should be ignored."""
-
-    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
-
-    assert (
-        client._rtc_payload_to_datetime(
-            {"y": 2024, "n": 2, "d": 30, "h": 0, "m": 0, "s": 0}
-        )
-        is None
-    )
 
 
 @pytest.mark.asyncio
@@ -625,46 +344,96 @@ async def test_set_acm_boost_state_invalid_stemp(
     assert "Invalid stemp value" in str(err.value)
 
 
-@pytest.mark.asyncio
-async def test_set_acm_boost_state_cancel_minutes(
-    ducaheat_rest_harness: Callable[..., Any],
-) -> None:
-    """Cancelling boosts should log zero minutes and collect metadata."""
-
-    harness = ducaheat_rest_harness()
-
-    result = await harness.client.set_acm_boost_state("dev", "13", boost=False)
-
-    assert result["boost_state"]["boost_active"] is False
-
-
-@pytest.mark.asyncio
-async def test_set_acm_boost_state_metadata_wrapped_response(
-    ducaheat_rest_harness: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Non-mapping responses should be wrapped alongside boost metadata."""
-
-    harness = ducaheat_rest_harness()
-
-    async def fake_post_acm(*args: Any, **kwargs: Any) -> bool:
-        """Return a sentinel to force the non-dict branch."""
-
-        harness.segmented_calls.append(
-            {"path": args[0], "payload": kwargs.get("payload", {})}
-        )
-        return True
-
-    monkeypatch.setattr(harness.client, "_post_acm_endpoint", fake_post_acm)
-
-    result = await harness.client.set_acm_boost_state("dev", "14", boost=True)
-
-    assert result["response"] is True
-    assert result["boost_state"]["boost_active"] is True
-
-
 def test_ensure_units_blank_defaults() -> None:
     """Empty unit strings should normalise to Celsius."""
 
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
 
     assert client._ensure_units("") == "C"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_boost", [False, True])
+async def test_acm_mode_write_makes_no_rtc_get_and_no_extra_boost_write(
+    ducaheat_rest_harness: Callable[..., Any], cancel_boost: bool
+) -> None:
+    """A plain acm mode write must not GET the RTC or POST an unrequested boost=false.
+
+    Regression: a failing RTC GET used to trigger a ``status_refresh`` POST of
+    ``{"boost": false}``, which cancels a running boost.
+    """
+
+    harness = ducaheat_rest_harness()
+    rtc = AsyncMock(side_effect=RuntimeError("rtc down"))
+    harness.client.get_rtc_time = rtc
+
+    await harness.client.set_node_settings(
+        "dev", ("acm", "7"), mode="auto", cancel_boost=cancel_boost
+    )
+
+    rtc.assert_not_awaited()
+    assert all(method != "GET" for method, _path, _kw in harness.requests)
+    # Only an explicitly requested cancel may touch /boost.
+    assert [call["path"].rsplit("/", 1)[-1] for call in harness.segmented_calls] == (
+        ["mode", "boost"] if cancel_boost else ["mode"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_acm_boost_state_write_makes_no_rtc_get(
+    ducaheat_rest_harness: Callable[..., Any],
+) -> None:
+    """Starting a boost posts once to /boost and returns the server response."""
+
+    harness = ducaheat_rest_harness()
+    rtc = AsyncMock(side_effect=RuntimeError("rtc down"))
+    harness.client.get_rtc_time = rtc
+
+    result = await harness.client.set_acm_boost_state(
+        "dev", "4", boost=True, boost_time=120, stemp=21.5, units="C"
+    )
+
+    rtc.assert_not_awaited()
+    assert result == {"ok": True}
+    assert [call["path"] for call in harness.segmented_calls] == [
+        "/api/v2/devs/dev/acm/4/boost"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_acm_boost_with_stemp_sends_boost_time(
+    ducaheat_rest_harness: Callable[..., Any],
+) -> None:
+    """mode=boost with stemp and boost_time must send both fields (B7)."""
+
+    harness = ducaheat_rest_harness()
+
+    await harness.client.set_node_settings(
+        "dev", ("acm", "6"), mode="boost", stemp=22, boost_time=60
+    )
+
+    assert [call["path"] for call in harness.segmented_calls] == [
+        "/api/v2/devs/dev/acm/6/status"
+    ]
+    assert harness.segmented_calls[0]["payload"] == {
+        "mode": "boost",
+        "stemp": "22.0",
+        "units": "C",
+        "boost_time": 60,
+    }
+
+
+@pytest.mark.asyncio
+async def test_acm_boost_with_stemp_validates_boost_time(
+    ducaheat_rest_harness: Callable[..., Any],
+) -> None:
+    """An invalid boost_time is rejected even when stemp is also supplied."""
+
+    harness = ducaheat_rest_harness()
+
+    with pytest.raises(ValueError, match="boost_time"):
+        await harness.client.set_node_settings(
+            "dev", ("acm", "6"), mode="boost", stemp=22, boost_time=45
+        )
+
+    assert harness.segmented_calls == []
