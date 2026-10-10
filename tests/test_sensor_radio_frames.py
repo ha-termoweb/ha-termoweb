@@ -87,3 +87,30 @@ def test_frames_sensor_follows_the_monitor(monkeypatch: pytest.MonkeyPatch) -> N
     }
     removers[0]()
     assert connected == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("brand", ["radio_monitor", "radio"])
+async def test_no_device_points_via_a_device_that_is_never_created(brand) -> None:
+    """Every via_device of an entry's entities names a device the entry creates."""
+
+    sensors = importlib.import_module("custom_components.termoweb.entities.sensor")
+    binary = importlib.import_module(
+        "custom_components.termoweb.entities.binary_sensor"
+    )
+    added: list[Any] = []
+    hass, entry = _setup(brand)
+    await binary.async_setup_entry(hass, entry, added.extend)
+    await sensors.async_setup_entry(hass, entry, added.extend)
+    for entity in added:
+        entity.hass = hass
+    infos = [entity.device_info for entity in added]
+    created = {ident for info in infos for ident in info["identifiers"]}
+    for info in infos:
+        assert info.get("via_device") in created | {None}
+        assert info["manufacturer"] == "Radio"
+    gateway = next(i for i in infos if (DOMAIN, DEV_ID) in i["identifiers"])
+    if brand == "radio_monitor":
+        assert "via_device" not in gateway
+    else:
+        assert gateway["via_device"] == (DOMAIN, DEV_ID, "site")

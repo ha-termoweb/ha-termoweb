@@ -10,7 +10,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration as loader_async_get_integration
 
-from .const import DOMAIN, get_brand_configuration_url, get_brand_label
+from .const import (
+    BRAND_LABELS,
+    DOMAIN,
+    RADIO_BRANDS,
+    brand_has_site_device,
+    get_brand_configuration_url,
+    get_brand_label,
+)
 from .i18n import format_fallback
 from .inventory import normalize_node_addr
 from .runtime import EntryRuntime, require_runtime
@@ -65,6 +72,8 @@ def apply_entry_device_overrides(
 
     if isinstance(brand, str) and brand.strip():
         manufacturer = brand.strip()
+        if manufacturer in BRAND_LABELS or manufacturer in RADIO_BRANDS:
+            manufacturer = get_brand_label(manufacturer)  # brand key -> label
 
     if manufacturer:
         info["manufacturer"] = manufacturer
@@ -139,8 +148,9 @@ def build_gateway_device_info(
         manufacturer=brand_label,
         name=f"{brand_label} Gateway",
         model="Gateway/Controller",
-        via_device=(DOMAIN, str(dev_id), "site"),
     )
+    if entry_data is None or brand_has_site_device(entry_data.brand):
+        info["via_device"] = (DOMAIN, str(dev_id), "site")
     _set_configuration_url(info, entry_data)
 
     info = apply_entry_device_overrides(

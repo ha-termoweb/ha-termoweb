@@ -329,3 +329,25 @@ async def test_async_get_integration_version() -> None:
 
     assert await async_get_integration_version(hass) == "test-version"
     assert hass.integration_requests == [DOMAIN]
+
+
+def test_brand_keys_become_manufacturer_labels_and_monitor_has_no_site() -> None:
+    """Brand keys show as their labels; a listen-only gateway has no site parent."""
+
+    hass = types.SimpleNamespace(data={DOMAIN: {}})
+    for brand, label in (
+        ("termoweb", "TermoWeb"),
+        ("ducaheat", "Ducaheat"),
+        ("radio", "Radio"),
+        ("radio_monitor", "Radio"),
+    ):
+        build_entry_runtime(hass=hass, entry_id=brand, dev_id="dev", brand=brand)
+        info = build_gateway_device_info(hass, brand, "dev")
+        assert info["manufacturer"] == label
+        has_site = brand != "radio_monitor"
+        assert ("via_device" in info) is has_site
+    assert build_gateway_device_info(None, None, "dev")["via_device"] == (
+        DOMAIN,
+        "dev",
+        "site",
+    )

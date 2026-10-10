@@ -123,6 +123,12 @@ def get_brand_label(brand: str) -> str:
     return BRAND_LABELS.get(brand, BRAND_LABELS[BRAND_TERMOWEB])
 
 
+def brand_has_site_device(brand: str | None) -> bool:
+    """Return False for listen-only radio entries: they have no site device."""
+
+    return brand != BRAND_RADIO_MONITOR
+
+
 def get_brand_configuration_url(brand: str | None) -> str | None:
     """Return the web portal URL for a cloud brand; None for the local radio."""
 
