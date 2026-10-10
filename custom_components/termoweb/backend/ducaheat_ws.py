@@ -71,6 +71,8 @@ _PROBE_ACK_TIMEOUT = 5.0
 _UPGRADE_DRAIN_TIMEOUT = 1.0
 _PARSE_ERROR_WINDOW_S = 30.0
 _PARSE_ERROR_THRESHOLD = 3
+_WS_CONNECT_TIMEOUT = 15.0
+_WS_CLOSE_TIMEOUT = 10.0
 
 
 def _rand_t() -> str:
@@ -207,12 +209,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._payload_stale_after = self._default_payload_window
         self._payload_window_hint: float | None = None
         self._payload_window_source: str = "default"
-        self._suppress_default_cadence_hint = True
-        try:
-            self._reset_payload_window(source="default")
-        finally:
-            self._suppress_default_cadence_hint = False
-        self._pending_default_cadence_hint = True
+        self._parse_error_reconnect = False
+        self._disconnect_lock = asyncio.Lock()
+        self._reset_payload_window(source="default")
         state = self._ws_state_bucket()
         state.setdefault("subscribe_attempts_total", 0)
         state.setdefault("subscribe_success_total", 0)
@@ -284,6 +283,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             window.popleft()
         should_disconnect = len(window) >= _PARSE_ERROR_THRESHOLD
         if should_disconnect:
+            self._parse_error_reconnect = True
             _LOGGER.warning(
                 "WS (ducaheat): repeated parse errors (%d in %.0fs); reconnecting",
                 total,
@@ -312,29 +312,21 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         try:
             arr = json.loads(content)
         except json.JSONDecodeError:
-            should_disconnect = self._record_parse_error(now=now, reason="json")
-            if should_disconnect:
-                self._loop.create_task(self._disconnect("parse_errors"))
+            self._record_parse_error(now=now, reason="json")
             return None
         if not isinstance(arr, list) or not arr:
-            should_disconnect = self._record_parse_error(now=now, reason="shape")
-            if should_disconnect:
-                self._loop.create_task(self._disconnect("parse_errors"))
+            self._record_parse_error(now=now, reason="shape")
             return None
         return arr[0], arr[1:]
 
     def _update_status_from_heartbeat(self, *, now: float) -> None:
-        """Update status based on heartbeat activity and payload recency."""
+        """Report healthy only while payloads are fresh, otherwise connected."""
 
-        tracker = self._ws_health
-        has_payload = tracker.last_payload_at is not None or (
-            self._last_update_event_at is not None
-        )
-        if has_payload:
-            self._update_status("healthy")
-            return
-        if self._status not in {"connected", "healthy"}:
-            self._update_status("connected")
+        tracker = self._ws_health_tracker()
+        tracker.refresh_payload_state(now=now)
+        status = "connected" if tracker.payload_stale else "healthy"
+        if tracker.status != status:
+            self._update_status(status)
 
     def start(self) -> asyncio.Task:
         """Start the websocket runner task."""
@@ -382,7 +374,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     await self._connect_once()
                     await self._read_loop_ws()
                 except asyncio.CancelledError:
-                    break
+                    raise
                 except Exception as exc:
                     _LOGGER.debug("WS (ducaheat): error %s", exc, exc_info=True)
                 finally:
@@ -427,7 +419,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             if isinstance(ping_interval, (int, float))
             else None
         )
-        _LOGGER.info(
+        _LOGGER.debug(
             "WS (ducaheat): OPEN decoded sid=%s pingInterval=%s pingTimeout=%s",
             sid,
             info.get("pingInterval"),
@@ -478,13 +470,14 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             for k, v in headers.items()
             if k.lower() not in ("connection", "accept-encoding")
         }
-        self._ws = await self._session.ws_connect(
-            ws_url,
-            headers=ws_headers,
-            heartbeat=None,
-            autoclose=False,
-            timeout=aiohttp.ClientTimeout(total=15),
-        )
+        async with asyncio.timeout(_WS_CONNECT_TIMEOUT):
+            self._ws = await self._session.ws_connect(
+                ws_url,
+                headers=ws_headers,
+                heartbeat=None,
+                autoclose=False,
+                timeout=aiohttp.ClientWSTimeout(ws_close=_WS_CLOSE_TIMEOUT),
+            )
 
         await self._send_str("2probe", context="probe", ws=self._ws)
         probe_deadline = time.monotonic() + _PROBE_ACK_TIMEOUT
@@ -895,7 +888,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             if not frame_recorded:
                                 self._record_frame(timestamp=now)
                                 frame_recorded = True
-                            self._update_status("healthy")
+                            self._update_status_from_heartbeat(now=now)
                             if self._pending_dev_data:
                                 self._pending_dev_data = False
                                 try:
@@ -954,6 +947,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             break
                         decoded = self._decode_socketio_event(content, now=now)
                         if decoded is None:
+                            if self._parse_error_reconnect:
+                                raise RuntimeError("repeated parse errors")
                             break
                         evt, args = decoded
                         self._stats.events_total += 1
@@ -1060,9 +1055,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                         stale_after=self._payload_stale_after,
                                     )
                             self._record_update_event(timestamp=now)
-                            self._update_status("healthy")
+                            self._update_status_from_heartbeat(now=now)
                             break
-                        break
                         break
                     continue
                 if msg.type == aiohttp.WSMsgType.ERROR:
@@ -1337,12 +1331,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._payload_window_hint = hint
         self._payload_window_source = source
 
-        previous_suppression = getattr(self, "_suppress_default_cadence_hint", False)
-        self._suppress_default_cadence_hint = True
-        try:
-            tracker = self._ws_health_tracker()
-        finally:
-            self._suppress_default_cadence_hint = previous_suppression
+        tracker = self._ws_health_tracker()
         staleness_changed = tracker.set_payload_window(window)
 
         state = self._ws_state_bucket()
@@ -1373,15 +1362,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._payload_stale_after = self._default_payload_window
         self._payload_window_hint = None
         self._payload_window_source = source
-        previous_suppression = getattr(self, "_suppress_default_cadence_hint", False)
-        self._suppress_default_cadence_hint = True
-        try:
-            tracker = self._ws_health_tracker()
-        finally:
-            self._suppress_default_cadence_hint = previous_suppression
+        tracker = self._ws_health_tracker()
         staleness_changed = tracker.set_payload_window(self._payload_stale_after)
-
-        self._pending_default_cadence_hint = True
 
         state = self._ws_state_bucket()
         state["payload_stale_after"] = tracker.payload_stale_after
@@ -1551,11 +1533,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             return
         try:
             handler(self.dev_id, tuple(deltas), replace=replace)
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug(
-                "WS (ducaheat): failed to apply websocket deltas",
-                exc_info=True,
-            )
+        except Exception:  # one bad frame must not kill the read loop
+            _LOGGER.exception("WS (ducaheat): failed to apply websocket deltas")
 
     def _translate_path_update(self, payload: Any) -> dict[str, Any] | None:
         """Translate ``{"path": ..., "body": ...}`` websocket frames into nodes."""
@@ -1711,10 +1690,19 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 )
 
     async def _disconnect(self, reason: str) -> None:
+        """Close the websocket and reset per-session state (serialized)."""
+
+        async with self._disconnect_lock:
+            await self._disconnect_locked(reason)
+
+    async def _disconnect_locked(self, reason: str) -> None:
+        """Tear down the current session; caller holds ``_disconnect_lock``."""
+
         await self._stop_idle_monitor()
         self._reset_idle_recovery_state(now=None)
         self._last_update_event_at = None
         self._parse_error_window.clear()
+        self._parse_error_reconnect = False
         task = self._keepalive_task
         if task:
             task.cancel()
@@ -1733,15 +1721,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 _LOGGER.debug("WS (ducaheat): close failed", exc_info=True)
             self._ws = None
         self._pending_dev_data = False
-        self._cleanup_ws_state()
         self._ping_interval = None
-        previous_suppression = getattr(self, "_suppress_default_cadence_hint", False)
-        self._suppress_default_cadence_hint = True
-        try:
-            self._reset_payload_window(source="disconnect")
-            tracker = self._ws_health
-        finally:
-            self._suppress_default_cadence_hint = previous_suppression
+        self._reset_payload_window(source="disconnect")
+        tracker = self._ws_health_tracker()
         tracker.last_payload_at = None
         tracker.last_heartbeat_at = None
         tracker.healthy_since = None
@@ -1760,9 +1742,10 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
     async def _get_token(self) -> str:
         headers = await self._client.authed_headers()
         auth = headers.get("Authorization") if isinstance(headers, dict) else None
-        if not auth:
+        token = auth.partition(" ")[2].strip() if isinstance(auth, str) else ""
+        if not token:
             raise RuntimeError("missing Authorization")
-        return auth.split(" ", 1)[1]
+        return token
 
 
 __all__ = ["DucaheatWSClient"]

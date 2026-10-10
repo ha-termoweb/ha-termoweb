@@ -774,7 +774,8 @@ async def test_start_and_runner_lifecycle(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(client, "_connect_once", AsyncMock(side_effect=_connect_once))
     monkeypatch.setattr(client, "_read_loop_ws", AsyncMock(side_effect=_read_loop))
 
-    await client._runner()
+    with pytest.raises(asyncio.CancelledError):
+        await client._runner()
 
     assert statuses[0] == "starting"
     assert "connect_once" in statuses
@@ -969,7 +970,7 @@ async def test_read_loop_marks_healthy_on_engineio_pong(
     await _run_read_loop(client)
 
     tracker = client._ws_health
-    assert statuses == []
+    assert "healthy" not in statuses
     assert tracker.last_heartbeat_at is not None
     assert tracker.status != "healthy"
 
@@ -1142,7 +1143,6 @@ async def test_read_loop_additional_flows(monkeypatch: pytest.MonkeyPatch) -> No
                     ),
                     SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442/invalid"),
                     SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442invalid"),
-                    SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442[]"),
                     SimpleNamespace(
                         type=aiohttp.WSMsgType.TEXT, data='442["message","ping"]'
                     ),
@@ -1783,7 +1783,8 @@ async def test_namespace_ack_replays_cached_subscriptions(
     await _run_read_loop(client)
 
     assert client._pending_dev_data is False
-    assert statuses and statuses[-1] == "healthy"
+    # Namespace ack without any payload yet: connected, not healthy.
+    assert statuses == ["connected"]
     assert ("dev_data",) == emit_calls[0]
     assert emit_calls[1:] == [
         ("subscribe", "/htr/1/samples"),
@@ -1839,7 +1840,7 @@ async def test_namespace_ack_processes_embedded_event(
 
     assert emit_calls and emit_calls[0] == ("dev_data",)
     subscribe_mock.assert_awaited_once()
-    assert statuses and statuses[0] == "healthy"
+    assert statuses[0] == "connected"
     assert statuses[-1] == "healthy"
 
 

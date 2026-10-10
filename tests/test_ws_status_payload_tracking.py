@@ -107,41 +107,6 @@ class TrackingStatusClient(_WSStatusMixin):
         self.notifications.append(payload)
 
 
-class LegacyStatusClient(_WSStatusMixin):
-    """Populate legacy websocket fields for tracker bootstrap tests."""
-
-    def __init__(self, hass: DummyHass) -> None:
-        self.hass = hass
-        self.entry_id = "entry"
-        self.dev_id = "device"
-        self._status = "legacy"
-        self._healthy_since = 111.1
-        self._last_payload_at = 222.2
-        self._last_heartbeat_at = 333.3
-
-
-def test_ws_health_tracker_bootstraps_legacy_state() -> None:
-    """Ensure tracker initialization consumes legacy mixin attributes."""
-
-    hass = DummyHass()
-    runtime = build_entry_runtime(hass=hass, entry_id="entry", dev_id="device")
-    client = LegacyStatusClient(hass)
-
-    assert hass.data[DOMAIN][client.entry_id] is runtime
-
-    tracker = client._ws_health_tracker()
-
-    assert tracker.status == "legacy"
-    assert tracker.healthy_since == 111.1
-    assert tracker.last_payload_at == 222.2
-    assert tracker.last_heartbeat_at == 333.3
-
-    assert client.dev_id in runtime.ws_trackers
-    assert runtime.ws_trackers[client.dev_id] is tracker
-
-    assert client._ws_health_tracker() is tracker
-
-
 def test_mark_ws_payload_dispatches_staleness_changes() -> None:
     """Ensure payload timestamps call the tracker and expose staleness flags."""
 

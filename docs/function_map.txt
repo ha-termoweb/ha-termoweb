@@ -179,7 +179,7 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._record_pa
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._decode_socketio_event
     Decode a Socket.IO ``42`` payload safely.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._update_status_from_heartbeat
-    Update status based on heartbeat activity and payload recency.
+    Report healthy only while payloads are fresh, otherwise connected.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.start
     Start the websocket runner task.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.stop
@@ -246,6 +246,10 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._maybe_sub
     Attempt subscription installation when prerequisites are met.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._replay_subscription_paths
     Replay cached subscription paths after a reconnect.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._disconnect
+    Close the websocket and reset per-session state (serialized).
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._disconnect_locked
+    Tear down the current session; caller holds ``_disconnect_lock``.
 custom_components/termoweb/backend/factory.py :: _backend_class
     Return the backend class serving the given brand.
 custom_components/termoweb/backend/factory.py :: create_backend

@@ -56,6 +56,9 @@ from .ws_client import (
 
 _LOGGER = logging.getLogger(__name__)
 
+_WS_CONNECT_TIMEOUT = 15.0
+_WS_CLOSE_TIMEOUT = 10.0
+
 _SENSITIVE_PLACEHOLDERS: Mapping[str, str] = {
     "token": "{token}",
     "dev_id": "{dev_id}",
@@ -408,9 +411,7 @@ class TermoWebWSClient(_WSCommon):
         if isinstance(nodes, dict):
             return nodes
         if isinstance(nodes, list):
-            mapped = self._translate_nodes_list(nodes)
-            data["nodes"] = mapped
-            return mapped
+            return self._translate_nodes_list(nodes)
         return None
 
     def _translate_nodes_list(
@@ -535,8 +536,8 @@ class TermoWebWSClient(_WSCommon):
             return
         try:
             handler(self.dev_id, tuple(deltas), replace=replace)
-        except Exception:
-            _LOGGER.debug("WS: failed to apply websocket deltas", exc_info=True)
+        except Exception:  # one bad frame must not kill the read loop
+            _LOGGER.exception("WS: failed to apply websocket deltas")
 
     def _heater_sample_subscription_targets(self) -> Iterable[tuple[str, str]]:
         """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
@@ -621,9 +622,14 @@ class TermoWebWSClient(_WSCommon):
         auth_header = (
             headers.get("Authorization") if isinstance(headers, dict) else None
         )
-        if not auth_header:
+        token = (
+            auth_header.partition(" ")[2].strip()
+            if isinstance(auth_header, str)
+            else ""
+        )
+        if not token:
             raise RuntimeError("authorization token missing")
-        return auth_header.split(" ", 1)[1]
+        return token
 
     async def _force_refresh_token(self) -> None:
         """Force the REST client to fetch a fresh access token."""
@@ -773,7 +779,6 @@ class TermoWebWSClient(_WSCommon):
         """Manage reconnection loops for the legacy Socket.IO protocol."""
 
         while not self._closing:
-            should_retry = True
             session_started = time.time()
             try:
                 await self._throttle_connection_attempt()
@@ -817,7 +822,7 @@ class TermoWebWSClient(_WSCommon):
                 )
                 await self._read_loop()
             except asyncio.CancelledError:
-                should_retry = False
+                raise
             except HandshakeError as err:
                 self._hs_fail_count += 1
                 if self._hs_fail_count == 1:
@@ -864,7 +869,7 @@ class TermoWebWSClient(_WSCommon):
                         await self._ws.close()
                     self._ws = None
                 self._update_status("disconnected")
-            if self._closing or not should_retry:
+            if self._closing:
                 break
             if self._session_received_payload(session_started):
                 self._backoff_idx = 0
@@ -933,13 +938,14 @@ class TermoWebWSClient(_WSCommon):
         )
         _LOGGER.info("WS: connecting to %s", self._sanitise_url(ws_url))
         headers = self._brand_headers(origin="https://localhost")
-        self._ws = await self._session.ws_connect(
-            ws_url,
-            timeout=aiohttp.ClientTimeout(total=15),
-            heartbeat=None,
-            autoclose=False,
-            headers=headers,
-        )
+        async with asyncio.timeout(_WS_CONNECT_TIMEOUT):
+            self._ws = await self._session.ws_connect(
+                ws_url,
+                timeout=aiohttp.ClientWSTimeout(ws_close=_WS_CLOSE_TIMEOUT),
+                heartbeat=None,
+                autoclose=False,
+                headers=headers,
+            )
 
     async def _join_namespace(self) -> None:
         """Join the API namespace after the websocket connects."""

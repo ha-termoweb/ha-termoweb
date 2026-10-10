@@ -71,7 +71,6 @@ async def test_ducaheat_backoff_resets_after_healthy_session(
         coordinator=SimpleNamespace(update_nodes=MagicMock()),
         session=SimpleNamespace(),
     )
-    client._dispatcher_mock = MagicMock()  # type: ignore[attr-defined]
     sleeps = _install_sleep_recorder(monkeypatch, client)
 
     async def _read_loop_ws() -> None:
@@ -116,7 +115,6 @@ async def test_termoweb_backoff_resets_after_healthy_session(
         coordinator=SimpleNamespace(),
         session=session,
     )
-    client._dispatcher_mock = MagicMock()  # type: ignore[attr-defined]
     sleeps = _install_sleep_recorder(monkeypatch, client)
 
     async def _connect_ws(_sid: str) -> None:

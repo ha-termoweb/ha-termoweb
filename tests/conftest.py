@@ -2719,3 +2719,24 @@ def _runtime_from_hass_data(monkeypatch: pytest.MonkeyPatch) -> None:
         return entries
 
     monkeypatch.setattr(runtime_module, "_domain_entries", _domain_entries)
+
+
+def listen_ws_status(monkeypatch: pytest.MonkeyPatch, client: Any) -> "MagicMock":
+    """Return a mock receiving every ws-status payload ``client`` dispatches."""
+    from unittest.mock import MagicMock
+
+    from custom_components.termoweb.const import signal_ws_status
+
+    # Patch the globals the client's class really uses: some tests reload or
+    # evict the ws_client module, so a fresh import may be a different object.
+    module_globals = type(client)._notify_ws_status.__globals__
+    forward = module_globals["async_dispatcher_send"]
+    listener = MagicMock()
+
+    def _send(hass: Any, signal: str, *args: Any) -> None:
+        if signal == signal_ws_status(client.entry_id):
+            listener(*args)
+        forward(hass, signal, *args)
+
+    monkeypatch.setitem(module_globals, "async_dispatcher_send", _send)
+    return listener

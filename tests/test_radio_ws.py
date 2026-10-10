@@ -10,7 +10,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from conftest import build_entry_runtime
+from conftest import build_entry_runtime, listen_ws_status
 from fake_radio_link import (
     CLOCK_ACCEPTED,
     HEATER,
@@ -90,7 +90,7 @@ async def settle(rounds: int = 30) -> None:
 
 
 def build(nodes=NODES):
-    """Return (listener, client, links, coordinator, sleeper, runtime, dispatched)."""
+    """Return (listener, client, links, coordinator, sleeper, runtime)."""
 
     links: list[FakeRadioLink] = []
 
@@ -126,9 +126,7 @@ def build(nodes=NODES):
         sleep=sleeper,
         grant_settle_s=0,
     )
-    dispatched = MagicMock()
-    listener._dispatcher_mock = dispatched  # noqa: SLF001
-    return listener, client, links, coordinator, sleeper, runtime, dispatched
+    return listener, client, links, coordinator, sleeper, runtime
 
 
 @pytest.fixture(autouse=True)
@@ -153,10 +151,13 @@ def test_requires_inventory() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_connects_refreshes_and_reports_health() -> None:
+async def test_start_connects_refreshes_and_reports_health(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Start: connect, keepalive + status per heater, deltas, healthy tracker."""
 
-    listener, client, links, coordinator, sleeper, runtime, dispatched = build()
+    listener, client, links, coordinator, sleeper, runtime = build()
+    dispatched = listen_ws_status(monkeypatch, listener)
     task = listener.start()
     assert listener.start() is task
     await settle()
@@ -189,9 +190,9 @@ async def test_start_connects_refreshes_and_reports_health() -> None:
     assert tracker.payload_stale_after == 3 * REFRESH
     assert tracker.last_heartbeat_at is not None
     assert coordinator.connections[-1]["connected"] is True
-    statuses = [call.args[2]["status"] for call in dispatched.call_args_list]
+    statuses = [call.args[0]["status"] for call in dispatched.call_args_list]
     assert statuses[0] == "connected" and "healthy" in statuses
-    assert any(call.args[2].get("health_changed") for call in dispatched.call_args_list)
+    assert any(call.args[0].get("health_changed") for call in dispatched.call_args_list)
 
     await listener.stop()
     assert not (listener._task is not None and not listener._task.done())
@@ -204,7 +205,7 @@ async def test_start_connects_refreshes_and_reports_health() -> None:
 async def test_registration_power_request_and_reports() -> None:
     """Unsolicited heater frames get their station replies and become deltas."""
 
-    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener, client, links, coordinator, sleeper, runtime = build()
     listener.start()
     await settle()
     link = links[0]
@@ -241,7 +242,7 @@ async def test_registration_power_request_and_reports() -> None:
 async def test_granted_heater_reports_heating() -> None:
     """After BF 01 the heater's power record flags heating; that becomes state on."""
 
-    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener, client, links, coordinator, sleeper, runtime = build()
     listener.start()
     await settle()
     link = links[0]
@@ -266,7 +267,7 @@ async def test_granted_heater_reports_heating() -> None:
 async def test_power_request_over_the_limit_switches_the_heater_off() -> None:
     """A heater that heats over the power limit is acked, read, then switched off."""
 
-    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener, client, links, coordinator, sleeper, runtime = build()
     listener.start()
     await settle()
     link = links[0]
@@ -302,7 +303,7 @@ async def test_energy_estimate_is_pushed_to_the_energy_sensors(monkeypatch) -> N
             (entry_id, dev_id, updates)
         ),
     )
-    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener, client, links, coordinator, sleeper, runtime = build()
     client.note_max_power(6, 1500.0)
     listener.start()
     await settle()
@@ -321,7 +322,7 @@ async def test_energy_estimate_is_pushed_to_the_energy_sensors(monkeypatch) -> N
 async def test_frames_without_usable_content() -> None:
     """Undecodable reports are confirmed but push nothing; noise is ignored."""
 
-    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener, client, links, coordinator, sleeper, runtime = build()
     listener.start()
     await settle()
     link = links[0]
@@ -366,7 +367,7 @@ async def test_failed_station_reply_is_logged_not_raised(
 ) -> None:
     """A heater that misses the BF grant just repeats its request."""
 
-    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener, client, links, coordinator, sleeper, runtime = build()
     listener.start()
     await settle()
     links[0].no_ack.add(HEATER)
@@ -381,7 +382,7 @@ async def test_failed_station_reply_is_logged_not_raised(
 async def test_stop_cancels_pending_station_replies() -> None:
     """Replies still waiting for a heater are cancelled on stop."""
 
-    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener, client, links, coordinator, sleeper, runtime = build()
     listener.start()
     await settle()
     client.reply_timeout = 30.0
@@ -398,7 +399,7 @@ async def test_stop_cancels_pending_station_replies() -> None:
 async def test_disconnect_reports_down_then_reconnects_with_backoff() -> None:
     """A dropped gateway is reported at once and reconnected after a backoff."""
 
-    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener, client, links, coordinator, sleeper, runtime = build()
     listener.start()
     await settle()
     link = links[0]
@@ -425,7 +426,7 @@ async def test_disconnect_reports_down_then_reconnects_with_backoff() -> None:
 async def test_connect_failures_back_off_progressively() -> None:
     """Connect errors back off 5 s, 10 s, ... and reset after a success."""
 
-    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener, client, links, coordinator, sleeper, runtime = build()
     link = await client.async_connect()
     link.drop()
     link.connect_errors = [RadioLinkError("down"), RadioLinkError("down")]
@@ -457,7 +458,7 @@ async def test_refresh_skips_bad_addresses_and_silent_heaters(
     """A bad inventory address is skipped; a silent heater pushes nothing."""
 
     nodes = [*NODES, {"type": "htr", "addr": "300"}]
-    listener, client, links, coordinator, sleeper, runtime, _ = build(nodes)
+    listener, client, links, coordinator, sleeper, runtime = build(nodes)
     await client.async_connect()
     links[0].no_ack.add(7)
     with caplog.at_level(logging.DEBUG, logger=radio_ws.__name__):
@@ -495,7 +496,7 @@ async def test_unexpected_refresh_error_does_not_stop_the_loop(
 ) -> None:
     """A bug in one heater's refresh or in the power check is logged; the loop goes on."""
 
-    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener, client, links, coordinator, sleeper, runtime = build()
     real_settings = client.get_node_settings
 
     async def broken_settings(dev_id, node):
@@ -532,7 +533,7 @@ async def test_unexpected_grant_error_is_logged_and_the_loop_goes_on(
 ) -> None:
     """A bug in a power grant is logged at ERROR; refreshes keep running."""
 
-    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener, client, links, coordinator, sleeper, runtime = build()
     listener.start()
     await settle()
 
