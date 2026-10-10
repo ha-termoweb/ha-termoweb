@@ -29,7 +29,11 @@ from custom_components.termoweb.boost import (
     coerce_int,
     validate_boost_minutes,
 )
-from custom_components.termoweb.codecs.ducaheat_codec import decode_settings
+from custom_components.termoweb.codecs.ducaheat_codec import (
+    decode_settings,
+    encode_program_command,
+    extract_prog_days,
+)
 from custom_components.termoweb.codecs.termoweb_codec import decode_samples
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
@@ -52,8 +56,6 @@ from custom_components.termoweb.inventory import Inventory, NodeDescriptor
 from custom_components.termoweb.planner.ducaheat_planner import plan_command
 
 _LOGGER = logging.getLogger(__name__)
-
-_DAY_ORDER = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
 class DucaheatRequestError(Exception):
@@ -252,13 +254,19 @@ class DucaheatRESTClient(RESTClient):
         if not commands:
             return {}
 
+        headers = await self.authed_headers()
+        current_prog: dict[str, list[int]] | None = None
+        if any(isinstance(command, SetProgram) for command in commands):
+            current_prog = await self._get_prog_days(dev_id, node_id, headers)
+
         write_calls: list[tuple[str, dict[str, Any]]] = []
         for command in commands:
-            plan = plan_command(dev_id, node_id, command, units=units)
+            plan = plan_command(
+                dev_id, node_id, command, units=units, current_prog=current_prog
+            )
             write_call = plan[0]
             write_calls.append((write_call.path, write_call.json or {}))
 
-        headers = await self.authed_headers()
         responses: dict[str, Any] = {}
         for path, payload in write_calls:
             if use_acm_endpoint:
@@ -282,6 +290,19 @@ class DucaheatRESTClient(RESTClient):
 
         return responses
 
+    async def _get_prog_days(
+        self, dev_id: str, node_id: NodeId, headers: Mapping[str, str]
+    ) -> dict[str, list[int]]:
+        """GET the node's weekly program so a write can echo its slot resolution."""
+
+        node_type = node_id.node_type.value
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{node_id.addr}"
+        if node_type == "thm":
+            path = f"{path}/settings"
+        payload = await self._request("GET", path, headers=dict(headers))
+        section = payload.get("prog") if isinstance(payload, Mapping) else None
+        return extract_prog_days(section)
+
     async def set_node_settings(  # noqa: C901
         self,
         dev_id: str,
@@ -291,11 +312,11 @@ class DucaheatRESTClient(RESTClient):
         stemp: float | None = None,
         prog: list[int] | None = None,
         ptemp: list[float] | None = None,
-        units: str = "C",
+        units: str | None = None,
         boost_time: int | None = None,
         cancel_boost: bool = False,
     ) -> dict[str, Any]:
-        """Write heater settings using the segmented endpoints."""
+        """Write heater settings; units are only written alone when passed explicitly."""
 
         node_type, addr = self._resolve_node_descriptor(node)
         node_id = NodeId(NodeType(node_type), addr)
@@ -312,7 +333,7 @@ class DucaheatRESTClient(RESTClient):
             if stemp is not None:
                 commands.append(SetSetpoint(stemp, mode=mode_value))
             elif (
-                units_value is not None
+                units is not None
                 and mode_value is None
                 and prog is None
                 and ptemp is None
@@ -347,7 +368,10 @@ class DucaheatRESTClient(RESTClient):
                     raise ValueError(f"Invalid stemp value: {stemp}") from err
                 payload["units"] = self._ensure_units(units)
             if prog is not None:
-                payload["prog"] = self._serialise_prog(prog)
+                current_prog = await self._get_prog_days(dev_id, node_id, headers)
+                payload["prog"] = encode_program_command(
+                    SetProgram(self._ensure_prog(prog)), current=current_prog
+                )["prog"]
             if ptemp is not None:
                 payload["ptemp"] = self._serialise_prog_temps(ptemp)
 
@@ -392,7 +416,7 @@ class DucaheatRESTClient(RESTClient):
                     )
                 )
             elif (
-                units_value is not None
+                units is not None
                 and mode_value is None
                 and prog is None
                 and ptemp is None
@@ -424,7 +448,7 @@ class DucaheatRESTClient(RESTClient):
             stemp=stemp,
             prog=prog,
             ptemp=ptemp,
-            units=units,
+            units=self._ensure_units(units),
             cancel_boost=cancel_boost,
         )
 
@@ -712,19 +736,6 @@ class DucaheatRESTClient(RESTClient):
             raise ValueError(f"Invalid units: {value}")
         return unit
 
-    def _serialise_prog(self, prog: list[int]) -> dict[str, Any]:
-        """Serialise the 168-slot programme back to API structure."""
-        normalised = self._ensure_prog(prog)
-        half_hour: dict[str, Any] = {}
-        for idx in range(len(_DAY_ORDER)):
-            start = idx * 24
-            hourly = normalised[start : start + 24]
-            slots: list[int] = []
-            for value in hourly:
-                slots.extend([value, value])
-            half_hour[str(idx)] = slots
-        return {"prog": half_hour}
-
     def _serialise_prog_temps(self, ptemp: list[float]) -> dict[str, str]:
         """Serialise preset temperatures into the API schema."""
         cold, night, day = self._ensure_ptemp(ptemp)
@@ -758,7 +769,7 @@ class DucaheatBackend(Backend):
         stemp: float | None = None,
         prog: list[int] | None = None,
         ptemp: list[float] | None = None,
-        units: str = "C",
+        units: str | None = None,
         boost_context: BoostContext | None = None,
     ) -> Any:
         """Update node settings while applying Ducaheat boost heuristics."""

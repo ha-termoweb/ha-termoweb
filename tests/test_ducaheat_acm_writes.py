@@ -139,7 +139,7 @@ async def test_ducaheat_acm_settings_boost_flow(
         boost_time=60,
     )
 
-    assert {"status", "prog", "prog_temps"} <= responses.keys()
+    assert responses.keys() == {"status", "prog"}
     status_call = next(
         call for call in harness.segmented_calls if call["path"].endswith("/status")
     )
@@ -166,7 +166,7 @@ async def test_ducaheat_acm_settings_cancel_only(
         cancel_boost=True,
     )
 
-    assert responses["boost"] == {"ok": True}
+    assert responses == {"boost": {"ok": True}}
 
 
 @pytest.mark.asyncio
@@ -176,7 +176,6 @@ async def test_ducaheat_acm_settings_cancel_with_units(
     """Cancel requests with explicit units should emit a status payload."""
 
     harness = ducaheat_rest_harness()
-    monkeypatch.setattr(harness.client, "_ensure_units", lambda units: f"unit:{units}")
 
     responses = await harness.client.set_node_settings(
         "dev",
@@ -191,7 +190,7 @@ async def test_ducaheat_acm_settings_cancel_with_units(
         for call in harness.segmented_calls
         if call["path"].endswith("/status") and call["addr"] == "16"
     )
-    assert status_call["payload"] == {"units": "unit:F"}
+    assert status_call["payload"] == {"units": "F"}
 
 
 @pytest.mark.asyncio

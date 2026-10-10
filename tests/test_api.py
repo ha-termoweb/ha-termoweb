@@ -1993,25 +1993,6 @@ def test_ducaheat_get_node_samples_keeps_second_payload(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_ducaheat_serialise_prog_expands_half_hours() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-
-    prog: list[int] = []
-    for day in range(7):
-        prog.extend([day % 3] * 24)
-
-    serialised = client._serialise_prog(prog)
-    assert set(serialised) == {"prog"}
-    assert len(serialised["prog"]) == 7
-    assert serialised["prog"]["0"] == [0] * 48
-    assert serialised["prog"]["1"] == [1] * 48
-
-
 def test_rest_client_normalise_ws_nodes_passthrough() -> None:
     client = RESTClient(FakeSession(), "user", "pass", api_base="https://api.fake")
     payload = {"htr": {"settings": {"01": {}}}}

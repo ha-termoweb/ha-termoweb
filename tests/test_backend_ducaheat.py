@@ -335,7 +335,7 @@ async def test_ducaheat_rest_set_htr_mode_preserves_modified_auto(
 async def test_ducaheat_rest_set_htr_full_segment_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure heater updates emit status, prog, and prog_temps segments."""
+    """Ensure heater updates emit status and prog segments; presets go to status."""
 
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
 
@@ -358,6 +358,9 @@ async def test_ducaheat_rest_set_htr_full_segment_payload(
         return {"segment": path.rsplit("/", 1)[-1], "payload": dict(payload)}
 
     monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
+    monkeypatch.setattr(
+        client, "_request", AsyncMock(return_value={"prog": {"0": [0] * 24}})
+    )
 
     weekly_prog = [1] * 168
     preset_temps = [10.0, 15.0, 20.0]
@@ -368,11 +371,10 @@ async def test_ducaheat_rest_set_htr_full_segment_payload(
         mode="heat",
         stemp=21,
         prog=weekly_prog,
-        ptemp=preset_temps,
         units=" f ",
     )
 
-    assert set(responses) == {"status", "prog", "prog_temps"}
+    assert set(responses) == {"status", "prog"}
     assert responses["status"]["payload"] == {
         "mode": "manual",
         "stemp": "21.0",
@@ -380,12 +382,15 @@ async def test_ducaheat_rest_set_htr_full_segment_payload(
     }
     prog_payload = responses["prog"]["payload"]["prog"]
     assert set(prog_payload) == {str(idx) for idx in range(7)}
-    assert all(len(slots) == 48 for slots in prog_payload.values())
-    assert all(set(slots) == {1} for slots in prog_payload.values())
-    assert responses["prog_temps"]["payload"] == {
-        "cold": "10.0",
-        "night": "15.0",
-        "day": "20.0",
+    assert all(slots == [1] * 24 for slots in prog_payload.values())
+
+    responses = await client.set_node_settings(
+        "dev", ("htr", "1"), ptemp=preset_temps, units="F"
+    )
+    assert responses["status"]["payload"] == {
+        "ice_temp": "10.0",
+        "eco_temp": "15.0",
+        "comf_temp": "20.0",
         "units": "F",
     }
 

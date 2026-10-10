@@ -50,8 +50,8 @@ def test_encode_program_command_splits_weekly_prog() -> None:
 
     assert set(payload) == {"prog"}
     assert set(payload["prog"]) == {"0", "1", "2", "3", "4", "5", "6"}
-    assert payload["prog"]["0"] == [0, 0, 1, 1, 2, 2] * 8
-    assert len(payload["prog"]["6"]) == 48
+    assert payload["prog"]["0"] == [0, 1, 2] * 8
+    assert len(payload["prog"]["6"]) == 24
 
 
 def test_encode_extra_options_requires_values() -> None:
@@ -222,10 +222,12 @@ def test_encode_preset_temps_with_units() -> None:
     payload = encode_preset_temps_command(
         SetPresetTemps([7.0, 16.0, 21.0]), units=" c "
     )
-    assert payload["cold"] == "7.0"
-    assert payload["night"] == "16.0"
-    assert payload["day"] == "21.0"
-    assert payload["units"] == "C"
+    assert payload == {
+        "ice_temp": "7.0",
+        "eco_temp": "16.0",
+        "comf_temp": "21.0",
+        "units": "C",
+    }
 
 
 def test_encode_extra_options_with_values() -> None:
