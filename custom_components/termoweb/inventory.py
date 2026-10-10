@@ -7,31 +7,9 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 import logging
 import typing
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
 PrebuiltNode = Any
-
-_NODE_SECTION_IGNORE_KEYS = frozenset(
-    {"dev_id", "name", "connected", "nodes", "nodes_by_type"}
-)
-
-_SNAPSHOT_NAME_CANDIDATE_KEYS = (
-    "name",
-    "label",
-    "title",
-    "display_name",
-    "device_name",
-    "friendly_name",
-    "heater_name",
-    "alias",
-    "room",
-)
-
-
-_NODE_TYPE_ALIASES: dict[str, str] = {
-    "power_monitor": "pmo",
-    "power_monitors": "pmo",
-}
 
 
 def _default_heater_name(addr: str) -> str:
@@ -56,7 +34,6 @@ __all__ = [
     "boostable_accumulator_details_for_entry",
     "build_heater_address_map",
     "build_node_inventory",
-    "heater_platform_details_from_inventory",
     "heater_sample_subscription_targets",
     "normalize_heater_addresses",
     "normalize_node_addr",
@@ -105,9 +82,6 @@ class InventorySnapshot:
 class Inventory:
     """Represent immutable node inventory details."""
 
-    _HEATER_NAME_MAP_CACHE_LIMIT: ClassVar[int] = 3
-    _DEFAULT_FACTORY_CACHE_KEY: ClassVar[str] = "default_factory"
-
     _dev_id: str
     _nodes: tuple[PrebuiltNode, ...]
     _addresses_by_type_cache: dict[str, tuple[str, ...]] | None
@@ -129,8 +103,6 @@ class Inventory:
         tuple[dict[str, tuple[str, ...]], dict[str, str]] | None
     )
     _power_monitor_sample_targets_cache: tuple[tuple[str, str], ...] | None
-    _heater_name_by_type_cache: dict[str, dict[str, dict[str, str]]]
-    _heater_name_by_type_factories: dict[str, Callable[[str], str]]
 
     def __init__(
         self,
@@ -151,8 +123,6 @@ class Inventory:
         object.__setattr__(self, "_power_monitor_address_map_cache", None)
         object.__setattr__(self, "_power_monitor_sample_address_cache", None)
         object.__setattr__(self, "_power_monitor_sample_targets_cache", None)
-        object.__setattr__(self, "_heater_name_by_type_cache", {})
-        object.__setattr__(self, "_heater_name_by_type_factories", {})
         object.__setattr__(self, "_energy_sample_types_cache", None)
 
     @property
@@ -197,11 +167,11 @@ class Inventory:
                 continue
 
             node_type = normalize_node_type(
-                entry.get("type") or entry.get("node_type"),
+                entry.get("type"),
                 use_default_when_falsey=True,
             )
             addr = normalize_node_addr(
-                entry.get("addr") or entry.get("address"),
+                entry.get("addr"),
                 use_default_when_falsey=True,
             )
 
@@ -744,127 +714,24 @@ class Inventory:
     def heater_names_by_type(
         self, default_factory: Callable[[str], str] | None = None
     ) -> dict[str, dict[str, str]]:
-        """Return cached heater names by type for ``default_factory``."""
+        """Return heater names by type, using ``default_factory`` for unnamed nodes."""
 
         factory = default_factory or _default_heater_name
-        signature = self._heater_factory_signature(factory)
-
-        if signature:
-            cached = self._heater_name_by_type_cache.get(signature)
-            cached_factory = self._heater_name_by_type_factories.get(signature)
-            if cached is not None and (
-                cached_factory is factory
-                or self._heater_factory_signature(cached_factory) == signature
-            ):
-                return cached
-
-        nodes: tuple[PrebuiltNode, ...] = self._nodes
-        sanitized_nodes: tuple[Any, ...]
-        if nodes:
-            sanitized: list[Any] = []
-            for node in nodes:
-                as_dict = getattr(node, "as_dict", None)
-                if callable(as_dict):
-                    try:
-                        payload = as_dict()
-                    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
-                        payload = None
-                    else:
-                        if isinstance(payload, Mapping):
-                            sanitized.append(dict(payload))
-                            continue
-
-                sanitized.append(
-                    {
-                        "type": getattr(node, "type", None),
-                        "addr": getattr(node, "addr", None),
-                        "name": getattr(node, "name", None),
-                    }
-                )
-            sanitized_nodes = tuple(sanitized)
-        else:
-            sanitized_nodes = nodes
-
-        def _node_value(candidate: Any, key: str) -> Any:
-            """Return attribute ``key`` for ``candidate`` regardless of type."""
-
-            if isinstance(candidate, Mapping):
-                return candidate.get(key)
-            return getattr(candidate, key, None)
-
         by_type: dict[str, dict[str, str]] = {}
-
-        for node in sanitized_nodes:
-            node_type = normalize_node_type(_node_value(node, "type"))
+        for node_type, nodes in self._ensure_nodes_by_type_cache().items():
             if node_type not in HEATER_NODE_TYPES:
                 continue
-            addr = normalize_node_addr(_node_value(node, "addr"))
-            if not addr or addr.lower() == "none":
-                continue
-            raw_name = _node_value(node, "name")
-            if isinstance(raw_name, str) and raw_name.strip():
-                resolved = raw_name.strip()
-            else:
-                resolved = factory(addr)
-            bucket = by_type.setdefault(node_type, {})
-            bucket[addr] = resolved
-
-        mapping = {node_type: dict(values) for node_type, values in by_type.items()}
-
-        if not signature:
-            return mapping
-
-        def _evict_stale_cache(new_key: str) -> None:
-            """Drop the oldest cached factory when exceeding the size limit."""
-
-            cache_size = len(self._heater_name_by_type_cache)
-            if new_key in self._heater_name_by_type_cache:
-                return
-            if cache_size < self._HEATER_NAME_MAP_CACHE_LIMIT:
-                return
-
-            candidates = [
-                key
-                for key in self._heater_name_by_type_cache
-                if key != self._DEFAULT_FACTORY_CACHE_KEY
-            ]
-            if not candidates:
-                candidates = list(self._heater_name_by_type_cache)
-
-            if candidates:
-                evicted = candidates[0]
-                self._heater_name_by_type_cache.pop(evicted, None)
-                self._heater_name_by_type_factories.pop(evicted, None)
-
-        _evict_stale_cache(signature)
-
-        self._heater_name_by_type_cache[signature] = mapping
-        self._heater_name_by_type_factories[signature] = factory
-        return mapping
-
-    @staticmethod
-    def _heater_factory_signature(factory: Callable[[str], str] | None) -> str | None:
-        """Return a stable cache key for ``factory`` when possible."""
-
-        if factory is None:
-            return None
-        if factory is _default_heater_name:
-            return Inventory._DEFAULT_FACTORY_CACHE_KEY
-
-        name = getattr(factory, "__qualname__", None) or getattr(
-            factory, "__name__", None
-        )
-        module = getattr(factory, "__module__", None)
-        if not name or name == "<lambda>":
-            return None
-
-        code = getattr(factory, "__code__", None)
-        code_hint: str | None = None
-        if code is not None:
-            code_hint = f"{getattr(code, 'co_filename', '')}:{getattr(code, 'co_firstlineno', '')}"
-
-        signature_parts = [part for part in (module or "", name, code_hint) if part]
-        return "|".join(signature_parts)
+            for node in nodes:
+                addr = normalize_node_addr(getattr(node, "addr", ""))
+                if not addr:
+                    continue
+                raw_name = getattr(node, "name", None)
+                if isinstance(raw_name, str) and raw_name.strip():
+                    resolved = raw_name.strip()
+                else:
+                    resolved = factory(addr)
+                by_type.setdefault(node_type, {})[addr] = resolved
+        return by_type
 
 
 def _normalize_node_identifier(
@@ -911,13 +778,12 @@ def normalize_node_type(
 ) -> str:
     """Return ``value`` as a normalised node type string."""
 
-    normalized = _normalize_node_identifier(
+    return _normalize_node_identifier(
         value,
         default=default,
         use_default_when_falsey=use_default_when_falsey,
         lowercase=True,
     )
-    return _NODE_TYPE_ALIASES.get(normalized, normalized)
 
 
 def normalize_node_addr(
@@ -926,8 +792,11 @@ def normalize_node_addr(
     default: str = "",
     use_default_when_falsey: bool = False,
 ) -> str:
-    """Return ``value`` as a normalised node address string."""
+    """Return ``value`` as a normalised node address string; ``None`` is invalid."""
 
+    if value is None and not use_default_when_falsey:
+        msg = "node address must not be None"
+        raise ValueError(msg)
     return _normalize_node_identifier(
         value,
         default=default,
@@ -973,33 +842,15 @@ def addresses_by_node_type(
 
 def build_heater_address_map(
     nodes: Iterable[Any],
-    *,
-    heater_types: Iterable[str] | None = None,
 ) -> tuple[dict[str, list[str]], dict[str, set[str]]]:
     """Return mapping of heater node types to addresses and reverse lookup."""
 
-    allowed_types: set[str]
-    if heater_types is None:
-        allowed_types = set(HEATER_NODE_TYPES)
-    else:
-        allowed_types = {
-            normalize_node_type(node_type, use_default_when_falsey=True)
-            for node_type in heater_types
-            if normalize_node_type(node_type, use_default_when_falsey=True)
-        }  # pragma: no cover - exercised indirectly in integration
-
-    if not allowed_types:
-        return {}, {}  # pragma: no cover - defensive
-
-    by_type_raw, _ = addresses_by_node_type(
-        nodes,
-        known_types=allowed_types,
-    )  # pragma: no cover - exercised via higher level integration tests
+    by_type_raw, _ = addresses_by_node_type(nodes, known_types=HEATER_NODE_TYPES)
 
     by_type: dict[str, list[str]] = {
         node_type: list(addresses)
         for node_type, addresses in by_type_raw.items()
-        if node_type in allowed_types and addresses
+        if node_type in HEATER_NODE_TYPES and addresses
     }
 
     reverse: dict[str, set[str]] = {}
@@ -1008,36 +859,6 @@ def build_heater_address_map(
             reverse.setdefault(address, set()).add(node_type)
 
     return by_type, reverse
-
-
-def heater_platform_details_from_inventory(
-    inventory: Inventory,
-    *,
-    default_name_simple: Callable[[str], str],
-) -> tuple[
-    dict[str, list[Node]],
-    dict[str, list[str]],
-    Callable[[str, str], str],
-]:
-    """Return heater platform metadata derived from ``inventory``."""
-
-    nodes_by_type = inventory.nodes_by_type
-    forward_map, _ = inventory.heater_address_map
-    addrs_by_type = {
-        node_type: list(forward_map.get(node_type, []))
-        for node_type in HEATER_NODE_TYPES
-    }
-
-    def resolve_name(node_type: str, addr: str) -> str:
-        """Resolve friendly names for heater nodes."""
-
-        return inventory.resolve_heater_name(
-            node_type,
-            addr,
-            default_factory=default_name_simple,
-        )
-
-    return nodes_by_type, addrs_by_type, resolve_name
 
 
 def boostable_accumulator_details_for_entry(
@@ -1097,13 +918,6 @@ def normalize_heater_addresses(
         if not node_type:
             continue
 
-        alias_target: str | None = None
-        if node_type in {"heater", "heaters", "htr"}:
-            alias_target = "htr"
-        if alias_target is not None and node_type != alias_target:
-            compat_aliases[node_type] = alias_target
-            node_type = alias_target
-
         if node_type not in HEATER_NODE_TYPES:
             continue
 
@@ -1144,25 +958,14 @@ def normalize_power_monitor_addresses(
 
     cleaned_map: dict[str, list[str]] = {}
     compat_aliases: dict[str, str] = {"pmo": "pmo"}
-    for alias, target in _NODE_TYPE_ALIASES.items():
-        if target == "pmo":
-            compat_aliases.setdefault(alias, "pmo")
 
     for raw_type, values in sources:
-        raw_type_normalized = _normalize_node_identifier(
-            raw_type,
-            use_default_when_falsey=True,
-            lowercase=True,
-        )
         node_type = normalize_node_type(
             raw_type,
             use_default_when_falsey=True,
         )
-        if not node_type or node_type != "pmo":
+        if node_type != "pmo":
             continue
-
-        if raw_type_normalized and raw_type_normalized != "pmo":
-            compat_aliases[raw_type_normalized] = "pmo"
 
         if isinstance(values, str) or not isinstance(values, Iterable):
             candidates = [values]
@@ -1256,18 +1059,12 @@ class Node:
     def name(self) -> str:
         """Return the friendly name for the node."""
 
-        attr_name = getattr(self, "_attr_name", None)
-        if isinstance(attr_name, str) and attr_name.strip():
-            return attr_name
         return self._node_name
 
     @name.setter
     def name(self, value: str | None) -> None:
         """Update the stored friendly name for the node."""
-        cleaned = str(value or "").strip()
-        self._node_name = cleaned
-        if hasattr(self, "_attr_name"):
-            self._attr_name = cleaned
+        self._node_name = str(value or "").strip()
 
     def as_dict(self) -> dict[str, Any]:
         """Return a serialisable snapshot of core node metadata."""
@@ -1322,11 +1119,6 @@ class PowerMonitorNode(Node):
 
         super().__init__(name=name, addr=addr)
 
-    def power_level(self) -> float:
-        """Return the reported power level (stub)."""
-
-        raise NotImplementedError
-
     def default_name(self) -> str:
         """Return the fallback friendly name for the power monitor."""
 
@@ -1349,11 +1141,6 @@ class ThermostatNode(Node):
 
         super().__init__(name=name, addr=addr)
 
-    def capabilities(self) -> dict[str, Any]:
-        """Return thermostat capabilities (stub)."""
-
-        raise NotImplementedError
-
 
 NODE_CLASS_BY_TYPE: dict[str, type[Node]] = {
     HeaterNode.NODE_TYPE: HeaterNode,
@@ -1363,151 +1150,15 @@ NODE_CLASS_BY_TYPE: dict[str, type[Node]] = {
 }
 
 
-def _existing_nodes_map(
-    source: Mapping[str, typing.Any] | None,
-) -> dict[str, dict[str, Any]]:
-    """Return a mapping of node type sections extracted from ``source``."""
-
-    if not isinstance(source, Mapping):
-        return {}
-
-    sections: dict[str, dict[str, Any]] = {}
-
-    raw_existing = source.get("nodes_by_type")
-    if isinstance(raw_existing, Mapping):
-        for node_type, section in raw_existing.items():
-            if isinstance(section, Mapping):
-                sections[node_type] = dict(section)
-
-    for key, value in source.items():
-        if key in _NODE_SECTION_IGNORE_KEYS:
-            continue
-        if isinstance(value, Mapping):
-            sections.setdefault(key, dict(value))
-
-    return sections
-
-
-def _iter_snapshot_sections(
-    sections: Mapping[str, typing.Any],
-    seen: set[tuple[str, str]],
-) -> Iterable[dict[str, Any]]:
-    """Yield node payloads derived from snapshot-style ``sections``."""
-
-    for node_type, payload in sections.items():
-        if not isinstance(node_type, str):
-            continue
-        normalized_type = node_type.strip()
-        if not normalized_type or not isinstance(payload, Mapping):
-            continue
-        for entry in _iter_snapshot_section(normalized_type, payload):
-            addr = entry.get("addr")
-            if not isinstance(addr, str):
-                continue
-            key = (normalized_type, addr)
-            if key in seen:
-                continue
-            seen.add(key)
-            yield entry
-
-
-def _iter_snapshot_section(
-    node_type: str, section: Mapping[str, typing.Any]
-) -> Iterable[dict[str, Any]]:
-    """Yield node dictionaries for a single node type section."""
-
-    addresses = _collect_snapshot_addresses(section)
-    for addr in sorted(addresses):
-        entry: dict[str, Any] = {"type": node_type, "addr": addr}
-        name = _extract_snapshot_name(addresses[addr])
-        if name:
-            entry["name"] = name
-        yield entry
-
-
-def _collect_snapshot_addresses(
-    section: Mapping[str, typing.Any],
-) -> dict[str, list[Mapping[str, typing.Any]]]:
-    """Return mapping of addresses to candidate payloads from ``section``."""
-
-    addresses: dict[str, list[Mapping[str, typing.Any]]] = {}
-
-    addrs = section.get("addrs")
-    if isinstance(addrs, (list, tuple, set)):
-        for candidate in addrs:
-            addr = normalize_node_addr(candidate)
-            if addr:
-                addresses.setdefault(addr, [])
-
-    for value in section.values():
-        if not isinstance(value, Mapping):
-            continue
-        for addr_key, payload in value.items():
-            addr = normalize_node_addr(addr_key)
-            if not addr:
-                continue
-            bucket = addresses.setdefault(addr, [])
-            if isinstance(payload, Mapping):
-                bucket.append(payload)
-            elif isinstance(payload, str):
-                bucket.append({"name": payload})
-
-    return addresses
-
-
-def _extract_snapshot_name(payloads: Iterable[Mapping[str, typing.Any]]) -> str:
-    """Return best candidate name extracted from ``payloads``."""
-
-    queue = [payload for payload in payloads if isinstance(payload, Mapping)]
-    seen: set[int] = set()
-
-    while queue:
-        payload = queue.pop(0)
-        payload_id = id(payload)
-        if payload_id in seen:
-            continue
-        seen.add(payload_id)
-
-        for key in _SNAPSHOT_NAME_CANDIDATE_KEYS:
-            value = payload.get(key)
-            if isinstance(value, str):
-                candidate = value.strip()
-                if candidate:
-                    return candidate
-
-        queue.extend(
-            nested for nested in payload.values() if isinstance(nested, Mapping)
-        )
-
-    return ""
-
-
 def _iter_node_payload(raw_nodes: Any) -> Iterable[dict[str, Any]]:
-    """Yield node dictionaries from a payload returned by the API."""
+    """Yield node dictionaries from a ``{"nodes": [...]}`` payload or a node list."""
 
-    if isinstance(raw_nodes, dict):
-        node_list = raw_nodes.get("nodes")
-        if isinstance(node_list, list):
-            for entry in node_list:
-                if isinstance(entry, dict):
-                    yield entry
-            return
-
-        seen: set[tuple[str, str]] = set()
-
-        if isinstance(node_list, dict):
-            yield from _iter_snapshot_sections(node_list, seen)
-
-        sections = _existing_nodes_map(raw_nodes)
-        if sections:
-            yield from _iter_snapshot_sections(sections, seen)
-            if seen:
-                return
-
-    if isinstance(raw_nodes, list):
-        for entry in raw_nodes:
-            if isinstance(entry, dict):
-                yield entry
+    node_list = raw_nodes.get("nodes") if isinstance(raw_nodes, Mapping) else raw_nodes
+    if not isinstance(node_list, list):
+        return
+    for entry in node_list:
+        if isinstance(entry, dict):
+            yield entry
 
 
 def _resolve_node_class(node_type: str) -> type[Node]:
@@ -1516,28 +1167,14 @@ def _resolve_node_class(node_type: str) -> type[Node]:
     return NODE_CLASS_BY_TYPE.get(node_type, Node)
 
 
-def _normalise_with_fallback(
-    normalizer: Callable[..., str],
-    *candidates: Any,
-) -> str:
-    """Return the first non-empty normalised value from ``candidates``."""
-
-    for candidate in candidates:
-        normalized = normalizer(candidate, use_default_when_falsey=True)
-        if normalized:
-            return normalized
-    return ""
-
-
 def build_node_inventory(raw_nodes: Any) -> list[Node]:
     """Return a list of :class:`Node` instances for the provided payload."""
 
     inventory: list[Node] = []
     for index, payload in enumerate(_iter_node_payload(raw_nodes)):
-        node_type = _normalise_with_fallback(
-            normalize_node_type,
+        node_type = normalize_node_type(
             payload.get("type"),
-            payload.get("node_type"),
+            use_default_when_falsey=True,
         )
         if not node_type:
             _LOGGER.debug(
@@ -1547,11 +1184,10 @@ def build_node_inventory(raw_nodes: Any) -> list[Node]:
             )
             continue
 
-        name = payload.get("name") or payload.get("title") or payload.get("label")
-        addr = _normalise_with_fallback(
-            normalize_node_addr,
+        name = payload.get("name")
+        addr = normalize_node_addr(
             payload.get("addr"),
-            payload.get("address"),
+            use_default_when_falsey=True,
         )
 
         node_cls = _resolve_node_class(node_type)

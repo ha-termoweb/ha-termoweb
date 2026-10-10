@@ -667,7 +667,6 @@ class TestCoordinatorPowerLimitPolling:
             base_interval=30,
             dev_id="dev-coord",
             device=None,
-            nodes=None,
             inventory=inventory,
             brand=BRAND_TERMOWEB,
             entry_id="entry-coord",
@@ -707,7 +706,6 @@ class TestCoordinatorPowerLimitPolling:
             base_interval=30,
             dev_id="dev-coord-dh",
             device=None,
-            nodes=None,
             inventory=inventory,
             brand=BRAND_DUCAHEAT,
             entry_id="entry-coord-dh",
@@ -747,7 +745,6 @@ class TestCoordinatorPowerLimitPolling:
             base_interval=30,
             dev_id="dev-coord-err",
             device=None,
-            nodes=None,
             inventory=inventory,
             brand=BRAND_TERMOWEB,
             entry_id="entry-coord-err",
@@ -786,10 +783,10 @@ class TestBuildGatewayEntityUniqueId:
         with pytest.raises(ValueError, match="dev_id must be provided"):
             build_gateway_entity_unique_id("", "power_limit")
 
-    def test_none_dev_id_produces_valid_id(self) -> None:
-        """normalize_node_addr coerces None to 'None' string."""
-        uid = build_gateway_entity_unique_id(None, "power_limit")
-        assert "power_limit" in uid
+    def test_none_dev_id_raises(self) -> None:
+        """A missing dev_id must not become the literal string "None"."""
+        with pytest.raises(ValueError):
+            build_gateway_entity_unique_id(None, "power_limit")
 
 
 # ===========================================================================

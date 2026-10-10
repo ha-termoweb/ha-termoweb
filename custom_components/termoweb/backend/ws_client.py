@@ -213,10 +213,7 @@ def forward_ws_sample_updates(
             continue
         canonical_type = alias_map.get(node_type, node_type)
         if allowed_types is not None:
-            allowed = canonical_type in allowed_types
-            if not allowed and canonical_type in {"heater", "heaters"}:
-                allowed = "htr" in allowed_types
-            if not allowed:
+            if canonical_type not in allowed_types:
                 continue
         elif canonical_type == "thm":
             continue

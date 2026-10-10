@@ -187,8 +187,7 @@ class StateCoordinator(
         base_interval: int,
         dev_id: str,
         device: DeviceMetadata | Mapping[str, typing.Any] | None,
-        nodes: Mapping[str, typing.Any] | None,
-        inventory: Inventory | None = None,
+        inventory: Inventory,
         brand: str = BRAND_TERMOWEB,
         entry_id: str = "",
     ) -> None:
@@ -214,17 +213,16 @@ class StateCoordinator(
         self._device_metadata = metadata
         self._brand = brand or BRAND_TERMOWEB
         if not isinstance(inventory, Inventory):
-            msg = "EnergyStateCoordinator requires an Inventory instance"
+            msg = "StateCoordinator requires an Inventory instance"
             raise TypeError(msg)
 
-        self._inventory: Inventory | None = None
-        self._state_store: DomainStateStore | None = None
+        self._inventory: Inventory = inventory
+        self._state_store = DomainStateStore(self._node_ids_from_inventory(inventory))
         self._pending_settings: dict[tuple[str, str], PendingSetting] = {}
         self._rtc_reference: datetime | None = None
         self._rtc_reference_monotonic: float | None = None
         self._instant_power: dict[tuple[str, str], InstantPowerEntry] = {}
-        self._domain_view = DomainStateView(dev_id, None)
-        self.update_nodes(nodes, inventory=inventory)
+        self._domain_view = DomainStateView(dev_id, self._state_store)
 
     @property
     def domain_view(self) -> DomainStateView:
@@ -273,10 +271,6 @@ class StateCoordinator(
     ) -> None:
         """Update the gateway connection state in the domain store."""
 
-        store = self._state_store
-        if store is None:
-            return
-
         state = GatewayConnectionState(
             status=status,
             connected=connected,
@@ -289,7 +283,7 @@ class StateCoordinator(
             payload_stale_after=payload_stale_after,
             idle_restart_pending=idle_restart_pending,
         )
-        store.set_gateway_connection_state(state)
+        self._state_store.set_gateway_connection_state(state)
         self._publish_device_record()
 
     def apply_energy_snapshot(self, snapshot: EnergySnapshot) -> None:
@@ -299,13 +293,7 @@ class StateCoordinator(
             return
         if snapshot.dev_id != self._dev_id:
             return
-        inventory = self._inventory
-        if not isinstance(inventory, Inventory):
-            return
-        store = self._state_store or self._ensure_state_store(inventory)
-        if store is None:
-            return
-        changed = store.set_energy_snapshot(snapshot)
+        changed = self._state_store.set_energy_snapshot(snapshot)
         if changed:
             self._publish_device_record()
 
@@ -813,70 +801,17 @@ class StateCoordinator(
         )
         return True
 
-    def update_nodes(
-        self,
-        _nodes: Mapping[str, typing.Any] | None = None,
-        *,
-        inventory: Inventory | None = None,
-    ) -> None:
-        """Update cached inventory metadata when first configured."""
-
-        if self._inventory is not None:
-            if inventory is None or inventory is self._inventory:
-                return
-            msg = "Inventory rebinding is not allowed after setup"
-            raise ValueError(msg)
-
-        if isinstance(inventory, Inventory):
-            self._inventory = inventory
-            self._ensure_state_store(inventory)
-        else:
-            self._inventory = None
-            self._state_store = None
-            self._domain_view.update_store(None)
-
-    def _ensure_inventory(self) -> Inventory | None:
-        """Ensure cached inventory metadata is available."""
-
-        return self._inventory
-
     def _node_ids_from_inventory(self, inventory: Inventory) -> list[DomainNodeId]:
         """Return domain node identifiers derived from ``inventory``."""
 
         node_ids: list[DomainNodeId] = []
         for node in inventory.nodes:
-            node_type_value: Any
-            addr_value: Any
-            if isinstance(node, Mapping):
-                node_type_value = node.get("type")
-                addr_value = node.get("addr")
-            else:
-                node_type_value = getattr(node, "type", None)
-                addr_value = getattr(node, "addr", None)
-
             try:
-                node_type = DomainNodeType(str(node_type_value))
-            except ValueError:
-                try:
-                    node_type = DomainNodeType(str(node_type_value).lower())
-                except ValueError:
-                    continue
-            try:
-                node_ids.append(DomainNodeId(node_type, addr_value))
+                node_type = DomainNodeType(node.type)
+                node_ids.append(DomainNodeId(node_type, node.addr))
             except ValueError:
                 continue
         return node_ids
-
-    def _ensure_state_store(self, inventory: Inventory) -> DomainStateStore | None:
-        """Ensure a domain state store exists when applicable."""
-
-        node_ids = self._node_ids_from_inventory(inventory)
-        if self._state_store is None:
-            self._state_store = DomainStateStore(node_ids)
-        else:
-            self._state_store.reset_nodes(node_ids)
-        self._domain_view.update_store(self._state_store)
-        return self._state_store
 
     def handle_ws_deltas(
         self,
@@ -890,14 +825,7 @@ class StateCoordinator(
         if dev_id != self._dev_id:
             return
 
-        inventory = self._inventory
-        if not isinstance(inventory, Inventory):
-            return
-
-        store = self._state_store or self._ensure_state_store(inventory)
-        if store is None:
-            return
-
+        store = self._state_store
         applied = False
         for delta in deltas:
             if not isinstance(delta, NodeSettingsDelta):
@@ -922,11 +850,7 @@ class StateCoordinator(
     ) -> bool:
         """Apply an optimistic patch through the domain store when available."""
 
-        inventory = self._inventory
         store = self._state_store
-        if store is None or not isinstance(inventory, Inventory):
-            return False
-
         normalized_type = normalize_node_type(
             node_type,
             use_default_when_falsey=True,
@@ -948,65 +872,25 @@ class StateCoordinator(
         if node_id is None:
             return False
 
-        target_ids: list[DomainNodeId] = [node_id]
-        seen_ids: set[DomainNodeId] = {node_id}
-        for candidate_type, addresses in store.addresses_by_type.items():
-            if addr not in addresses or candidate_type == node_id.node_type.value:
-                continue
-            extra_id = store.resolve_node_id(candidate_type, addr)
-            if extra_id is not None and extra_id not in seen_ids:
-                target_ids.append(extra_id)
-                seen_ids.add(extra_id)
+        current_state = store.get_state(node_id.node_type, node_id.addr)
+        working_state = clone_state(current_state)
+        if working_state is None:
+            if node_id.node_type is DomainNodeType.ACCUMULATOR:
+                working_state = AccumulatorState()
+            elif node_id.node_type is DomainNodeType.THERMOSTAT:
+                working_state = ThermostatState()
+            elif node_id.node_type is DomainNodeType.POWER_MONITOR:
+                working_state = PowerMonitorState()
+            else:
+                working_state = HeaterState()
 
-        updated = False
+        before_boost = (
+            getattr(working_state, "boost_active", None),
+            getattr(working_state, "boost_end_day", None),
+            getattr(working_state, "boost_end_min", None),
+        )
         try:
-            for target_id in target_ids:
-                current_state = store.get_state(target_id.node_type, target_id.addr)
-                working_state = clone_state(current_state)
-                if working_state is None:
-                    if target_id.node_type is DomainNodeType.ACCUMULATOR:
-                        working_state = AccumulatorState()
-                    elif target_id.node_type is DomainNodeType.THERMOSTAT:
-                        working_state = ThermostatState()
-                    elif target_id.node_type is DomainNodeType.POWER_MONITOR:
-                        working_state = PowerMonitorState()
-                    else:
-                        working_state = HeaterState()
-
-                before_boost = (
-                    getattr(working_state, "boost_active", None),
-                    getattr(working_state, "boost_end_day", None),
-                    getattr(working_state, "boost_end_min", None),
-                )
-                try:
-                    mutator(working_state)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001
-                    _LOGGER.debug(
-                        "Failed to apply optimistic patch type=%s addr=%s: %s",
-                        target_id.node_type.value,
-                        target_id.addr,
-                        err,
-                    )
-                    return False
-                after_boost = (
-                    getattr(working_state, "boost_active", None),
-                    getattr(working_state, "boost_end_day", None),
-                    getattr(working_state, "boost_end_min", None),
-                )
-                if before_boost != after_boost and isinstance(
-                    working_state, AccumulatorState
-                ):
-                    working_state.boost_end_datetime = None
-                    working_state.boost_minutes_delta = None
-
-                store.replace_state(
-                    target_id.node_type,
-                    target_id.addr,
-                    working_state,
-                )
-                updated = True
+            mutator(working_state)
         except asyncio.CancelledError:
             raise
         except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001
@@ -1017,58 +901,41 @@ class StateCoordinator(
                 err,
             )
             return False
+        after_boost = (
+            getattr(working_state, "boost_active", None),
+            getattr(working_state, "boost_end_day", None),
+            getattr(working_state, "boost_end_min", None),
+        )
+        if before_boost != after_boost and isinstance(working_state, AccumulatorState):
+            working_state.boost_end_datetime = None
+            working_state.boost_minutes_delta = None
 
-        if updated:
-            self._publish_device_record()
-        return updated
+        store.replace_state(node_id.node_type, node_id.addr, working_state)
+        self._publish_device_record()
+        return True
 
-    async def async_refresh_heater(self, node: str | tuple[str, str]) -> None:
+    async def async_refresh_heater(self, node: tuple[str, str]) -> None:
         """Refresh settings for a specific node and push the update to listeners."""
 
         dev_id = self._dev_id
         success = False
-        if isinstance(node, tuple) and len(node) == 2:
-            raw_type, raw_addr = node
-            node_type = normalize_node_type(
-                raw_type,
-                use_default_when_falsey=True,
-            )
-            addr = normalize_node_addr(
-                raw_addr,
-                use_default_when_falsey=True,
-            )
-        else:
-            node_type = ""
-            addr = normalize_node_addr(node, use_default_when_falsey=True)
+        raw_type, raw_addr = node
+        resolved_type = normalize_node_type(raw_type, use_default_when_falsey=True)
+        addr = normalize_node_addr(raw_addr, use_default_when_falsey=True)
 
         _LOGGER.info(
             "Refreshing heater settings node_type=%s addr=%s",
-            node_type or "<auto>",
+            resolved_type,
             addr,
         )
-        resolved_type = node_type or "htr"
 
         try:
             self._prune_pending_settings()
-            if not addr:
+            if not resolved_type or not addr:
                 _LOGGER.error(
-                    "Cannot refresh heater settings without an address",
+                    "Cannot refresh heater settings without a node type and address",
                 )
                 return
-
-            inventory = self._ensure_inventory()
-
-            if inventory is None:
-                _LOGGER.error(
-                    "Cannot refresh heater settings without inventory metadata",
-                )
-                return
-
-            forward_map, reverse = inventory.heater_address_map
-            addr_types = reverse.get(addr)
-            resolved_type = node_type or (
-                next(iter(addr_types)) if addr_types else "htr"
-            )
 
             payload = await self.client.get_node_settings(dev_id, (resolved_type, addr))
 
@@ -1101,14 +968,7 @@ class StateCoordinator(
                 success = True
                 return
 
-            store = self._state_store or self._ensure_state_store(inventory)
-            if store is None:
-                _LOGGER.error(
-                    "Cannot refresh heater settings without a domain state store"
-                )
-                return
-
-            store.apply_full_snapshot(
+            self._state_store.apply_full_snapshot(
                 resolved_type,
                 addr,
                 self._filtered_settings_payload(payload),
@@ -1119,14 +979,14 @@ class StateCoordinator(
         except TimeoutError as err:
             _LOGGER.error(
                 "Timeout refreshing heater settings for node_type=%s addr=%s",
-                node_type or resolved_type,
+                resolved_type,
                 addr,
                 exc_info=err,
             )
         except (ClientError, BackendRateLimitError, BackendAuthError) as err:
             _LOGGER.error(
                 "Failed to refresh heater settings for node_type=%s addr=%s: %s",
-                node_type or resolved_type,
+                resolved_type,
                 addr,
                 err,
                 exc_info=err,
@@ -1135,7 +995,7 @@ class StateCoordinator(
             _LOGGER.info(
                 "Finished heater settings refresh for node_type=%s "
                 "addr=%s (success=%s)",
-                node_type or resolved_type,
+                resolved_type,
                 addr,
                 success,
             )
@@ -1143,28 +1003,17 @@ class StateCoordinator(
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch the latest settings for every known node on each poll."""
         dev_id = self._dev_id
-        inventory = self._ensure_inventory()
-
-        if inventory is None:
-            _LOGGER.debug("Skipping poll because inventory metadata is unavailable")
-            return {}
-
-        store = self._state_store or self._ensure_state_store(inventory)
-
-        addr_map, reverse = inventory.heater_address_map
+        addr_map, reverse = self._inventory.heater_address_map
         addrs = [addr for addrs in addr_map.values() for addr in addrs]
         rtc_now: datetime | None = None
         try:
             self._prune_pending_settings()
-            if store is None:
-                return {}
-
             if addrs:
                 rtc_now = await self._async_fetch_settings_to_store(
                     dev_id,
                     addr_map,
                     reverse,
-                    store,
+                    self._state_store,
                     rtc_now,
                 )
 
@@ -1213,7 +1062,7 @@ class EnergyStateCoordinator(
         hass: HomeAssistant,
         client: RESTClient,
         dev_id: str,
-        inventory: Inventory | None,
+        inventory: Inventory,
         state_coordinator: StateCoordinator | None = None,
     ) -> None:
         """Initialize the heater energy coordinator."""
@@ -1223,9 +1072,12 @@ class EnergyStateCoordinator(
             name="termoweb-htr-energy",
             update_interval=HTR_ENERGY_UPDATE_INTERVAL,
         )
+        if not isinstance(inventory, Inventory):
+            msg = "Energy inventory is unavailable"
+            raise TypeError(msg)
         self.client = client
         self._dev_id = dev_id
-        self._inventory: Inventory | None = None
+        self._inventory: Inventory = inventory
         self._last: dict[tuple[str, str], tuple[float, float]] = {}
         self._base_interval = HTR_ENERGY_UPDATE_INTERVAL
         self._base_interval_seconds = HTR_ENERGY_UPDATE_INTERVAL.total_seconds()
@@ -1241,7 +1093,6 @@ class EnergyStateCoordinator(
             "acm": 1000.0,
             "pmo": 3_600_000.0,
         }
-        self.update_addresses(inventory)
         self.data = build_empty_snapshot(dev_id)
 
     def _publish_to_state_store(self, snapshot: EnergySnapshot) -> None:
@@ -1258,19 +1109,6 @@ class EnergyStateCoordinator(
         if isinstance(data, EnergySnapshot):
             self._publish_to_state_store(data)
         super().async_set_updated_data(data)
-
-    def _resolve_inventory(self, candidate: Inventory | None = None) -> Inventory:
-        """Return the active inventory, preferring ``candidate`` when provided."""
-
-        if candidate is not None and not isinstance(candidate, Inventory):
-            msg = "Energy inventory is unavailable"
-            raise TypeError(msg)
-
-        inventory = candidate if isinstance(candidate, Inventory) else self._inventory
-        if not isinstance(inventory, Inventory):
-            msg = "Energy inventory is unavailable"
-            raise TypeError(msg)
-        return inventory
 
     @staticmethod
     def _node_id_for(node_type: str, addr: str) -> DomainNodeId | None:
@@ -1454,22 +1292,6 @@ class EnergyStateCoordinator(
                     power_bucket,
                 )
 
-    def update_addresses(
-        self,
-        inventory: Inventory | None,
-    ) -> None:
-        """Replace the tracked nodes using immutable inventory metadata."""
-
-        if not isinstance(inventory, Inventory):
-            msg = "Energy inventory is unavailable"
-            raise TypeError(msg)
-
-        valid_keys = set(self._iter_energy_targets(inventory))
-        self._inventory = inventory
-        self._last = {
-            key: value for key, value in self._last.items() if key in valid_keys
-        }
-
     def _process_energy_sample(
         self,
         node_type: str,
@@ -1529,7 +1351,7 @@ class EnergyStateCoordinator(
 
         dev_id = self._dev_id
         try:
-            inventory = self._resolve_inventory()
+            inventory = self._inventory
             targets_by_type = self._targets_by_type(inventory)
 
             energy_by_type: dict[str, dict[str, float]] = {
@@ -1657,11 +1479,7 @@ class EnergyStateCoordinator(
         else:
             self._ws_deadline = None
 
-        try:
-            inventory = self._resolve_inventory()
-        except TypeError:
-            return
-
+        inventory = self._inventory
         targets_by_type = self._targets_by_type(inventory)
         alias_map = inventory.sample_alias_map(
             include_types=ENERGY_NODE_TYPES,
@@ -1747,11 +1565,7 @@ class EnergyStateCoordinator(
         if dev_id != self._dev_id or not isinstance(samples, Mapping):
             return
 
-        try:
-            inventory = self._resolve_inventory()
-        except TypeError:
-            return
-
+        inventory = self._inventory
         targets_by_type = self._targets_by_type(inventory)
         alias_map = inventory.sample_alias_map(
             include_types=ENERGY_NODE_TYPES,

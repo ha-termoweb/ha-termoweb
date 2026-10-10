@@ -237,23 +237,3 @@ def test_get_energy_metrics_for_type_returns_filtered() -> None:
     result = view.get_energy_metrics_for_type(NodeType.HEATER)
     assert "01" in result
     assert "02" not in result
-
-
-# ---------------------------------------------------------------------------
-# update_store
-# ---------------------------------------------------------------------------
-
-
-def test_update_store_changes_backing_store() -> None:
-    """update_store refreshes the view's backing store reference."""
-
-    view = DomainStateView("dev", None)
-    assert view.get_heater_state("htr", "01") is None
-
-    store = DomainStateStore([NodeId(NodeType.HEATER, "01")])
-    store.apply_full_snapshot("htr", "01", {"mode": "manual"})
-    view.update_store(store)
-
-    state = view.get_heater_state("htr", "01")
-    assert state is not None
-    assert state.mode == "manual"

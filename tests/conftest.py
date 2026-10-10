@@ -2244,10 +2244,10 @@ class FakeCoordinator:
         base_interval: int = 0,
         dev_id: str = "dev",
         dev: Any | None = None,
-        nodes: dict[str, Any] | None = None,
         inventory: "Inventory" | None = None,
         brand: str | None = None,
         *,
+        nodes: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
         entry_id: str = "",
     ) -> None:

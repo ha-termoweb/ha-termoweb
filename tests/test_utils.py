@@ -91,7 +91,6 @@ def test_normalize_node_type_cases(
         (" 01 ", "", False, "01"),
         ("  ", "fallback", False, "fallback"),
         (None, "", True, ""),
-        (None, "fallback", False, "None"),
         ("none", "", False, "none"),
     ],
 )
@@ -263,11 +262,11 @@ def test_normalize_heater_addresses_accepts_string_sources() -> None:
     """String inputs should be coerced into normalised heater maps."""
 
     mapping, aliases = normalize_heater_addresses(
-        {"heater": " 1 ", "acm": ["2", "2", " "]}
+        {"htr": " 1 ", "acm": ["2", "2", " "], "heater": "3"}
     )
 
     assert mapping == {"htr": ["1"], "acm": ["2"]}
-    assert aliases["heater"] == "htr"
+    assert aliases == {"htr": "htr"}
 
 
 def test_get_brand_api_base_fallback() -> None:

@@ -398,7 +398,7 @@ def test_forward_ws_sample_updates_handles_power_monitors(
         "entry",
         "dev",
         {
-            "power_monitor": {
+            "pmo": {
                 "samples": {"7": {"power": 100}},
                 "lease_seconds": 90,
             }
