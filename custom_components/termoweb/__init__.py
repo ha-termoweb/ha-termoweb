@@ -360,7 +360,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         brand=brand,
         boost_runtime={},
         boost_temperature={},
-        climate_entities={},
     )
     hass.data[DOMAIN][entry.entry_id] = runtime
 

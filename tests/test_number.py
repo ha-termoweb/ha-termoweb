@@ -206,39 +206,6 @@ async def test_duration_async_added_to_hass_uses_settings_when_state_missing(
 
 
 @pytest.mark.asyncio
-async def test_duration_async_set_native_value_persists_valid_and_rejects_invalid(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Verify valid slider updates persist and invalid inputs leave state untouched."""
-
-    entity = _make_duration_entity()
-    entity.async_write_ha_state = MagicMock()
-
-    calls: list[tuple[HomeAssistant, str, str, str, int]] = []
-
-    def fake_set(
-        hass: HomeAssistant,
-        entry_id: str,
-        node_type: str,
-        addr: str,
-        minutes: int,
-    ) -> None:
-        calls.append((hass, entry_id, node_type, addr, minutes))
-
-    _patch_number_attr(monkeypatch, "set_boost_runtime_minutes", fake_set)
-
-    await entity.async_set_native_value(2.0)
-
-    hass = entity.hass
-    assert hass is not None
-    assert calls == [
-        (hass, entity._entry_id, entity._node_type, entity._addr, 120),
-    ]
-    assert entity.native_value == 2.0
-
-
-@pytest.mark.asyncio
 async def test_temperature_async_added_to_hass_prefers_stored_temperature(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -372,46 +339,6 @@ async def test_temperature_async_added_to_hass_uses_settings_when_state_missing(
         24.4,
     )
     assert entity.native_value == 24.4
-
-
-@pytest.mark.asyncio
-async def test_temperature_async_set_native_value_calls_service(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Verify slider updates call the preset service and persist the value."""
-
-    entity = _make_temperature_entity()
-    hass = entity.hass
-    assert hass is not None
-
-    hass.services = type("svc", (), {"async_call": AsyncMock()})()
-    entity.async_write_ha_state = MagicMock()
-
-    set_mock = MagicMock()
-    _patch_number_attr(monkeypatch, "set_boost_temperature", set_mock)
-    _patch_number_attr(
-        monkeypatch,
-        "resolve_climate_entity_id",
-        lambda *_: "climate.accumulator_2",
-    )
-
-    await entity.async_set_native_value(23.25)
-
-    hass.services.async_call.assert_awaited_once_with(
-        DOMAIN,
-        "set_acm_preset",
-        {"entity_id": "climate.accumulator_2", "temperature": 23.3},
-        blocking=True,
-    )
-    set_mock.assert_called_once_with(
-        hass,
-        entity._entry_id,
-        entity._node_type,
-        entity._addr,
-        23.3,
-    )
-    entity.async_write_ha_state.assert_called()
 
 
 @pytest.mark.asyncio

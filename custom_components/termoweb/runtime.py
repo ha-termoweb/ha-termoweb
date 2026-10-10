@@ -45,7 +45,6 @@ class EntryRuntime:
     last_radio_capture: dict[str, Any] | None = None
     boost_runtime: dict[str, dict[str, int]] = field(default_factory=dict)
     boost_temperature: dict[str, dict[str, float]] = field(default_factory=dict)
-    climate_entities: dict[str, dict[str, str]] = field(default_factory=dict)
     power_limit: int | None = None
     recalc_poll: Callable[[], None] | None = None
     unsub_ws_status: Callable[[], None] | None = None
