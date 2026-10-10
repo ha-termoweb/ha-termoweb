@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 from conftest import DummyREST
 import pytest
 
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.backend import termoweb_ws as module
 from custom_components.termoweb.backend.ws_client import ConnectionRateLimiter
 
@@ -66,7 +67,7 @@ async def test_handshake_retries_use_limiter_and_backoff(
     session.get = _get
     api_client = DummyREST()
     api_client._session = session
-    hass = SimpleNamespace(loop=asyncio.get_running_loop(), data={module.DOMAIN: {}})
+    hass = SimpleNamespace(loop=asyncio.get_running_loop(), data={DOMAIN: {}})
 
     client = module.TermoWebWSClient(
         hass,

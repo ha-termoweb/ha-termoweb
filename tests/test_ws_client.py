@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import importlib
 import gzip
 from types import MappingProxyType, ModuleType, SimpleNamespace
@@ -21,6 +22,7 @@ from conftest import (
     build_entry_runtime,
     listen_ws_status,
 )
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.backend import ducaheat_ws
 from custom_components.termoweb.backend import termoweb_ws as module
 from custom_components.termoweb.backend import ws_client as base_ws
@@ -149,7 +151,7 @@ def _make_termoweb_client(
             call_soon_threadsafe=lambda cb, *args: cb(*args),
         )
 
-    hass = SimpleNamespace(loop=hass_loop, data={module.DOMAIN: {}})
+    hass = SimpleNamespace(loop=hass_loop, data={DOMAIN: {}})
     build_entry_runtime(
         hass=hass,
         entry_id="entry",
@@ -179,7 +181,7 @@ def _make_ducaheat_client(
             create_task=lambda coro, **_: SimpleNamespace(done=lambda: True),
             call_soon_threadsafe=lambda cb, *args: cb(*args),
         )
-    hass = SimpleNamespace(loop=hass_loop, data={module.DOMAIN: {}})
+    hass = SimpleNamespace(loop=hass_loop, data={DOMAIN: {}})
     build_entry_runtime(
         hass=hass,
         entry_id="entry",
@@ -616,7 +618,7 @@ def test_ws_state_bucket_initialises_missing_data(
 
     client = _make_termoweb_client(monkeypatch)
     bucket = client._ws_state_bucket()
-    runtime = client.hass.data[module.DOMAIN]["entry"]
+    runtime = client.hass.data[DOMAIN]["entry"]
     runtime_module = importlib.import_module("custom_components.termoweb.runtime")
     assert isinstance(runtime, runtime_module.EntryRuntime)
     assert runtime.ws_state["device"] is bucket
@@ -638,58 +640,6 @@ def test_handshake_error_exposes_status_and_url() -> None:
     assert error.response_snippet == "snippet"
 
 
-def test_termoweb_nodes_to_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Node payloads should translate into domain deltas."""
-
-    client = _make_termoweb_client(monkeypatch)
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    inventory = Inventory("device", build_node_inventory(raw_nodes))
-    client._inventory = inventory
-
-    nodes_payload = {
-        "htr": {
-            "settings": {"1": {"mode": "manual", "unknown": "drop"}},
-            "status": {"1": {"stemp": "18.0", "online": True}},
-            "prog": {"1": {"0": 1}},
-            "samples": {"1": {"temp": 12}},
-            "advanced": {"1": {"misc": "skip"}},
-        },
-        "zzz": {"settings": {"1": {"mode": "auto"}}},
-    }
-
-    deltas = client._nodes_to_deltas(nodes_payload, inventory=inventory)
-    assert len(deltas) == 1
-    delta = deltas[0]
-    domain_module = importlib.import_module("custom_components.termoweb.domain")
-    assert isinstance(delta, domain_module.NodeSettingsDelta)
-    assert delta.node_id.addr == "1"
-    assert delta.payload["mode"] == "manual"
-    assert delta.payload["stemp"] == "18.0"
-    assert delta.payload["prog"] == {"0": 1}
-    assert "unknown" not in delta.payload
-    assert "samples" not in delta.payload
-
-
-def test_termoweb_nodes_to_deltas_validates_inventory(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Unknown nodes should be logged and ignored during delta translation."""
-
-    client = _make_termoweb_client(monkeypatch)
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    inventory = Inventory("device", build_node_inventory(raw_nodes))
-    client._inventory = inventory
-
-    with caplog.at_level(logging.WARNING, module._LOGGER.name):
-        deltas = client._nodes_to_deltas(
-            {"htr": {"settings": {"2": {"mode": "auto"}}}},
-            inventory=inventory,
-        )
-
-    assert deltas == []
-    assert any("unknown node_type" in record.message for record in caplog.records)
-
-
 def test_termoweb_translate_path_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
     """Path frames should yield node mappings and typed deltas."""
 
@@ -707,13 +657,16 @@ def test_termoweb_translate_path_deltas(monkeypatch: pytest.MonkeyPatch) -> None
     assert deltas[0].payload["mode"] == "auto"
 
 
-def test_ducaheat_brand_headers_include_expected_fields() -> None:
-    """Verify Ducaheat brand headers contain required keys."""
+def test_ducaheat_polling_headers_extend_brand_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ducaheat polling headers add browser-like fields to the shared brand set."""
 
-    headers = ducaheat_ws._brand_headers("agent", "requested")
-    assert headers["User-Agent"] == "agent"
-    assert headers["X-Requested-With"] == "requested"
-    assert headers["Origin"].startswith("https://")
+    client = _make_ducaheat_client(monkeypatch)
+    headers = client._polling_headers()
+    assert headers.items() >= client._brand_headers(origin="https://localhost").items()
+    assert headers["Referer"] == "https://localhost/"
+    assert headers["Connection"] == "keep-alive"
 
 
 def test_encode_polling_packet_formats_payload() -> None:
@@ -767,18 +720,6 @@ def test_ducaheat_log_nodes_summary_includes_counts(
     client._log_nodes_summary({"htr": {"settings": {"1": {}, "2": {}}}})
     assert "htr" in caplog.text
     assert "2" in caplog.text
-
-
-def test_termoweb_brand_headers_optional_origin(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Brand headers should include requested-with and optional origin."""
-
-    client = _make_termoweb_client(monkeypatch)
-    headers = client._brand_headers(origin="https://app.example")
-    assert headers["User-Agent"]
-    assert headers["X-Requested-With"]
-    assert headers["Origin"] == "https://app.example"
 
 
 def test_termoweb_value_redaction_behaviour(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -861,64 +802,6 @@ async def test_termoweb_cancel_idle_restart(monkeypatch: pytest.MonkeyPatch) -> 
     client._cancel_idle_restart()
     assert client._idle_restart_pending is False
     assert client._ws_state_bucket()["idle_restart_pending"] is False
-
-
-@pytest.mark.asyncio
-async def test_termoweb_get_token_from_rest(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The websocket client should reuse REST client authorization tokens."""
-
-    client = _make_termoweb_client(monkeypatch)
-    rest_client = client._client
-    rest_client.authed_headers = AsyncMock(  # type: ignore[attr-defined]
-        return_value={"Authorization": "Bearer newtoken"}
-    )
-    token = await client._get_token()
-    assert token == "newtoken"
-
-
-@pytest.mark.asyncio
-async def test_termoweb_get_token_missing_header(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Missing authorization headers should raise an error."""
-
-    client = _make_termoweb_client(monkeypatch)
-    rest_client = client._client
-    rest_client.authed_headers = AsyncMock(return_value={})  # type: ignore[attr-defined]
-    with pytest.raises(RuntimeError):
-        await client._get_token()
-
-
-def test_termoweb_start_reuses_existing_task(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Starting when already running should return the existing task."""
-
-    loop = DummyLoop()
-    client = _make_termoweb_client(monkeypatch, hass_loop=loop)
-
-    async def _noop() -> None:
-        return None
-
-    existing = DummyTask(_noop())
-    client._task = existing
-
-    task = client.start()
-    assert task is existing
-    assert not loop.created_tasks
-    existing.cancel()
-
-
-def test_termoweb_start_creates_task(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Starting without a running task should schedule the runner."""
-
-    loop = DummyLoop()
-    client = _make_termoweb_client(monkeypatch, hass_loop=loop)
-    runner = AsyncMock()
-    client._runner = runner  # type: ignore[assignment]
-
-    task = client.start()
-    assert task is loop.created_tasks[0]
-    assert runner.await_count == 0
-    task.cancel()
 
 
 @pytest.mark.asyncio
@@ -1056,37 +939,6 @@ def test_termoweb_schedule_idle_restart_skips_when_closed(
     assert not loop.created_tasks
 
 
-def test_ducaheat_client_start_reuses_task(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ducaheat client should reuse existing tasks when running."""
-
-    loop = DummyLoop()
-    client = _make_ducaheat_client(monkeypatch, hass_loop=loop)
-
-    async def _noop() -> None:
-        return None
-
-    existing = DummyTask(_noop())
-    client._task = existing  # type: ignore[attr-defined]
-
-    task = client.start()
-    assert task is existing
-    assert not loop.created_tasks
-    existing.cancel()
-
-
-def test_ducaheat_client_start_creates_task(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ducaheat client start should create a task when idle."""
-
-    loop = DummyLoop()
-    client = _make_ducaheat_client(monkeypatch, hass_loop=loop)
-    runner = AsyncMock()
-    client._runner = runner  # type: ignore[attr-defined]
-
-    task = client.start()
-    assert task is loop.created_tasks[0]
-    task.cancel()
-
-
 @pytest.mark.asyncio
 async def test_ducaheat_client_stop_cancels_task(
     monkeypatch: pytest.MonkeyPatch,
@@ -1148,14 +1000,18 @@ def test_ducaheat_path_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client._path() == "/socket.io/"
 
 
-def test_ws_lease_backoff_sequence() -> None:
-    """Backoff helper should iterate through the configured sequence."""
+@pytest.mark.parametrize("brand", ["termoweb", "ducaheat"])
+def test_ws_backoff_sequence(
+    monkeypatch: pytest.MonkeyPatch, brand: str
+) -> None:
+    """Both clients share one backoff sequence that restarts on reset."""
 
-    lease = base_ws._WsLeaseMixin()
-    values = [lease._next_backoff() for _ in range(6)]
+    maker = _make_termoweb_client if brand == "termoweb" else _make_ducaheat_client
+    client = maker(monkeypatch)
+    values = [client._next_backoff() for _ in range(6)]
     assert values == [5, 10, 30, 120, 300, 300]
-    lease._reset_backoff()
-    assert lease._next_backoff() == 5
+    client._reset_backoff()
+    assert client._next_backoff() == 5
 
 
 @pytest.mark.asyncio
@@ -1239,3 +1095,246 @@ def test_ws_common_update_status_dispatches(
 
     dispatcher.assert_called_once()
     coordinator.update_gateway_connection.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by both websocket clients, exercised through each of them
+# ---------------------------------------------------------------------------
+
+_CLIENT_FACTORIES = {
+    "termoweb": _make_termoweb_client,
+    "ducaheat": _make_ducaheat_client,
+}
+both_clients = pytest.mark.parametrize("brand", sorted(_CLIENT_FACTORIES))
+
+
+def _client_with_inventory(
+    monkeypatch: pytest.MonkeyPatch, brand: str, *, hass_loop: Any | None = None
+) -> tuple[Any, Inventory]:
+    """Return a client of ``brand`` bound to a one-heater inventory."""
+
+    client = _CLIENT_FACTORIES[brand](monkeypatch, hass_loop=hass_loop)
+    inventory = Inventory(
+        "device", build_node_inventory({"nodes": [{"type": "htr", "addr": "1"}]})
+    )
+    client._inventory = inventory
+    return client, inventory
+
+
+@both_clients
+def test_common_brand_headers(monkeypatch: pytest.MonkeyPatch, brand: str) -> None:
+    """Brand headers carry the brand identity and an optional origin."""
+
+    client = _CLIENT_FACTORIES[brand](monkeypatch)
+    headers = client._brand_headers(origin="https://app.example")
+    assert headers["User-Agent"]
+    assert headers["X-Requested-With"]
+    assert headers["Origin"] == "https://app.example"
+    assert "Origin" not in client._brand_headers()
+
+
+@both_clients
+def test_common_nodes_to_deltas(monkeypatch: pytest.MonkeyPatch, brand: str) -> None:
+    """Node payloads become deltas; unknown nodes and missing inventory are skipped."""
+
+    client, inventory = _client_with_inventory(monkeypatch, brand)
+    nodes = {
+        "htr": {
+            "settings": {"1": {"mode": "manual", "unknown": "drop"}},
+            "status": {"1": {"stemp": "18.0", "online": True}},
+            "prog": {"1": {"0": 1}},
+            "samples": {"1": {"temp": 12}},
+            "capabilities": {"1": {"x": 1}},
+            7: {"1": {"mode": "auto"}},
+            "extra": {"": {"mode": "auto"}},
+        },
+        "bogus": {"settings": {"1": {"mode": "auto"}}},
+    }
+
+    deltas = client._nodes_to_deltas(nodes, inventory=inventory)
+
+    assert len(deltas) == 1
+    payload = deltas[0].payload
+    assert deltas[0].node_id.addr == "1"
+    assert payload["mode"] == "manual"
+    assert payload["stemp"] == "18.0"
+    assert payload["prog"] == {"0": 1}
+    assert "unknown" not in payload
+    assert "samples" not in payload
+    assert (
+        client._nodes_to_deltas(
+            {"htr": {"settings": {"2": {"mode": "auto"}}}}, inventory=inventory
+        )
+        == []
+    )
+    assert client._nodes_to_deltas(nodes, inventory=None) == []
+
+
+@both_clients
+def test_common_apply_deltas_to_store(
+    monkeypatch: pytest.MonkeyPatch, brand: str
+) -> None:
+    """Deltas reach the coordinator handler; handler failures do not propagate."""
+
+    client, inventory = _client_with_inventory(monkeypatch, brand)
+    deltas = client._nodes_to_deltas(
+        {"htr": {"settings": {"1": {"mode": "auto"}}}}, inventory=inventory
+    )
+    client._apply_deltas_to_store(deltas, replace=True)  # no handler: no-op
+
+    handler = MagicMock()
+    client._coordinator = SimpleNamespace(handle_ws_deltas=handler)
+    client._apply_deltas_to_store(deltas, replace=True)
+    handler.assert_called_once_with("device", tuple(deltas), replace=True)
+
+    handler.side_effect = RuntimeError("boom")
+    client._apply_deltas_to_store(deltas, replace=False)
+
+
+@both_clients
+def test_common_translate_path_update(
+    monkeypatch: pytest.MonkeyPatch, brand: str
+) -> None:
+    """Path frames map onto node sections; malformed frames are rejected."""
+
+    client = _CLIENT_FACTORIES[brand](monkeypatch)
+    assert client._translate_path_update(
+        {"path": "/api/v2/devs/device/htr/2/settings/setup", "body": {"mode": "auto"}}
+    ) == {"htr": {"settings": {"2": {"setup": {"mode": "auto"}}}}}
+    assert client._translate_path_update(
+        {"path": "/api/v2/devs/device/htr/2/setup", "body": {"mode": "eco"}}
+    ) == {"htr": {"settings": {"2": {"setup": {"mode": "eco"}}}}}
+    for payload in (
+        {"path": "/", "body": {}},
+        {"path": "/api/v2/devs/device/htr", "body": {}},
+        "not a mapping",
+        {"nodes": {}},
+        {"path": "/api/v2/devs/device/htr/2/status"},
+        {"path": "/api/v2/devs/device/htr/ /status", "body": {"temp": 1}},
+    ):
+        assert client._translate_path_update(payload) is None
+
+
+@both_clients
+@pytest.mark.asyncio
+async def test_common_get_token(monkeypatch: pytest.MonkeyPatch, brand: str) -> None:
+    """The bearer token is reused from the REST client; a missing one raises."""
+
+    client = _CLIENT_FACTORIES[brand](monkeypatch)
+    client._client.authed_headers = AsyncMock(
+        return_value={"Authorization": "Bearer newtoken"}
+    )
+    assert await client._get_token() == "newtoken"
+    client._client.authed_headers = AsyncMock(return_value={})
+    with pytest.raises(RuntimeError):
+        await client._get_token()
+
+
+@both_clients
+def test_common_start_reuses_or_creates_task(
+    monkeypatch: pytest.MonkeyPatch, brand: str
+) -> None:
+    """``start`` reuses a live task and otherwise schedules the runner."""
+
+    loop = DummyLoop()
+    client = _CLIENT_FACTORIES[brand](monkeypatch, hass_loop=loop)
+
+    async def _noop() -> None:
+        return None
+
+    existing = DummyTask(_noop())
+    client._task = existing
+    assert client.start() is existing
+    assert not loop.created_tasks
+    existing.cancel()
+
+    client._task = None
+    client._runner = AsyncMock()  # type: ignore[assignment]
+    task = client.start()
+    assert task is loop.created_tasks[0]
+    task.cancel()
+
+
+@both_clients
+def test_common_normalise_nodes(monkeypatch: pytest.MonkeyPatch, brand: str) -> None:
+    """Normalisation delegates to the REST codec and tolerates codec failures."""
+
+    client = _CLIENT_FACTORIES[brand](monkeypatch)
+    nodes = {"htr": {"status": {"1": {}}}}
+
+    assert client._normalise_nodes(nodes) == nodes
+    client._client.normalise_ws_nodes = lambda n: MappingProxyType({"htr": {}})
+    assert client._normalise_nodes(nodes) == {"htr": {}}
+    assert isinstance(client._normalise_nodes(nodes), dict)
+    client._client.normalise_ws_nodes = lambda n: ["ok"]
+    assert client._normalise_nodes(nodes) == ["ok"]
+
+    def _raise(_nodes: Any) -> Any:
+        raise RuntimeError
+
+    client._client.normalise_ws_nodes = _raise
+    assert client._normalise_nodes(nodes) == nodes
+
+
+@both_clients
+def test_common_coerce_nodes_list(monkeypatch: pytest.MonkeyPatch, brand: str) -> None:
+    """List-shaped node snapshots become ``{type: {section: {addr: value}}}``."""
+
+    client, _ = _client_with_inventory(monkeypatch, brand)
+    entries = [
+        {"type": "htr", "addr": "1", "name": "skip", "lease_seconds": 60},
+        {
+            "type": "htr",
+            "addr": "1",
+            "settings": {"stemp": "20"},
+            "setup": {"program": 1},
+            "status": {"mode": "auto"},
+            3: "non-string key",
+            "": "empty key",
+        },
+        {"type": "htr", "addr": "9", "settings": {"x": 1}},
+        "not a mapping",
+    ]
+    original = copy.deepcopy(entries)
+
+    assert client._coerce_nodes_list(entries) == {
+        "htr": {
+            "lease_seconds": 60,
+            "settings": {"1": {"stemp": "20", "setup": {"program": 1}}},
+            "status": {"1": {"mode": "auto"}},
+        }
+    }
+    assert entries == original
+    assert client._coerce_nodes_list([{"type": "htr", "addr": "9"}]) is None
+    for not_a_list in (None, {"htr": {}}, "text", b"bytes", 5):
+        assert client._coerce_nodes_list(not_a_list) is None
+    client._inventory = None
+    assert client._coerce_nodes_list(entries) is None
+
+
+@both_clients
+def test_common_collect_sample_updates(
+    monkeypatch: pytest.MonkeyPatch, brand: str
+) -> None:
+    """Sample extraction filters node types, addresses and malformed entries."""
+
+    client = _CLIENT_FACTORIES[brand](monkeypatch)
+    payload: dict[Any, Any] = {
+        "htr": {
+            "samples": {"": {"power": 1}, "1": {"power": 2}},
+            "lease_seconds": 90,
+        },
+        123: {"samples": {"1": {"power": 3}}},
+        "acm": {"status": {"1": {}}},
+        "thm": {"samples": {"1": {"temp": 1}}},
+        "": {"samples": {"1": {"power": 5}}},
+        "pmo": {"samples": {"1": {"power": 4}}},
+    }
+
+    assert client._collect_sample_updates(payload) == {
+        "htr": {"samples": {"1": {"power": 2}}, "lease_seconds": 90},
+        "pmo": {"samples": {"1": {"power": 4}}, "lease_seconds": None},
+    }
+    assert set(client._collect_sample_updates(payload, allowed_types=["HTR"])) == {
+        "htr"
+    }

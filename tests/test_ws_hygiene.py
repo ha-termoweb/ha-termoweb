@@ -14,7 +14,7 @@ from conftest import DummyREST, build_entry_runtime, listen_ws_status
 import pytest
 from test_ducaheat_ws_protocol import QueueWebSocket, StubWebSocket, _make_client
 
-from custom_components.termoweb.backend import ducaheat_ws, termoweb_ws
+from custom_components.termoweb.backend import ducaheat_ws, termoweb_ws, ws_client
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 
 
@@ -390,13 +390,13 @@ async def test_termoweb_ws_connect_uses_ws_timeout_and_bound(
         await asyncio.Event().wait()
 
     client._session.ws_connect = _hang
-    monkeypatch.setattr(termoweb_ws, "_WS_CONNECT_TIMEOUT", 0.01)
+    monkeypatch.setattr(ws_client, "_WS_CONNECT_TIMEOUT", 0.01)
 
     with pytest.raises(TimeoutError):
         await client._connect_ws("sid")
 
     assert isinstance(calls[0]["timeout"], aiohttp.ClientWSTimeout)
-    assert calls[0]["timeout"].ws_close == termoweb_ws._WS_CLOSE_TIMEOUT
+    assert calls[0]["timeout"].ws_close == ws_client._WS_CLOSE_TIMEOUT
 
 
 @pytest.mark.asyncio
@@ -413,7 +413,7 @@ async def test_ducaheat_ws_connect_uses_ws_timeout_and_bound(
         await asyncio.Event().wait()
 
     monkeypatch.setattr(client._session, "ws_connect", _hang)
-    monkeypatch.setattr(ducaheat_ws, "_WS_CONNECT_TIMEOUT", 0.01)
+    monkeypatch.setattr(ws_client, "_WS_CONNECT_TIMEOUT", 0.01)
     monkeypatch.setattr(
         ducaheat_ws,
         "_decode_polling_packets",
@@ -459,17 +459,6 @@ async def test_get_token_rejects_malformed_header(header: str | None) -> None:
         await tw._get_token()
     with pytest.raises(RuntimeError):
         await dh._get_token()
-
-
-@pytest.mark.asyncio
-async def test_get_token_returns_bearer_value() -> None:
-    """A well-formed header yields the bare token."""
-
-    tw = _termoweb_client(
-        api_client=DummyREST(authed_headers={"Authorization": "Bearer abc"})
-    )
-
-    assert await tw._get_token() == "abc"
 
 
 def test_extract_nodes_does_not_mutate_payload() -> None:

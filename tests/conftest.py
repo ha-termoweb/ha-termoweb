@@ -59,6 +59,9 @@ class DummyREST:
     async def authed_headers(self) -> dict[str, str]:
         return self._headers
 
+    def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:
+        return nodes
+
     async def refresh_token(self) -> None:
         self._access_token = None
         await self._ensure_token()

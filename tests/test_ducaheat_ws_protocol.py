@@ -597,54 +597,6 @@ def _set_inventory(
     return inventory
 
 
-def test_nodes_to_deltas_translates_payloads(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Websocket node payloads should become domain deltas."""
-
-    client = _make_client(monkeypatch)
-    inventory = _set_inventory(client, _build_inventory_payload())
-
-    nodes = {
-        "htr": {
-            "settings": {"1": {"mode": "auto", "ignored": "value"}},
-            "status": {"1": {"stemp": "21.5", "online": True}},
-            "samples": {"1": {"temp": 25}},
-        },
-        "zzz": {"settings": {"1": {"mode": "auto"}}},
-    }
-
-    deltas = client._nodes_to_deltas(nodes, inventory=inventory)
-
-    assert len(deltas) == 1
-    delta = deltas[0]
-    assert delta.node_id.node_type.value == "htr"
-    assert delta.node_id.addr == "1"
-    assert delta.payload["mode"] == "auto"
-    assert delta.payload["stemp"] == "21.5"
-    assert "status" not in delta.payload
-    assert "ignored" not in delta.payload
-    assert "samples" not in delta.payload
-
-
-def test_nodes_to_deltas_validates_inventory(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Unknown nodes should be ignored with a warning."""
-
-    client = _make_client(monkeypatch)
-    inventory = _set_inventory(client, _build_inventory_payload())
-
-    with caplog.at_level(logging.WARNING):
-        deltas = client._nodes_to_deltas(
-            {"htr": {"settings": {"9": {"mode": "eco"}}}},
-            inventory=inventory,
-        )
-
-    assert deltas == []
-    assert "ignoring update for unknown" in caplog.text
-
-
 @pytest.mark.asyncio
 async def test_emit_sio_logs_subscribe(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -728,16 +680,6 @@ def test_decode_polling_packets_additional_paths(
         ducaheat_ws, "gzip", SimpleNamespace(decompress=MagicMock(side_effect=OSError))
     )
     assert ducaheat_ws._decode_polling_packets(b"\x1f\x8bbad") == []
-
-
-def test_brand_headers_apply_defaults() -> None:
-    """Brand headers should retain required defaults when optional values are missing."""
-
-    headers = ducaheat_ws._brand_headers("", "")
-
-    assert headers["User-Agent"] == ducaheat_ws.USER_AGENT
-    assert headers["X-Requested-With"] == ""
-    assert headers["Accept-Language"] == ducaheat_ws.ACCEPT_LANGUAGE
 
 
 def test_client_requires_session(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1295,66 +1237,6 @@ async def test_read_loop_applies_deltas_to_store(
     assert deltas[0].payload["mode"] == "eco"
 
 
-def test_translate_path_update_variants(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Path-based websocket updates should translate into node payloads."""
-
-    client = _make_client(monkeypatch)
-    translate = lambda payload: ws_client.translate_path_update(
-        payload,
-        resolve_section=ducaheat_ws.DucaheatWSClient._resolve_update_section,
-    )
-    payload = {
-        "path": "/api/v2/devs/device/htr/2/settings/setup",
-        "body": {"mode": "auto"},
-    }
-
-    translated = translate(payload)
-
-    assert translated == {"htr": {"settings": {"2": {"setup": {"mode": "auto"}}}}}
-    assert client._translate_path_update(payload) == translated
-
-    nested = translate(
-        {"path": "/api/v2/devs/device/htr/2/setup", "body": {"mode": "eco"}}
-    )
-    assert nested == {"htr": {"settings": {"2": {"setup": {"mode": "eco"}}}}}
-    assert (
-        client._translate_path_update(
-            {"path": "/api/v2/devs/device/htr/2/setup", "body": {"mode": "eco"}}
-        )
-        == nested
-    )
-
-    invalid_payloads = [
-        {"path": "/", "body": {}},
-        {"path": "/htr", "body": {}},
-        {"path": "/api/v2/devs/device/htr", "body": {}},
-        "not a mapping",
-        {"nodes": {}},
-        {"path": "/api/v2/devs/device/htr/2", "body": {}},
-        {"path": "/api/v2/devs/device/htr/2/status"},
-        {"path": None, "body": {}},
-        {"path": "/api/v2/devs/device/htr//status", "body": {"temp": 1}},
-        {"path": "/api/v2/devs/device/htr/ /status", "body": {"temp": 1}},
-    ]
-    for payload in invalid_payloads:
-        assert translate(payload) is None
-        assert client._translate_path_update(payload) is None
-
-    assert ducaheat_ws.DucaheatWSClient._resolve_update_section(None) == (None, None)
-    assert ducaheat_ws.DucaheatWSClient._resolve_update_section("ADVANCED_SETUP") == (
-        "advanced",
-        "advanced_setup",
-    )
-    assert ducaheat_ws.DucaheatWSClient._resolve_update_section("prog") == (
-        "settings",
-        "prog",
-    )
-    assert ducaheat_ws.DucaheatWSClient._resolve_update_section("unknown") == (
-        "settings",
-        "unknown",
-    )
-
-
 @pytest.mark.asyncio
 async def test_read_loop_forwards_sample_updates(
     monkeypatch: pytest.MonkeyPatch,
@@ -1409,7 +1291,7 @@ async def test_read_loop_dev_data_uses_raw_snapshot(
     """Fallback to raw nodes when the normalised payload is not a mapping."""
 
     client = _make_client(monkeypatch)
-    monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: "bad")
+    monkeypatch.setattr(client, "_normalise_nodes", lambda nodes: "bad")
     monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=0))
 
     class DevDataWS(QueueWebSocket):
@@ -1457,7 +1339,7 @@ async def test_read_loop_does_not_cache_incremental_updates(
     assert getattr(client, "_nodes_raw", None) is None
 
 
-def test_normalise_nodes_payload_handles_mappings(
+def test_normalise_nodes_handles_mappings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The normaliser helper should coerce mappings and handle errors."""
@@ -1481,7 +1363,7 @@ def test_normalise_nodes_payload_handles_mappings(
             return DummyMapping(copy.deepcopy(self._data, memo))
 
     proxy = DummyMapping({"htr": {}})
-    result = client._normalise_nodes_payload(proxy)
+    result = client._normalise_nodes(proxy)
     assert isinstance(result, dict)
 
     class NormalisingREST(DummyREST):
@@ -1489,7 +1371,7 @@ def test_normalise_nodes_payload_handles_mappings(
             return MappingProxyType({"htr": {"status": {}}})
 
     client._client = NormalisingREST()
-    result = client._normalise_nodes_payload({"htr": {}})
+    result = client._normalise_nodes({"htr": {}})
     assert result == {"htr": {"status": {}}}
 
     class RaisingREST(DummyREST):
@@ -1497,7 +1379,7 @@ def test_normalise_nodes_payload_handles_mappings(
             raise RuntimeError
 
     client._client = RaisingREST()
-    result = client._normalise_nodes_payload({"htr": {}})
+    result = client._normalise_nodes({"htr": {}})
     assert isinstance(result, dict)
 
     class ListREST(DummyREST):
@@ -1505,25 +1387,8 @@ def test_normalise_nodes_payload_handles_mappings(
             return ["ok"]
 
     client._client = ListREST()
-    result = client._normalise_nodes_payload({"htr": {}})
+    result = client._normalise_nodes({"htr": {}})
     assert result == ["ok"]
-
-
-def test_collect_sample_updates_filters_entries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Sample extraction should ignore invalid keys and addresses."""
-
-    client = _make_client(monkeypatch)
-    payload: Mapping[str, Any] = {
-        "htr": {"samples": {"": {"power": 1}, "1": {"power": 2}}},
-        123: {"samples": {"1": {"power": 3}}},
-        "acm": {"status": {"1": {}}},
-    }
-
-    result = client._collect_sample_updates(payload)
-
-    assert result == {"htr": {"samples": {"1": {"power": 2}}, "lease_seconds": None}}
 
 
 def test_collect_sample_updates_updates_payload_window(
@@ -1655,20 +1520,7 @@ async def test_emit_sio_sends_payload(monkeypatch: pytest.MonkeyPatch) -> None:
 
     await client._emit_sio("sample", {"x": 1})
 
-    assert ws.sent == ["42" + ducaheat_ws.DUCAHEAT_NAMESPACE + ',["sample",{"x":1}]']
-
-
-@pytest.mark.asyncio
-async def test_get_token_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The access token should be extracted from the Authorization header."""
-
-    client = _make_client(monkeypatch)
-    client._get_token = ducaheat_ws.DucaheatWSClient._get_token.__get__(  # type: ignore[method-assign]
-        client, ducaheat_ws.DucaheatWSClient
-    )
-    token = await client._get_token()
-
-    assert token == "rest-token"
+    assert ws.sent == ["42" + ducaheat_ws.WS_NAMESPACE + ',["sample",{"x":1}]']
 
 
 @pytest.mark.asyncio
@@ -1829,7 +1681,7 @@ async def test_namespace_ack_processes_embedded_event(
     monkeypatch.setattr(client, "_emit_sio", AsyncMock(side_effect=_record_emit))
     monkeypatch.setattr(client, "_replay_subscription_paths", AsyncMock())
     monkeypatch.setattr(client, "_log_nodes_summary", lambda nodes: None)
-    monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: nodes)
+    monkeypatch.setattr(client, "_normalise_nodes", lambda nodes: nodes)
     subscribe_mock = AsyncMock(return_value=2)
     monkeypatch.setattr(client, "_subscribe_feeds", subscribe_mock)
     statuses: list[str] = []
@@ -1874,7 +1726,7 @@ async def test_namespace_ack_skips_unexpected_namespace(
     client._pending_dev_data = False
 
     monkeypatch.setattr(client, "_log_nodes_summary", lambda nodes: None)
-    monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: nodes)
+    monkeypatch.setattr(client, "_normalise_nodes", lambda nodes: nodes)
     subscribe_mock = AsyncMock(return_value=0)
     monkeypatch.setattr(client, "_subscribe_feeds", subscribe_mock)
     monkeypatch.setattr(client, "_update_status", lambda status: None)
@@ -2301,17 +2153,3 @@ async def test_parse_error_does_not_block_update_stream(
     assert client._stats.events_total == 1
 
 
-@pytest.mark.asyncio
-async def test_get_token_requires_authorization(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Missing Authorization header should raise a runtime error."""
-
-    client = _make_client(monkeypatch)
-    client._get_token = ducaheat_ws.DucaheatWSClient._get_token.__get__(  # type: ignore[method-assign]
-        client, ducaheat_ws.DucaheatWSClient
-    )
-    monkeypatch.setattr(client._client, "authed_headers", AsyncMock(return_value={}))
-
-    with pytest.raises(RuntimeError):
-        await client._get_token()

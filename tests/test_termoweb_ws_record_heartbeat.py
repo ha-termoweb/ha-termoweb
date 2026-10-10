@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.backend import termoweb_ws as module
 from custom_components.termoweb.backend.termoweb_ws import TermoWebWSClient
 from homeassistant.core import HomeAssistant
@@ -22,7 +23,7 @@ def test_record_heartbeat_updates_timestamps(monkeypatch: pytest.MonkeyPatch) ->
         call_soon_threadsafe=lambda cb, *args: cb(*args),
         is_running=lambda: False,
     )
-    hass.data.setdefault(module.DOMAIN, {})["entry"] = {}
+    hass.data.setdefault(DOMAIN, {})["entry"] = {}
     coordinator = SimpleNamespace(data={}, update_nodes=MagicMock())
 
     monkeypatch.setattr(TermoWebWSClient, "_install_write_hook", lambda self: None)
@@ -63,7 +64,7 @@ async def test_read_loop_sends_server_heartbeat_ack(
         call_soon_threadsafe=lambda cb, *args: cb(*args),
         is_running=lambda: False,
     )
-    hass.data.setdefault(module.DOMAIN, {})["entry"] = {}
+    hass.data.setdefault(DOMAIN, {})["entry"] = {}
     coordinator = SimpleNamespace(data={})
 
     monkeypatch.setattr(TermoWebWSClient, "_install_write_hook", lambda self: None)

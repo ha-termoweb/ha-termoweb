@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Collection, Iterable, Mapping, MutableMapping
+from collections.abc import Collection, Iterable, Mapping
 import contextlib
 import gzip
 import json
@@ -22,38 +22,19 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.backend.ws_client import (
-    DUCAHEAT_NAMESPACE,
     HandshakeError,
     WSStats,
     _WSCommon,
-    _WsLeaseMixin,
-    build_settings_delta,
-    clone_payload_value,
-    forward_ws_sample_updates,
-    resolve_ws_update_section,
-    translate_path_update,
 )
 from custom_components.termoweb.backend.ws_health import WsHealthTracker
 from custom_components.termoweb.const import (
-    ACCEPT_LANGUAGE,
     API_BASE,
     BRAND_DUCAHEAT,
-    USER_AGENT,
+    DOMAIN,
+    WS_NAMESPACE,
     get_brand_api_base,
-    get_brand_requested_with,
-    get_brand_user_agent,
 )
-from custom_components.termoweb.domain import (
-    NodeId as DomainNodeId,
-    NodeSettingsDelta,
-    NodeType as DomainNodeType,
-    canonicalize_settings_payload,
-)
-from custom_components.termoweb.inventory import (
-    Inventory,
-    normalize_node_addr,
-    normalize_node_type,
-)
+from custom_components.termoweb.inventory import Inventory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,16 +44,12 @@ _PAYLOAD_WINDOW_MAX = 900.0
 _PAYLOAD_WINDOW_MARGIN_RATIO = 0.25
 _PAYLOAD_WINDOW_MARGIN_FLOOR = 15.0
 _CADENCE_KEYS = ("lease_seconds", "cadence_seconds", "poll_seconds")
-_NODE_METADATA_KEYS = {"type", "node_type", "addr", "address", "name", "title", "label"}
-_NODE_TYPE_LEVEL_KEYS = {"lease_seconds", "cadence_seconds", "poll_seconds"}
 _SUBSCRIBE_BACKOFF_INITIAL = 5.0
 _SUBSCRIBE_BACKOFF_MAX = 120.0
 _PROBE_ACK_TIMEOUT = 5.0
 _UPGRADE_DRAIN_TIMEOUT = 1.0
 _PARSE_ERROR_WINDOW_S = 30.0
 _PARSE_ERROR_THRESHOLD = 3
-_WS_CONNECT_TIMEOUT = 15.0
-_WS_CLOSE_TIMEOUT = 10.0
 
 
 def _rand_t() -> str:
@@ -130,25 +107,10 @@ def _decode_polling_packets(body: bytes) -> list[str]:
     return out
 
 
-def _brand_headers(user_agent: str, requested_with: str) -> dict[str, str]:
-    """Construct brand-specific headers for polling."""
-
-    return {
-        "User-Agent": user_agent or USER_AGENT,
-        "Accept-Language": ACCEPT_LANGUAGE,
-        "X-Requested-With": requested_with,
-        "Origin": "https://localhost",
-        "Referer": "https://localhost/",
-        "Accept": "*/*",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "Connection": "keep-alive",
-    }
-
-
-class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
+class DucaheatWSClient(_WSCommon):
     """Engine.IO v3 websocket client for the Ducaheat backend."""
+
+    _brand = BRAND_DUCAHEAT
 
     def __init__(
         self,
@@ -163,7 +125,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         inventory: Inventory | None = None,
     ) -> None:
         """Initialise the Ducaheat websocket client."""
-        _WsLeaseMixin.__init__(self)
         _WSCommon.__init__(self, inventory=inventory)
         self.hass = hass
         self.entry_id = entry_id
@@ -173,12 +134,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._session = session or getattr(api_client, "_session", None)
         if self._session is None:
             raise RuntimeError("aiohttp session required")
-        self._namespace = namespace or DUCAHEAT_NAMESPACE
+        self._namespace = namespace or WS_NAMESPACE
         self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
-
-        self._brand = BRAND_DUCAHEAT
-        self._ua = get_brand_user_agent(self._brand)
-        self._xrw = get_brand_requested_with(self._brand)
 
         self._task: asyncio.Task | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -187,7 +144,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._pending_subscribe = True
         self._last_subscribe_attempt_ts = 0.0
         self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
-        self._subscription_refresh_lock = asyncio.Lock()
         self._send_lock = asyncio.Lock()
         self._idle_monitor_task: asyncio.Task | None = None
         self._last_soft_refresh_at = 0.0
@@ -245,6 +201,19 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 raise RuntimeError("websocket not connected")
             await target.send_str(payload)
 
+    def _polling_headers(self) -> dict[str, str]:
+        """Return the browser-like headers used for the Engine.IO polling handshake."""
+
+        return {
+            **self._brand_headers(origin="https://localhost"),
+            "Referer": "https://localhost/",
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Connection": "keep-alive",
+        }
+
     def _status_should_reset_health(self, status: str) -> bool:
         """Return True when a status transition should reset health."""
 
@@ -285,13 +254,13 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if should_disconnect:
             self._parse_error_reconnect = True
             _LOGGER.warning(
-                "WS (ducaheat): repeated parse errors (%d in %.0fs); reconnecting",
+                "WS: repeated parse errors (%d in %.0fs); reconnecting",
                 total,
                 _PARSE_ERROR_WINDOW_S,
             )
         elif _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug(
-                "WS (ducaheat): parse error (%s) count=%d window=%d",
+                "WS: parse error (%s) count=%d window=%d",
                 reason,
                 total,
                 len(window),
@@ -327,15 +296,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         status = "connected" if tracker.payload_stale else "healthy"
         if tracker.status != status:
             self._update_status(status)
-
-    def start(self) -> asyncio.Task:
-        """Start the websocket runner task."""
-        if self._task and not self._task.done():
-            return self._task
-        self._task = self._loop.create_task(
-            self._runner(), name=f"termoweb-ws-{self.dev_id}"
-        )
-        return self._task
 
     async def stop(self) -> None:
         """Stop the websocket client and background tasks."""
@@ -376,7 +336,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    _LOGGER.debug("WS (ducaheat): error %s", exc, exc_info=True)
+                    _LOGGER.debug("WS: error %s", exc, exc_info=True)
                 finally:
                     healthy_session = self._session_received_payload(session_started)
                     await self._disconnect("loop")
@@ -390,7 +350,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
     async def _connect_once(self) -> None:
         """Perform a single websocket handshake and upgrade attempt."""
         token = await self._get_token()
-        headers = _brand_headers(self._ua, self._xrw)
+        headers = self._polling_headers()
         self._idle_timeout_flag = False
 
         open_params = {
@@ -409,7 +369,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         packets = _decode_polling_packets(body)
         open_pkt = next((pkt for pkt in packets if pkt and pkt[0] == "0"), None)
         if not open_pkt:
-            _LOGGER.debug("WS (ducaheat): open raw first 120 bytes: %r", body[:120])
+            _LOGGER.debug("WS: open raw first 120 bytes: %r", body[:120])
             raise HandshakeError(590, open_url, "missing OPEN (0)")
         info = json.loads(open_pkt[1:])
         sid = info.get("sid")
@@ -420,7 +380,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             else None
         )
         _LOGGER.debug(
-            "WS (ducaheat): OPEN decoded sid=%s pingInterval=%s pingTimeout=%s",
+            "WS: OPEN decoded sid=%s pingInterval=%s pingTimeout=%s",
             sid,
             info.get("pingInterval"),
             info.get("pingTimeout"),
@@ -470,14 +430,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             for k, v in headers.items()
             if k.lower() not in ("connection", "accept-encoding")
         }
-        async with asyncio.timeout(_WS_CONNECT_TIMEOUT):
-            self._ws = await self._session.ws_connect(
-                ws_url,
-                headers=ws_headers,
-                heartbeat=None,
-                autoclose=False,
-                timeout=aiohttp.ClientWSTimeout(ws_close=_WS_CLOSE_TIMEOUT),
-            )
+        self._ws = await self._open_websocket(ws_url, ws_headers)
 
         await self._send_str("2probe", context="probe", ws=self._ws)
         probe_deadline = time.monotonic() + _PROBE_ACK_TIMEOUT
@@ -498,7 +451,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 await self._send_str("3", context="probe-pong", ws=self._ws)
                 continue
             if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug("WS (ducaheat): unexpected probe frame: %r", probe)
+                _LOGGER.debug("WS: unexpected probe frame: %r", probe)
         if not probe_ack:
             raise HandshakeError(408, ws_url, "probe ack timeout")
         await self._send_str("5", context="upgrade", ws=self._ws)
@@ -515,9 +468,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     await self._send_str("3", context="upgrade-pong", ws=self._ws)
                     continue
                 if _LOGGER.isEnabledFor(logging.DEBUG):
-                    _LOGGER.debug(
-                        "WS (ducaheat): discarding frame after upgrade: %r", frame
-                    )
+                    _LOGGER.debug("WS: discarding frame after upgrade: %r", frame)
                 break
 
         await self._send_str(
@@ -585,7 +536,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             return
         self._idle_monitor_task = self._loop.create_task(
             self._idle_monitor(),
-            name=f"termoweb-ws-idle-{self.dev_id}",
+            name=f"{DOMAIN}-ws-idle-{self.dev_id}",
         )
 
     async def _stop_idle_monitor(self) -> None:
@@ -656,14 +607,14 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             await self._replay_subscription_paths()
         except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
             _LOGGER.debug(
-                "WS (ducaheat): soft lease refresh failed for %s",
+                "WS: soft lease refresh failed for %s",
                 self.dev_id,
                 exc_info=True,
             )
             return False
 
         _LOGGER.info(
-            "WS (ducaheat): refreshing websocket lease early (age=%.0fs window=%.0fs)",
+            "WS: refreshing websocket lease early (age=%.0fs window=%.0fs)",
             elapsed,
             hint_value,
         )
@@ -732,7 +683,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 f"idle_for={idle_for:.0f}s" if idle_for is not None else "idle_for=?"
             )
             _LOGGER.info(
-                "WS (ducaheat): idle recovery (%s, stale=%s, subs=%d, pending=%s, attempts=%d)",
+                "WS: idle recovery (%s, stale=%s, subs=%d, pending=%s, attempts=%d)",
                 summary,
                 payload_stale,
                 len(self._subscription_paths),
@@ -743,21 +694,21 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 await self._emit_sio("dev_data")
             except Exception:  # noqa: BLE001  # pragma: no cover - defensive
                 _LOGGER.debug(
-                    "WS (ducaheat): idle recovery dev_data probe failed",
+                    "WS: idle recovery dev_data probe failed",
                     exc_info=True,
                 )
             try:
                 await self._replay_subscription_paths()
             except Exception:  # noqa: BLE001  # pragma: no cover - defensive
                 _LOGGER.debug(
-                    "WS (ducaheat): idle recovery replay failed",
+                    "WS: idle recovery replay failed",
                     exc_info=True,
                 )
             try:
                 await self._maybe_subscribe(now)
             except Exception:  # noqa: BLE001  # pragma: no cover - defensive
                 _LOGGER.debug(
-                    "WS (ducaheat): idle recovery subscribe failed",
+                    "WS: idle recovery subscribe failed",
                     exc_info=True,
                 )
             tracker = self._ws_health
@@ -781,7 +732,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             )
             if should_disconnect:
                 _LOGGER.warning(
-                    "WS (ducaheat): idle recovery escalation after %d attempts; reconnecting",
+                    "WS: idle recovery escalation after %d attempts; reconnecting",
                     self._idle_recovery_attempts,
                 )
                 await self._disconnect("idle_recovery_failed")
@@ -800,11 +751,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001  # pragma: no cover - defensive
-            _LOGGER.debug("WS (ducaheat): idle monitor error", exc_info=True)
+            _LOGGER.debug("WS: idle monitor error", exc_info=True)
         finally:
             if self._idle_monitor_task is task:
                 self._idle_monitor_task = None
-            _LOGGER.debug("WS (ducaheat): idle monitor stopped")
+            _LOGGER.debug("WS: idle monitor stopped")
 
     async def _read_loop_ws(self) -> None:  # noqa: C901
         ws = self._ws
@@ -872,7 +823,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                 namespace, sep, remainder = ns_payload.partition(",")
                                 if namespace and namespace != self._namespace:
                                     _LOGGER.debug(
-                                        "WS (ducaheat): <- SIO 40 for unexpected namespace %s",
+                                        "WS: <- SIO 40 for unexpected namespace %s",
                                         namespace,
                                     )
                                     if sep and remainder:
@@ -900,7 +851,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     self._start_idle_monitor()
                                 except Exception:  # noqa: BLE001  # pragma: no cover - defensive
                                     _LOGGER.debug(
-                                        "WS (ducaheat): failed to emit dev_data or replay subscriptions",
+                                        "WS: failed to emit dev_data or replay subscriptions",
                                         exc_info=True,
                                     )
                             if rest_payload:
@@ -965,12 +916,10 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                 if isinstance(nodes_candidate, Mapping):
                                     nodes_map = nodes_candidate
                                 else:
-                                    nodes_map = self._coerce_dev_data_nodes(
-                                        nodes_candidate
-                                    )
+                                    nodes_map = self._coerce_nodes_list(nodes_candidate)
                             if isinstance(nodes_map, Mapping):
                                 self._log_nodes_summary(nodes_map)
-                                normalised = self._normalise_nodes_payload(nodes_map)
+                                normalised = self._normalise_nodes(nodes_map)
                                 inventory = (
                                     self._inventory
                                     if isinstance(self._inventory, Inventory)
@@ -997,9 +946,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                 self._record_update_event(timestamp=now)
                                 subs = await self._maybe_subscribe(now)
                                 if subs:
-                                    _LOGGER.info(
-                                        "WS (ducaheat): subscribed %d feeds", subs
-                                    )
+                                    _LOGGER.info("WS: subscribed %d feeds", subs)
                                 self._update_status("healthy")
                             break
 
@@ -1008,9 +955,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             self._log_update_brief(payload_body)
                             translated = self._translate_path_update(payload_body)
                             if translated:
-                                normalised_update = self._normalise_nodes_payload(
-                                    translated
-                                )
+                                normalised_update = self._normalise_nodes(translated)
                                 if (
                                     isinstance(normalised_update, dict)
                                     and normalised_update
@@ -1064,7 +1009,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 if msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED}:
                     raise RuntimeError("websocket closed")
         finally:
-            _LOGGER.debug("WS (ducaheat): read loop ended (ws closed or error)")
+            _LOGGER.debug("WS: read loop ended (ws closed or error)")
 
     def _start_keepalive(self) -> None:
         """Launch the keepalive loop when the websocket is connected."""
@@ -1075,7 +1020,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             return
         self._keepalive_task = self._loop.create_task(
             self._keepalive_loop(),
-            name=f"termoweb-ws-keepalive-{self.dev_id}",
+            name=f"{DOMAIN}-ws-keepalive-{self.dev_id}",
         )
 
     async def _keepalive_loop(self) -> None:
@@ -1095,16 +1040,16 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 try:
                     await self._send_str("2", context="keepalive-ping", ws=ws)
                 except Exception:  # noqa: BLE001 - defensive logging
-                    _LOGGER.debug("WS (ducaheat): keepalive ping failed", exc_info=True)
+                    _LOGGER.debug("WS: keepalive ping failed", exc_info=True)
                     break
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001  # pragma: no cover - defensive
-            _LOGGER.debug("WS (ducaheat): keepalive loop error", exc_info=True)
+            _LOGGER.debug("WS: keepalive loop error", exc_info=True)
         finally:
             if self._keepalive_task is task:
                 self._keepalive_task = None
-            _LOGGER.debug("WS (ducaheat): keepalive loop stopped")
+            _LOGGER.debug("WS: keepalive loop stopped")
 
     def _extract_dev_data_payload(
         self, args: Iterable[Any]
@@ -1123,7 +1068,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 nodes = item.get("nodes") if "nodes" in item else None
                 if isinstance(nodes, Mapping):
                     return item
-                coerced = self._coerce_dev_data_nodes(nodes)
+                coerced = self._coerce_nodes_list(nodes)
                 if coerced is not None:
                     combined = dict(item)
                     combined["nodes"] = coerced
@@ -1144,41 +1089,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 queue.extend(item)
         return None
 
-    def _coerce_dev_data_nodes(self, nodes: Any) -> dict[str, Any] | None:
-        """Convert list-style websocket snapshots into mapping payloads."""
-
-        if nodes is None or isinstance(nodes, Mapping):
-            return None
-        if isinstance(nodes, (str, bytes, bytearray)):
-            return None
-        if not isinstance(nodes, Iterable):
-            return None
-
-        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
-        if inventory is None:
-            _LOGGER.error(
-                "WS (ducaheat): cannot coerce nodes payload without inventory for %s",
-                self.dev_id,
-            )
-            return None
-
-        snapshot: dict[str, Any] = {}
-        for node_type, addr, entry in inventory.iter_known_entries(nodes):
-            type_bucket = snapshot.setdefault(node_type, {})
-            for key in _NODE_TYPE_LEVEL_KEYS:
-                if key in entry and key not in type_bucket:
-                    type_bucket[key] = entry[key]
-            for key, value in entry.items():
-                if key in _NODE_METADATA_KEYS or key in _NODE_TYPE_LEVEL_KEYS:
-                    continue
-                existing = type_bucket.get(key)
-                if isinstance(existing, MutableMapping):
-                    existing[addr] = value
-                else:
-                    type_bucket[key] = {addr: value}
-
-        return snapshot or None
-
     def _log_nodes_summary(self, nodes: Mapping[str, typing.Any]) -> None:
         if not _LOGGER.isEnabledFor(logging.INFO):
             return
@@ -1192,7 +1102,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         addrs.update(addr for addr in sec if isinstance(addr, str))
                 kinds.append(f"{key}={len(addrs) if addrs else 0}")
         _LOGGER.info(
-            "WS (ducaheat): dev_data nodes: %s",
+            "WS: dev_data nodes: %s",
             " ".join(kinds) if kinds else "(no nodes)",
         )
 
@@ -1206,7 +1116,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             payload = body.get("body")
             if isinstance(payload, Mapping):
                 keys = ",".join(list(payload.keys())[:6])
-        _LOGGER.debug("WS (ducaheat): update path=%s keys=%s", path, keys)
+        _LOGGER.debug("WS: update path=%s keys=%s", path, keys)
 
     async def _emit_sio(self, event: str, *args: Any) -> None:
         if not self._ws or self._ws.closed:
@@ -1221,27 +1131,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 summary = f" path={args[0]}"
             elif args:
                 summary = f" args={args}"
-            _LOGGER.debug("WS (ducaheat): -> 42 %s%s", event, summary)
-
-    def _normalise_nodes_payload(self, nodes: Mapping[str, typing.Any]) -> Any:
-        """Normalise websocket node payloads via the REST client helper."""
-
-        normaliser = getattr(self._client, "normalise_ws_nodes", None)
-        snapshot: Any = clone_payload_value(nodes)
-        if isinstance(snapshot, Mapping) and not isinstance(snapshot, dict):
-            snapshot = dict(snapshot)
-        if callable(normaliser):
-            resolved: Any
-            try:
-                resolved = normaliser(snapshot)  # type: ignore[arg-type]
-            except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
-                _LOGGER.debug("WS (ducaheat): normalise_ws_nodes failed", exc_info=True)
-                return snapshot
-            else:
-                if isinstance(resolved, Mapping) and not isinstance(resolved, dict):
-                    return dict(resolved)
-                return resolved
-        return snapshot
+            _LOGGER.debug("WS: -> 42 %s%s", event, summary)
 
     def _normalise_cadence_value(self, value: Any) -> float | None:
         """Return a positive cadence hint in seconds."""
@@ -1341,7 +1231,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         state["payload_stale"] = tracker.payload_stale
 
         _LOGGER.debug(
-            "WS (ducaheat): payload stale window %.1f->%.1f s (hint=%.1f s, source=%s)",
+            "WS: payload stale window %.1f->%.1f s (hint=%.1f s, source=%s)",
             previous,
             window,
             hint,
@@ -1373,7 +1263,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
         if not math.isclose(previous, self._payload_stale_after, rel_tol=1e-3):
             _LOGGER.debug(
-                "WS (ducaheat): payload stale window reset to %.1f s (source=%s)",
+                "WS: payload stale window reset to %.1f s (source=%s)",
                 self._payload_stale_after,
                 source,
             )
@@ -1391,168 +1281,27 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         *,
         allowed_types: Collection[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
-        """Extract heater sample updates from a websocket payload."""
+        """Collect sample updates and widen the payload window from lease hints."""
 
-        allowed: set[str] | None = None
-        if allowed_types is not None:
-            allowed = set()
-            for candidate in allowed_types:
-                normalized = normalize_node_type(
-                    candidate,
-                    use_default_when_falsey=True,
-                )
-                if normalized:
-                    allowed.add(normalized)
-
-        updates: dict[str, dict[str, Any]] = {}
-        for node_type, type_payload in nodes.items():
-            if not isinstance(node_type, str) or not isinstance(type_payload, Mapping):
-                continue
-            canonical_type = normalize_node_type(
-                node_type,
-                use_default_when_falsey=True,
-            )
-            if canonical_type is None:
-                continue
-            if allowed is not None:
-                if canonical_type not in allowed:
-                    continue
-            elif canonical_type == "thm":
-                continue
-            samples = type_payload.get("samples")
-            if not isinstance(samples, Mapping):
-                continue
-            bucket: dict[str, Any] = {}
-            for addr, payload in samples.items():
-                normalised_addr = normalize_node_addr(addr)
-                if not normalised_addr:
-                    continue
-                bucket[normalised_addr] = payload
-            sample_lease = (
-                samples.get("lease_seconds") if isinstance(samples, Mapping) else None
-            )
+        updates = super()._collect_sample_updates(nodes, allowed_types=allowed_types)
+        for update in updates.values():
+            sample_lease = update["samples"].get("lease_seconds")
             if sample_lease is not None:
                 self._apply_payload_window_hint(
                     source="sample_section",
                     lease_seconds=sample_lease,
                 )
-            lease_seconds = type_payload.get("lease_seconds")
-            if bucket or lease_seconds is not None:
-                updates[node_type] = {
-                    "samples": bucket,
-                    "lease_seconds": lease_seconds,
-                }
-            if lease_seconds is not None:
+            if update["lease_seconds"] is not None:
                 self._apply_payload_window_hint(
                     source="sample_updates",
-                    lease_seconds=lease_seconds,
+                    lease_seconds=update["lease_seconds"],
                 )
         return updates
-
-    def _nodes_to_deltas(
-        self,
-        nodes: Mapping[str, typing.Any],
-        *,
-        inventory: Inventory | None,
-    ) -> list[NodeSettingsDelta]:
-        """Convert websocket node payloads into domain delta objects."""
-
-        resolved_inventory = inventory if isinstance(inventory, Inventory) else None
-        if resolved_inventory is None:
-            _LOGGER.warning(
-                "WS (ducaheat): missing inventory for node delta translation on %s",
-                self.dev_id,
-            )
-            return []
-
-        deltas: list[NodeSettingsDelta] = []
-        for raw_type, sections in nodes.items():
-            if not isinstance(raw_type, str) or not isinstance(sections, Mapping):
-                continue
-            node_type = DomainNodeType.coerce(raw_type)
-            if node_type is None:
-                continue
-
-            per_addr: dict[str, dict[str, Any]] = {}
-            for section, section_payload in sections.items():
-                if not isinstance(section, str):
-                    continue
-                if section == "samples" or not isinstance(section_payload, Mapping):
-                    continue
-                for raw_addr, payload in section_payload.items():
-                    addr = normalize_node_addr(
-                        raw_addr,
-                        use_default_when_falsey=True,
-                    )
-                    if not addr:
-                        continue
-                    bucket = per_addr.setdefault(addr, {})
-                    settings_delta: Mapping[str, typing.Any] = {}
-                    if section == "status" and isinstance(payload, Mapping):
-                        settings_delta = canonicalize_settings_payload(
-                            {"status": payload}
-                        )
-                    elif section == "capabilities":
-                        continue
-                    else:
-                        settings_delta = build_settings_delta(section, payload)
-                    if settings_delta:
-                        bucket.update(settings_delta)
-
-            for addr, payload in per_addr.items():
-                try:
-                    node_id = DomainNodeId(node_type, addr)
-                except ValueError:
-                    continue
-                if not resolved_inventory.has_node(
-                    node_id.node_type.value, node_id.addr
-                ):
-                    _LOGGER.warning(
-                        "WS (ducaheat): ignoring update for unknown node_type=%s addr=%s on %s",
-                        node_type.value,
-                        addr,
-                        self.dev_id,
-                    )
-                    continue
-                deltas.append(NodeSettingsDelta(node_id=node_id, changes=payload))
-
-        return deltas
-
-    def _apply_deltas_to_store(
-        self,
-        deltas: Iterable[NodeSettingsDelta],
-        *,
-        replace: bool,
-    ) -> None:
-        """Apply deltas to the domain store via the coordinator."""
-
-        coordinator = getattr(self, "_coordinator", None)
-        handler = getattr(coordinator, "handle_ws_deltas", None)
-        if not callable(handler):
-            return
-        try:
-            handler(self.dev_id, tuple(deltas), replace=replace)
-        except Exception:  # one bad frame must not kill the read loop
-            _LOGGER.exception("WS (ducaheat): failed to apply websocket deltas")
-
-    def _translate_path_update(self, payload: Any) -> dict[str, Any] | None:
-        """Translate ``{"path": ..., "body": ...}`` websocket frames into nodes."""
-
-        return translate_path_update(
-            payload,
-            resolve_section=self._resolve_update_section,
-        )
-
-    @staticmethod
-    def _resolve_update_section(section: str | None) -> tuple[str | None, str | None]:
-        """Map a websocket path segment to the node section bucket."""
-
-        return resolve_ws_update_section(section)
 
     def _forward_sample_updates(
         self, updates: Mapping[str, Mapping[str, typing.Any]]
     ) -> None:
-        """Forward websocket heater sample updates to the energy coordinator."""
+        """Mark payload freshness and relay sample updates to the energy coordinator."""
 
         has_payload = False
         for node_payload in updates.values():
@@ -1575,14 +1324,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 timestamp=time.time(),
                 stale_after=self._payload_stale_after,
             )
-        forward_ws_sample_updates(
-            self.hass,
-            self.entry_id,
-            self.dev_id,
-            updates,
-            logger=_LOGGER,
-            log_prefix="WS (ducaheat)",
-        )
+        super()._forward_sample_updates(updates)
 
     async def _subscribe_feeds(self, *, now: float | None = None) -> int:
         """Subscribe to heater status and sample feeds."""
@@ -1598,7 +1340,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             self._subscription_paths = set()
             self._increment_state_counter("subscribe_fail_total")
             _LOGGER.error(
-                "WS (ducaheat): missing inventory for subscription on %s",
+                "WS: missing inventory for subscription on %s",
                 self.dev_id,
             )
             raise TypeError("TermoWeb inventory unavailable for subscription")
@@ -1629,7 +1371,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             state["last_subscribe_success_at"] = attempt_ts
             return len(paths)
         except Exception:  # noqa: BLE001  # pragma: no cover - defensive
-            _LOGGER.debug("WS (ducaheat): subscribe failed", exc_info=True)
+            _LOGGER.debug("WS: subscribe failed", exc_info=True)
             self._pending_subscribe = True
             self._increment_state_counter("subscribe_fail_total")
             return 0
@@ -1683,7 +1425,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 await self._emit_sio("subscribe", path)
             except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
                 _LOGGER.debug(
-                    "WS (ducaheat): replay subscribe failed for path %s",
+                    "WS: replay subscribe failed for path %s",
                     path,
                     exc_info=True,
                 )
@@ -1717,7 +1459,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     message=reason.encode(),
                 )
             except Exception:  # noqa: BLE001  # pragma: no cover - defensive
-                _LOGGER.debug("WS (ducaheat): close failed", exc_info=True)
+                _LOGGER.debug("WS: close failed", exc_info=True)
             self._ws = None
         self._pending_dev_data = False
         self._ping_interval = None
@@ -1737,14 +1479,5 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 reason=reason,
                 payload_changed=True,
             )
-
-    async def _get_token(self) -> str:
-        headers = await self._client.authed_headers()
-        auth = headers.get("Authorization") if isinstance(headers, dict) else None
-        token = auth.partition(" ")[2].strip() if isinstance(auth, str) else ""
-        if not token:
-            raise RuntimeError("missing Authorization")
-        return token
-
 
 __all__ = ["DucaheatWSClient"]

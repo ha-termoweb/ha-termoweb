@@ -20,6 +20,12 @@ from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_token_fragment,
 )
+from custom_components.termoweb.const import (
+    ACCEPT_LANGUAGE,
+    BRAND_TERMOWEB,
+    get_brand_requested_with,
+    get_brand_user_agent,
+)
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from homeassistant.core import HomeAssistant
 
@@ -42,7 +48,7 @@ def translate_update(payload: Any) -> Any:
 
     return ws_client_module.translate_path_update(
         payload,
-        resolve_section=module.TermoWebWSClient._resolve_update_section,
+        resolve_section=ws_client_module.resolve_ws_update_section,
     )
 
 
@@ -149,17 +155,6 @@ def test_handshake_error_exposes_fields() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_token_requires_authorization(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """_get_token should raise when the Authorization header is missing."""
-
-    client, _ = _make_client(monkeypatch, rest_headers={"Authorization": ""})
-    with pytest.raises(RuntimeError):
-        await client._get_token()
-
-
-@pytest.mark.asyncio
 async def test_force_refresh_token_resets_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -197,60 +192,6 @@ async def test_refresh_subscription_requires_connection(
     client, _ = _make_client(monkeypatch)
     with pytest.raises(RuntimeError):
         await client._refresh_subscription(reason="disconnected")
-
-
-def test_translate_path_update_and_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Path based updates should map onto node sections."""
-
-    client, _ = _make_client(monkeypatch)
-    payload = {
-        "path": "/api/devs/device/htr/1/settings/temp",
-        "body": {"value": 20},
-    }
-    translated = translate_update(payload)
-    assert translated == {"htr": {"settings": {"1": {"temp": {"value": 20}}}}}
-    assert client._translate_path_update(payload) == translated
-    setup_payload = {
-        "path": "/api/devs/device/htr/1/setup/program",
-        "body": {"foo": 1},
-    }
-    translated_setup = translate_update(setup_payload)
-    assert translated_setup == {
-        "htr": {"settings": {"1": {"setup": {"program": {"foo": 1}}}}}
-    }
-    assert client._translate_path_update(setup_payload) == translated_setup
-    assert module.TermoWebWSClient._resolve_update_section("advanced_setup") == (
-        "advanced",
-        "advanced_setup",
-    )
-    assert module.TermoWebWSClient._resolve_update_section("prog") == (
-        "settings",
-        "prog",
-    )
-    assert module.TermoWebWSClient._resolve_update_section(None) == (None, None)
-
-
-def test_translate_path_update_invalid_cases(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Invalid payloads should return None from the path translator."""
-
-    client, _ = _make_client(monkeypatch)
-    for payload in INVALID_TRANSLATION_PAYLOADS:
-        assert translate_update(payload) is None
-        assert client._translate_path_update(payload) is None
-
-
-def test_translate_path_update_rejects_unknown_nodes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Path translation should ignore unknown node types and addresses."""
-
-    client, _ = _make_client(monkeypatch)
-    for payload in (
-        {"path": "/api/devs/device/ /1/settings", "body": {"v": 1}},
-        {"path": "/api/devs/device/htr/ /settings", "body": {"v": 1}},
-    ):
-        assert translate_update(payload) is None
-        assert client._translate_path_update(payload) is None
 
 
 def test_handle_handshake_logging(
@@ -440,14 +381,13 @@ def test_header_sanitizers(monkeypatch: pytest.MonkeyPatch) -> None:
     client, _ = _make_client(monkeypatch)
 
     headers = client._brand_headers(origin="https://app")
-    assert headers["X-Requested-With"] == module.get_brand_requested_with(
-        module.BRAND_TERMOWEB
-    )
-    client._requested_with = ""
+    assert headers["X-Requested-With"] == get_brand_requested_with(BRAND_TERMOWEB)
+    monkeypatch.setattr(ws_client_module, "get_brand_requested_with", lambda _b: None)
     headers = client._brand_headers(origin="https://app")
+    assert "X-Requested-With" not in headers
     assert headers["Origin"] == "https://app"
-    assert headers["User-Agent"] == module.get_brand_user_agent(module.BRAND_TERMOWEB)
-    assert headers["Accept-Language"] == module.ACCEPT_LANGUAGE
+    assert headers["User-Agent"] == get_brand_user_agent(BRAND_TERMOWEB)
+    assert headers["Accept-Language"] == ACCEPT_LANGUAGE
 
     assert redact_token_fragment("   ") == ""
     assert redact_token_fragment("") == ""
@@ -610,17 +550,17 @@ def test_extract_nodes_variants(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_resolve_update_section_variants() -> None:
     """Update section resolver should map known segments consistently."""
 
-    assert module.TermoWebWSClient._resolve_update_section(None) == (None, None)
-    assert module.TermoWebWSClient._resolve_update_section("status") == ("status", None)
-    assert module.TermoWebWSClient._resolve_update_section("advanced_setup") == (
+    assert ws_client_module.resolve_ws_update_section(None) == (None, None)
+    assert ws_client_module.resolve_ws_update_section("status") == ("status", None)
+    assert ws_client_module.resolve_ws_update_section("advanced_setup") == (
         "advanced",
         "advanced_setup",
     )
-    assert module.TermoWebWSClient._resolve_update_section("setup") == (
+    assert ws_client_module.resolve_ws_update_section("setup") == (
         "settings",
         "setup",
     )
-    assert module.TermoWebWSClient._resolve_update_section("unknown") == (
+    assert ws_client_module.resolve_ws_update_section("unknown") == (
         "settings",
         "unknown",
     )

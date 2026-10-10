@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 from conftest import DummyREST, build_entry_runtime
 import pytest
 
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.backend import ducaheat_ws, termoweb_ws
 
 SESSIONS = 5
@@ -61,7 +62,7 @@ async def test_ducaheat_backoff_resets_after_healthy_session(
 ) -> None:
     """Ducaheat restarts backoff after a healthy session and reports disconnect first."""
 
-    hass = SimpleNamespace(loop=_stub_loop(), data={termoweb_ws.DOMAIN: {}})
+    hass = SimpleNamespace(loop=_stub_loop(), data={DOMAIN: {}})
     build_entry_runtime(hass=hass, entry_id="entry", dev_id="device")
     client = ducaheat_ws.DucaheatWSClient(
         hass,
@@ -105,7 +106,7 @@ async def test_termoweb_backoff_resets_after_healthy_session(
     session = SimpleNamespace(closed=False)
     api_client = DummyREST()
     api_client._session = session
-    hass = SimpleNamespace(loop=_stub_loop(), data={termoweb_ws.DOMAIN: {}})
+    hass = SimpleNamespace(loop=_stub_loop(), data={DOMAIN: {}})
     build_entry_runtime(hass=hass, entry_id="entry", dev_id="device")
     client = termoweb_ws.TermoWebWSClient(
         hass,

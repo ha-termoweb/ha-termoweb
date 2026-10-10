@@ -11,7 +11,6 @@ import json
 import logging
 import random
 import time
-import typing
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import weakref
@@ -20,44 +19,14 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb.backend.rest_client import RESTClient
-from custom_components.termoweb.const import (
-    ACCEPT_LANGUAGE,
-    API_BASE,
-    BRAND_TERMOWEB,
-    DOMAIN,
-    USER_AGENT,
-    WS_NAMESPACE,
-    get_brand_requested_with,
-    get_brand_user_agent,
-)
-from custom_components.termoweb.domain import (
-    NodeId as DomainNodeId,
-    NodeSettingsDelta,
-    NodeType as DomainNodeType,
-    canonicalize_settings_payload,
-)
-from custom_components.termoweb.inventory import (
-    Inventory,
-    normalize_node_addr,
-    normalize_node_type,
-)
+from custom_components.termoweb.const import API_BASE, BRAND_TERMOWEB, WS_NAMESPACE
+from custom_components.termoweb.domain import NodeSettingsDelta
+from custom_components.termoweb.inventory import Inventory
 from custom_components.termoweb.runtime import require_runtime
 
-from .ws_client import (
-    HandshakeError,
-    WSStats,
-    _WSCommon,
-    build_settings_delta,
-    clone_payload_value,
-    forward_ws_sample_updates,
-    resolve_ws_update_section,
-    translate_path_update,
-)
+from .ws_client import HandshakeError, WSStats, _WSCommon
 
 _LOGGER = logging.getLogger(__name__)
-
-_WS_CONNECT_TIMEOUT = 15.0
-_WS_CLOSE_TIMEOUT = 10.0
 
 _SENSITIVE_PLACEHOLDERS: Mapping[str, str] = {
     "token": "{token}",
@@ -68,6 +37,8 @@ _SENSITIVE_PLACEHOLDERS: Mapping[str, str] = {
 
 class TermoWebWSClient(_WSCommon):
     """Legacy Socket.IO 0.9 websocket client for TermoWeb."""
+
+    _brand = BRAND_TERMOWEB
 
     def __init__(
         self,
@@ -99,9 +70,6 @@ class TermoWebWSClient(_WSCommon):
         self._disconnected = asyncio.Event()
         self._disconnected.set()
 
-        self._user_agent = get_brand_user_agent(BRAND_TERMOWEB)
-        self._requested_with = get_brand_requested_with(BRAND_TERMOWEB)
-
         self._closing = False
         self._healthy_since: float | None = None
         self._hb_send_interval: float = 27.0
@@ -109,8 +77,6 @@ class TermoWebWSClient(_WSCommon):
         self._rtc_keepalive_task: asyncio.Task | None = None
         self._rtc_keepalive_interval: float = 30.0
 
-        self._backoff_seq = [5, 10, 30, 120, 300]
-        self._backoff_idx = 0
         self._hs_fail_threshold = handshake_fail_threshold
         self._hs_fail_count: int = 0
         self._hs_fail_start: float = 0.0
@@ -122,13 +88,9 @@ class TermoWebWSClient(_WSCommon):
         self._last_event_at: float | None = None
         self._last_heartbeat_at: float | None = None
 
-        self._payload_idle_window: float = 240.0
         self._idle_restart_task: asyncio.Task | None = None
         self._idle_restart_pending = False
         self._idle_monitor_task: asyncio.Task | None = None
-
-        self._subscription_refresh_lock = asyncio.Lock()
-        self._subscription_refresh_failed = False
 
         self._ws_state: dict[str, Any] | None = None
         state = self._ws_state_bucket()
@@ -137,19 +99,6 @@ class TermoWebWSClient(_WSCommon):
 
         self._write_hook_installed = False
         self._install_write_hook()
-
-    def _brand_headers(self, *, origin: str | None = None) -> dict[str, str]:
-        """Return baseline headers aligned with the REST client brand."""
-
-        headers = {
-            "User-Agent": self._user_agent or USER_AGENT,
-            "Accept-Language": ACCEPT_LANGUAGE,
-        }
-        if self._requested_with:
-            headers["X-Requested-With"] = self._requested_with
-        if origin:
-            headers["Origin"] = origin
-        return headers
 
     def _sanitise_url(self, url: str) -> str:
         """Return a redacted representation of the websocket URL."""
@@ -183,19 +132,14 @@ class TermoWebWSClient(_WSCommon):
     # ------------------------------------------------------------------
     # Public control
     # ------------------------------------------------------------------
-    def start(self) -> asyncio.Task:
-        """Start the websocket client background task."""
-        if self._task and not self._task.done():
-            return self._task
+    def _prepare_start(self) -> None:
+        """Reset per-run state before the runner task is created."""
         _LOGGER.debug("WS: start requested")
         self._closing = False
         self._stop_event = asyncio.Event()
         self._handshake_logged = False
         self._subscription_refresh_failed = False
-        self._task = self._loop.create_task(
-            self._runner(), name=f"{DOMAIN}-ws-{self.dev_id}"
-        )
-        return self._task
+
 
     # ------------------------------------------------------------------
     # Payload handlers
@@ -283,12 +227,7 @@ class TermoWebWSClient(_WSCommon):
                     return
             _LOGGER.debug("WS: %s without nodes", event)
             return
-        normaliser = getattr(self._client, "normalise_ws_nodes", None)
-        if callable(normaliser):
-            try:
-                nodes = normaliser(nodes)  # type: ignore[arg-type]
-            except Exception:  # pragma: no cover - defensive logging only
-                _LOGGER.debug("WS: normalise_ws_nodes failed; using raw payload")
+        nodes = self._normalise_nodes(nodes)
         if _LOGGER.isEnabledFor(logging.DEBUG) and not merge:
             _LOGGER.debug("WS: dev_data snapshot contains %d node groups", len(nodes))
         deltas = self._nodes_to_deltas(nodes, inventory=inventory)
@@ -298,43 +237,9 @@ class TermoWebWSClient(_WSCommon):
             timestamp=time.time(),
             stale_after=self._payload_idle_window,
         )
-        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
-        allowed_types = (
-            set(inventory.energy_sample_types)
-            if isinstance(inventory, Inventory)
-            else None
+        sample_updates = self._collect_sample_updates(
+            nodes, allowed_types=inventory.energy_sample_types
         )
-
-        sample_updates: dict[str, dict[str, Any]] = {}
-        for node_type, type_payload in nodes.items():
-            if not isinstance(node_type, str) or not isinstance(type_payload, Mapping):
-                continue
-            canonical_type = normalize_node_type(
-                node_type,
-                use_default_when_falsey=True,
-            )
-            if canonical_type is None:
-                continue
-            if allowed_types is not None:
-                if canonical_type not in allowed_types:
-                    continue
-            elif canonical_type == "thm":
-                continue
-            samples = type_payload.get("samples")
-            if not isinstance(samples, Mapping):
-                continue
-            bucket: dict[str, Any] = {}
-            for addr, sample_payload in samples.items():
-                normalised_addr = normalize_node_addr(addr)
-                if not normalised_addr:
-                    continue
-                bucket[normalised_addr] = sample_payload
-            lease_seconds = type_payload.get("lease_seconds")
-            if bucket or lease_seconds is not None:
-                sample_updates[node_type] = {
-                    "samples": bucket,
-                    "lease_seconds": lease_seconds,
-                }
         if merge and _LOGGER.isEnabledFor(logging.DEBUG):
             inventory = (
                 self._inventory if isinstance(self._inventory, Inventory) else None
@@ -360,14 +265,6 @@ class TermoWebWSClient(_WSCommon):
             self._forward_sample_updates(sample_updates)
         self._mark_event(count_event=True)
 
-    def _translate_path_update(self, payload: Any) -> dict[str, Any] | None:
-        """Translate ``{"path": ..., "body": ...}`` frames into nodes."""
-
-        return translate_path_update(
-            payload,
-            resolve_section=self._resolve_update_section,
-        )
-
     def _translate_path_deltas(
         self,
         payload: Any,
@@ -383,26 +280,6 @@ class TermoWebWSClient(_WSCommon):
         deltas = self._nodes_to_deltas(nodes, inventory=inventory)
         return nodes, deltas
 
-    @staticmethod
-    def _resolve_update_section(section: str | None) -> tuple[str | None, str | None]:
-        """Map a websocket path segment onto the node bucket name."""
-
-        return resolve_ws_update_section(section)
-
-    def _forward_sample_updates(
-        self, updates: Mapping[str, Mapping[str, typing.Any]]
-    ) -> None:
-        """Relay websocket heater sample updates to the energy coordinator."""
-
-        forward_ws_sample_updates(
-            self.hass,
-            self.entry_id,
-            self.dev_id,
-            updates,
-            logger=_LOGGER,
-            log_prefix="WS",
-        )
-
     def _extract_nodes(self, data: Any) -> dict[str, Any] | None:
         """Extract the nodes dictionary from a websocket payload."""
         if not isinstance(data, dict):
@@ -411,132 +288,8 @@ class TermoWebWSClient(_WSCommon):
         if isinstance(nodes, dict):
             return nodes
         if isinstance(nodes, list):
-            return self._translate_nodes_list(nodes)
+            return self._coerce_nodes_list(nodes) or {}
         return None
-
-    def _translate_nodes_list(
-        self, nodes: Iterable[Any]
-    ) -> dict[str, dict[str, dict[str, Any]]]:
-        """Convert list-based node payloads into the nested mapping schema."""
-
-        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
-        if inventory is None:
-            _LOGGER.error(
-                "WS: missing inventory for nodes list translation on %s",
-                self.dev_id,
-            )
-            return {}
-
-        translated: dict[str, dict[str, dict[str, Any]]] = {}
-        for node_type, addr, entry in inventory.iter_known_entries(nodes):
-            node_bucket = translated.setdefault(node_type, {})
-            added = False
-            for key, value in entry.items():
-                if key in {"type", "addr", "node_type", "address"}:
-                    continue
-                if not isinstance(key, str):
-                    continue
-                section, nested_key = self._resolve_update_section(key)
-                if section is None:
-                    continue
-                section_bucket = node_bucket.setdefault(section, {})
-                if nested_key:
-                    existing = section_bucket.get(addr)
-                    merged = dict(existing) if isinstance(existing, Mapping) else {}
-                    merged[nested_key] = clone_payload_value(value)
-                    section_bucket[addr] = merged
-                else:
-                    section_bucket[addr] = clone_payload_value(value)
-                added = True
-            if not added and not node_bucket:
-                translated.pop(node_type, None)
-        return translated
-
-    def _nodes_to_deltas(
-        self,
-        nodes: Mapping[str, typing.Any],
-        *,
-        inventory: Inventory | None,
-    ) -> list[NodeSettingsDelta]:
-        """Convert websocket node payloads into domain delta objects."""
-
-        resolved_inventory = inventory if isinstance(inventory, Inventory) else None
-        if resolved_inventory is None:
-            _LOGGER.warning(
-                "WS: missing inventory for node delta translation on %s",
-                self.dev_id,
-            )
-            return []
-
-        deltas: list[NodeSettingsDelta] = []
-        for raw_type, sections in nodes.items():
-            if not isinstance(raw_type, str) or not isinstance(sections, Mapping):
-                continue
-            node_type = DomainNodeType.coerce(raw_type)
-            if node_type is None:
-                continue
-
-            per_addr: dict[str, dict[str, Any]] = {}
-            for section, section_payload in sections.items():
-                if not isinstance(section, str):
-                    continue
-                if section == "samples" or not isinstance(section_payload, Mapping):
-                    continue
-                for raw_addr, payload in section_payload.items():
-                    addr = normalize_node_addr(
-                        raw_addr,
-                        use_default_when_falsey=True,
-                    )
-                    if not addr:
-                        continue
-                    bucket = per_addr.setdefault(addr, {})
-                    settings_delta: Mapping[str, typing.Any] = {}
-                    if section == "status" and isinstance(payload, Mapping):
-                        settings_delta = canonicalize_settings_payload(
-                            {"status": payload}
-                        )
-                    elif section == "capabilities":
-                        continue
-                    else:
-                        settings_delta = build_settings_delta(section, payload)
-                    if settings_delta:
-                        bucket.update(settings_delta)
-
-            for addr, payload in per_addr.items():
-                try:
-                    node_id = DomainNodeId(node_type, addr)
-                except ValueError:
-                    continue
-                if not resolved_inventory.has_node(
-                    node_id.node_type.value, node_id.addr
-                ):
-                    _LOGGER.warning(
-                        "WS: ignoring update for unknown node_type=%s addr=%s on %s",
-                        node_type.value,
-                        addr,
-                        self.dev_id,
-                    )
-                    continue
-                deltas.append(NodeSettingsDelta(node_id=node_id, changes=payload))
-
-        return deltas
-
-    def _apply_deltas_to_store(
-        self,
-        deltas: Iterable[NodeSettingsDelta],
-        *,
-        replace: bool,
-    ) -> None:
-        """Apply deltas to the domain store via the coordinator."""
-
-        coordinator = getattr(self, "_coordinator", None)
-        handler = getattr(coordinator, "handle_ws_deltas", None)
-        if not callable(handler):
-            return
-        try:
-            handler(self.dev_id, tuple(deltas), replace=replace)
-        except Exception:  # one bad frame must not kill the read loop
-            _LOGGER.exception("WS: failed to apply websocket deltas")
 
     def _heater_sample_subscription_targets(self) -> Iterable[tuple[str, str]]:
         """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
@@ -614,21 +367,6 @@ class TermoWebWSClient(_WSCommon):
         self._idle_restart_pending = False
         self._ws_state_bucket()["idle_restart_pending"] = False
         self._sync_gateway_connection_state(now=time.time())
-
-    async def _get_token(self) -> str:
-        """Reuse the REST client token for websocket authentication."""
-        headers = await self._client.authed_headers()
-        auth_header = (
-            headers.get("Authorization") if isinstance(headers, dict) else None
-        )
-        token = (
-            auth_header.partition(" ")[2].strip()
-            if isinstance(auth_header, str)
-            else ""
-        )
-        if not token:
-            raise RuntimeError("authorization token missing")
-        return token
 
     async def _force_refresh_token(self) -> None:
         """Force the REST client to fetch a fresh access token."""
@@ -871,11 +609,8 @@ class TermoWebWSClient(_WSCommon):
             if self._closing:
                 break
             if self._session_received_payload(session_started):
-                self._backoff_idx = 0
-            delay = self._backoff_seq[
-                min(self._backoff_idx, len(self._backoff_seq) - 1)
-            ]
-            self._backoff_idx = min(self._backoff_idx + 1, len(self._backoff_seq) - 1)
+                self._reset_backoff()
+            delay = self._next_backoff()
             jitter = random.uniform(0.8, 1.2)
             await asyncio.sleep(delay * jitter)
 
@@ -937,14 +672,7 @@ class TermoWebWSClient(_WSCommon):
         )
         _LOGGER.info("WS: connecting to %s", self._sanitise_url(ws_url))
         headers = self._brand_headers(origin="https://localhost")
-        async with asyncio.timeout(_WS_CONNECT_TIMEOUT):
-            self._ws = await self._session.ws_connect(
-                ws_url,
-                timeout=aiohttp.ClientWSTimeout(ws_close=_WS_CLOSE_TIMEOUT),
-                heartbeat=None,
-                autoclose=False,
-                headers=headers,
-            )
+        self._ws = await self._open_websocket(ws_url, headers)
 
     async def _join_namespace(self) -> None:
         """Join the API namespace after the websocket connects."""

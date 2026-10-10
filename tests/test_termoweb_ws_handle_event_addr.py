@@ -8,6 +8,7 @@ import pytest
 
 from homeassistant.core import HomeAssistant
 
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.backend import termoweb_ws as module
 from custom_components.termoweb.domain import NodeSettingsDelta
 from custom_components.termoweb.inventory import build_node_inventory
@@ -31,7 +32,7 @@ def test_handle_event_routes_updates_to_deltas(
     """Update events should translate into domain deltas without raw caches."""
 
     hass = _make_hass()
-    hass.data.setdefault(module.DOMAIN, {})["entry"] = {}
+    hass.data.setdefault(DOMAIN, {})["entry"] = {}
     handle_ws_deltas = MagicMock()
     coordinator = SimpleNamespace(data={}, handle_ws_deltas=handle_ws_deltas)
 
@@ -53,8 +54,8 @@ def test_handle_event_routes_updates_to_deltas(
         client.dev_id,
         build_node_inventory(inventory_payload),
     )
-    hass.data[module.DOMAIN]["entry"]["inventory"] = client._inventory
-    hass.data[module.DOMAIN]["entry"]["coordinator"] = coordinator
+    hass.data[DOMAIN]["entry"]["inventory"] = client._inventory
+    hass.data[DOMAIN]["entry"]["coordinator"] = coordinator
 
     event_payload: dict[str, Any] = {
         "name": "update",
