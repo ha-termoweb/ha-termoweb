@@ -7,7 +7,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration
 
-from .const import CLOUD_CONFIGURATION_URL, DEVICE_BRAND_LABELS, DOMAIN, get_brand_label
+from .const import CLOUD_CONFIGURATION_URL, DOMAIN, get_brand_label
 from .inventory import normalize_node_addr
 from .runtime import EntryRuntime, require_runtime
 
@@ -16,7 +16,7 @@ async def async_get_integration_version(hass: HomeAssistant) -> str:
     """Return the installed integration version string."""
 
     integration = await async_get_integration(hass, DOMAIN)
-    return integration.version or "unknown"
+    return str(integration.version or "unknown")
 
 
 def _entry_gateway_record(
@@ -64,21 +64,10 @@ def apply_entry_device_overrides(
     if entry_data is None:
         return info
 
-    manufacturer: str | None = None
-    brand = entry_data.brand
-
-    if isinstance(brand, str) and brand.strip():
-        manufacturer = brand.strip()
-        if manufacturer in DEVICE_BRAND_LABELS:
-            manufacturer = get_brand_label(manufacturer)  # brand key -> label
-
-    if manufacturer:
-        info["manufacturer"] = manufacturer
+    info["manufacturer"] = get_brand_label(entry_data.brand)
 
     if include_version:
-        version = entry_data.version
-        if version is not None:
-            info["sw_version"] = str(version)
+        info["sw_version"] = entry_data.version
 
     return info
 
@@ -111,12 +100,7 @@ def build_installation_device_info(
     if entry_data is None:
         return info
 
-    coordinator = entry_data.coordinator
-    if coordinator is not None:
-        gateway_name = getattr(coordinator, "gateway_name", None)
-        if gateway_name not in (None, ""):
-            info["name"] = str(gateway_name)
-
+    info["name"] = entry_data.coordinator.gateway_name
     return info
 
 
@@ -154,19 +138,15 @@ def build_gateway_device_info(
         return info
 
     coordinator = entry_data.coordinator
-    if coordinator is not None:
-        model = getattr(coordinator, "gateway_model", None)
-        if model not in (None, ""):
-            info["model"] = str(model)
+    model = coordinator.gateway_model
+    if model not in (None, ""):
+        info["model"] = str(model)
 
-        device_metadata = getattr(coordinator, "device_metadata", None)
-        if device_metadata is not None:
-            fw_version = getattr(device_metadata, "fw_version", None)
-            if fw_version not in (None, ""):
-                info["sw_version"] = str(fw_version)
-            serial_id = getattr(device_metadata, "serial_id", None)
-            if serial_id not in (None, ""):
-                info["serial_number"] = str(serial_id)
+    device_metadata = coordinator.device_metadata
+    if device_metadata.fw_version not in (None, ""):
+        info["sw_version"] = str(device_metadata.fw_version)
+    if device_metadata.serial_id not in (None, ""):
+        info["serial_number"] = str(device_metadata.serial_id)
 
     return info
 

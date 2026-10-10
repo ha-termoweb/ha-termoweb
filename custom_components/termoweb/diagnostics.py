@@ -15,9 +15,8 @@ from homeassistant.core import HomeAssistant
 
 from .backend.sanitize import mask_identifier
 from .backend.ws_health import WsHealthTracker
-from .const import CONF_BRAND, DEFAULT_BRAND, DOMAIN, get_brand_label
+from .const import DOMAIN, get_brand_label
 from .runtime import EntryRuntime, require_runtime
-from .utils import async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,9 +45,6 @@ def _extract_websocket_clients(runtime: EntryRuntime) -> list[dict[str, Any]]:
 
     clients: list[dict[str, Any]] = []
     for dev_id, state in state_map.items():
-        if not isinstance(dev_id, str) or not isinstance(state, Mapping):
-            continue
-
         client_state = dict(state)
         entry: dict[str, Any] = {
             "device": mask_identifier(dev_id),
@@ -94,25 +90,6 @@ async def async_get_config_entry_diagnostics(
     filtered_count = snapshot.filtered_count
     node_inventory = list(snapshot.node_inventory)
 
-    version = runtime.version
-    if version is None:
-        version = await async_get_integration_version(hass)
-    version_str = str(version)
-
-    brand_value: str | None = None
-    candidate_brand = runtime.brand
-    if isinstance(candidate_brand, str) and candidate_brand.strip():
-        brand_value = candidate_brand.strip()
-    if not brand_value:
-        entry_brand = entry.data.get(CONF_BRAND)
-        if isinstance(entry_brand, str) and entry_brand.strip():
-            brand_value = entry_brand.strip()
-    brand_label = get_brand_label(brand_value or DEFAULT_BRAND)
-
-    hass_config = getattr(hass, "config", None)
-    time_zone = getattr(hass_config, "time_zone", None)
-    time_zone_str = str(time_zone) if time_zone not in (None, "") else None
-
     installation_section: dict[str, Any] = {
         "node_inventory": node_inventory,
     }
@@ -143,27 +120,20 @@ async def async_get_config_entry_diagnostics(
     diagnostics: dict[str, Any] = {
         "integration": {
             "domain": DOMAIN,
-            "version": version_str,
-            "brand": brand_label,
+            "version": runtime.version,
+            "brand": get_brand_label(runtime.brand),
         },
         "home_assistant": {
             "version": HA_VERSION,
             "python_version": platform.python_version(),
+            "time_zone": hass.config.time_zone,
         },
         "site": installation_section,
     }
 
-    if time_zone_str is not None:
-        diagnostics["home_assistant"]["time_zone"] = time_zone_str
-
     last_import = runtime.last_energy_import_summary
-    energy_section: dict[str, Any] = {}
-    if isinstance(last_import, Mapping):
-        energy_section["last_run"] = dict(last_import)
-    elif last_import is not None:
-        energy_section["last_run"] = last_import
-    if energy_section:
-        diagnostics["energy_import"] = energy_section
+    if last_import is not None:
+        diagnostics["energy_import"] = {"last_run": dict(last_import)}
 
     ws_clients = _extract_websocket_clients(runtime)
     if ws_clients:

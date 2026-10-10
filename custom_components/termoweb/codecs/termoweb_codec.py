@@ -149,23 +149,17 @@ def decode_devs_payload(raw: Any) -> list[dict[str, Any]]:
         for key in ("devs", "devices"):
             value = raw.get(key)
             if isinstance(value, list):
-                filtered = [item for item in value if isinstance(item, dict)]
-                try:
-                    return [
-                        DevSummary.model_validate(item).model_dump(exclude_none=True)
-                        for item in filtered
-                    ]
-                except ValidationError:
-                    return filtered
+                return [
+                    DevSummary.model_validate(item).model_dump(exclude_none=True)
+                    for item in value
+                    if isinstance(item, dict)
+                ]
 
     return []
 
 
 def decode_nodes_payload(raw: Any) -> Any:
     """Validate and normalise a nodes payload without changing semantics."""
-
-    if not isinstance(raw, (dict, list)):
-        return raw
 
     try:
         model = NodesResponse.model_validate(raw)
@@ -190,44 +184,20 @@ def decode_node_settings(node_type: str, raw: Any) -> dict[str, Any]:
     try:
         model = model_cls.model_validate(raw)
     except ValidationError:
-        fallback = (
-            canonicalize_settings_payload(raw) if isinstance(raw, Mapping) else {}
+        result = canonicalize_settings_payload(raw)
+        stage = "settings (fallback)"
+    else:
+        result = canonicalize_settings_payload(model.model_dump(exclude_none=True))
+        stage = "settings"
+
+    all_raw = set(raw.keys())
+    if isinstance(raw.get("status"), Mapping):
+        all_raw |= set(raw["status"].keys())
+    dropped = all_raw - set(result.keys()) - {"status", "raw"}
+    if dropped:
+        _LOGGER.debug(
+            "Undecoded fields in %s %s: %s", node_type, stage, sorted(dropped)
         )
-
-        if isinstance(raw, Mapping):
-            raw_top = set(raw.keys())
-            status_keys = set()
-            if isinstance(raw.get("status"), Mapping):
-                status_keys = set(raw["status"].keys())
-            all_raw = raw_top | status_keys
-            decoded_keys = set(fallback.keys()) if isinstance(fallback, dict) else set()
-            dropped = all_raw - decoded_keys - {"status", "raw"}
-            if dropped:
-                _LOGGER.debug(
-                    "Undecoded fields in %s settings (fallback): %s",
-                    node_type,
-                    sorted(dropped),
-                )
-
-        return fallback
-
-    validated = model.model_dump(exclude_none=True)
-    result = canonicalize_settings_payload(validated)
-
-    if isinstance(raw, Mapping):
-        raw_top = set(raw.keys())
-        status_keys = set()
-        if isinstance(raw.get("status"), Mapping):
-            status_keys = set(raw["status"].keys())
-        all_raw = raw_top | status_keys
-        decoded_keys = set(result.keys()) if isinstance(result, dict) else set()
-        dropped = all_raw - decoded_keys - {"status", "raw"}
-        if dropped:
-            _LOGGER.debug(
-                "Undecoded fields in %s settings: %s",
-                node_type,
-                sorted(dropped),
-            )
 
     return result
 
@@ -289,10 +259,7 @@ def decode_samples(
         if isinstance(counter_value, dict):
             counter_min = counter_value.get("min", counter_min)
             counter_max = counter_value.get("max", counter_max)
-            if "value" in counter_value:
-                counter_value = counter_value.get("value")
-            elif "counter" in counter_value:
-                counter_value = counter_value.get("counter")
+            counter_value = counter_value.get("value", counter_value.get("counter"))
         if counter_value is None:
             counter_value = item.get("value")
         if counter_value is None:

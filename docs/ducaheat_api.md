@@ -109,6 +109,7 @@ Not present in this heater‑focused dump; documented here for completeness.
 
 - **Power monitor (`pmo`)**: `GET .../pmo/{addr}/samples?start=<sec>&end=<sec>` — **epoch seconds** observed.  
 - **Heater/Accumulator (`htr`/`acm`)**: Not present in this dump; prior docs treat thermal nodes as **epoch milliseconds**.
+- **Counter units**: `htr`/`acm` counters are **Wh**; `pmo` counters are read as **watt-seconds** (kWh = `counter / 3,600,000`). The `pmo` unit is not confirmed by this dump. See `SAMPLE_COUNTER_SCALES` in `backend/base.py`.
 
 ---
 

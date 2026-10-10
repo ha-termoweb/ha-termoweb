@@ -27,10 +27,7 @@ IMPORT_ENERGY_HISTORY_SCHEMA = vol.Schema(
 
 
 async def async_register_import_energy_history_service(hass: HomeAssistant) -> None:
-    """Register the import_energy_history service if it is missing."""
-
-    if hass.services.has_service(DOMAIN, SERVICE_IMPORT_ENERGY_HISTORY):
-        return
+    """Register the import_energy_history service (once, from async_setup)."""
 
     async def _service_import_energy_history(call: ServiceCall) -> None:
         """Import energy history for every loaded entry whose backend supports it."""

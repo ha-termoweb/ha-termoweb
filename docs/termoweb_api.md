@@ -158,6 +158,7 @@ Mode note: `modified_auto` is a temporary setpoint override while the heater is 
 }
 ```
 - `counter` is a cumulative **Wh** total (monotonic). kWh delta between samples = `(Δcounter)/1000`.
+- Power monitor (`pmo`) counters are read as **watt-seconds** (joules): kWh = `counter / 3,600,000`. This unit was set when power monitor support was added and is not confirmed by a capture in this document. Both the hourly poll and the history import use the one table `SAMPLE_COUNTER_SCALES` in `backend/base.py`.
 
 Observed cadence for `htr`: ~3600 s.
 
