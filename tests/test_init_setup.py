@@ -1161,12 +1161,11 @@ def test_recalc_poll_interval_transitions(
 
         monkeypatch.setattr(termoweb_init, "async_call_later", fake_async_call_later)
 
-        # (a) No running tasks with stretched=True restores base interval
-        record.stretched = True
+        # (a) No running tasks while suspended restores base interval
         record.poll_suspended = True
         coordinator.update_interval = timedelta(seconds=999)
         record.recalc_poll()
-        assert record.stretched is False
+        assert record.poll_suspended is False
         assert coordinator.update_interval == timedelta(seconds=base_interval)
 
         # (b) Healthy trackers with fresh payloads suspend polling
@@ -1179,13 +1178,11 @@ def test_recalc_poll_interval_transitions(
         tracker.mark_payload(timestamp=current_time, stale_after=300)
         record.ws_tasks["dev-healthy"] = healthy_task
         record.ws_trackers["dev-healthy"] = tracker
-        record.stretched = False
         record.poll_suspended = False
         coordinator.update_interval = timedelta(seconds=base_interval)
         current_time = 1_010.0
         record.recalc_poll()
         assert record.poll_suspended is True
-        assert record.stretched is True
         assert coordinator.update_interval is None
         assert scheduled and scheduled[0] > 0
 
@@ -1193,7 +1190,6 @@ def test_recalc_poll_interval_transitions(
         current_time = 1_400.0
         record.recalc_poll()
         assert record.poll_suspended is False
-        assert record.stretched is False
         assert coordinator.update_interval == timedelta(seconds=base_interval)
         assert scheduled[-1] == "cancelled"
 
@@ -1205,7 +1201,6 @@ def test_recalc_poll_interval_transitions(
         current_time = 1_410.0
         record.recalc_poll()
         assert record.poll_suspended is True
-        assert record.stretched is True
         assert coordinator.update_interval is None
 
         # (e) Unhealthy status resumes polling immediately
@@ -1213,7 +1208,6 @@ def test_recalc_poll_interval_transitions(
         current_time = 1_420.0
         record.recalc_poll()
         assert record.poll_suspended is False
-        assert record.stretched is False
         assert coordinator.update_interval == timedelta(seconds=base_interval)
         assert scheduled[-1] == "cancelled"
 
@@ -1273,11 +1267,9 @@ def test_recalc_poll_interval_edge_cases(
         record.ws_tasks["dev-edge"] = done_task
         record.ws_trackers.clear()
         record.poll_suspended = True
-        record.stretched = True
         coordinator.update_interval = None
         record.recalc_poll()
         assert record.poll_suspended is False
-        assert record.stretched is False
         assert coordinator.update_interval == timedelta(seconds=base_interval)
 
         record.ws_tasks.clear()
@@ -1288,7 +1280,6 @@ def test_recalc_poll_interval_edge_cases(
         record.ws_tasks["dev-missing"] = orphan_task
         record.ws_trackers.clear()
         record.poll_suspended = False
-        record.stretched = False
         coordinator.update_interval = timedelta(seconds=base_interval)
         record.recalc_poll()
         orphan_event.set()
@@ -1331,7 +1322,6 @@ def test_recalc_poll_interval_edge_cases(
         record.ws_tasks["dev-legacy"] = legacy_task
         record.ws_trackers["dev-legacy"] = legacy_tracker
         record.poll_suspended = False
-        record.stretched = False
         coordinator.update_interval = timedelta(seconds=base_interval)
         record.recalc_poll()
         legacy_event.set()
@@ -1360,11 +1350,9 @@ def test_recalc_poll_interval_edge_cases(
         record.ws_tasks["dev-fresh"] = resume_task
         record.ws_trackers["dev-fresh"] = fresh_tracker
         record.poll_suspended = False
-        record.stretched = False
         coordinator.update_interval = timedelta(seconds=base_interval)
         record.recalc_poll()
         assert record.poll_suspended is True
-        assert record.stretched is True
         assert record.poll_resume_unsub is not None
         assert scheduled and scheduled[-1] == 30
 
@@ -1427,10 +1415,10 @@ def test_ws_status_dispatcher_filters_entry(
         healthy_tracker.update_status("healthy")
         healthy_tracker.mark_payload(stale_after=300)
         record1.ws_trackers["dev-1"] = healthy_tracker
-        record1.stretched = False
+        record1.poll_suspended = False
         coordinator1.update_interval = timedelta(seconds=base_interval)
         cb1({"entry_id": entry1.entry_id, "payload_changed": True})
-        assert record1.stretched is True
+        assert record1.poll_suspended is True
         assert coordinator1.update_interval is None
         healthy_event.set()
         await healthy_task
@@ -1446,10 +1434,10 @@ def test_ws_status_dispatcher_filters_entry(
         other_tracker.update_status("healthy")
         other_tracker.mark_payload(stale_after=300)
         record1.ws_trackers["dev-1"] = other_tracker
-        record1.stretched = False
+        record1.poll_suspended = False
         coordinator1.update_interval = timedelta(seconds=base_interval)
         cb2({"entry_id": entry1.entry_id, "payload_changed": True})
-        assert record1.stretched is False
+        assert record1.poll_suspended is False
         assert coordinator1.update_interval == timedelta(seconds=base_interval)
         other_event.set()
         await other_task
@@ -1681,44 +1669,6 @@ def test_import_energy_history_service_logs_entry_task_exception(
     asyncio.run(_run())
 
     assert "import_energy_history task failed" in caplog.text
-
-
-def test_start_ws_skips_when_task_running(
-    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    class HappyClient(BaseFakeClient):
-        async def list_devices(self) -> list[dict[str, Any]]:
-            return [{"dev_id": "dev-1"}]
-
-    monkeypatch.setattr(backend_factory, "RESTClient", HappyClient)
-    entry = ConfigEntry("skip", data={"username": "user", "password": "pw"})
-    stub_hass.config_entries.add(entry)
-
-    async def _run() -> None:
-        assert await termoweb_init.async_setup_entry(stub_hass, entry)
-        await _drain_tasks(stub_hass)
-
-        record = termoweb_init._test_helpers.get_record(stub_hass, entry)
-        coordinator: FakeCoordinator = record.coordinator
-        assert not coordinator.listeners
-        start_ws = record.start_ws
-        assert callable(start_ws)
-
-        existing = record.ws_tasks.get("dev-1")
-        if existing:
-            await existing
-
-        blocker = asyncio.Event()
-        pending = asyncio.create_task(blocker.wait())
-        record.ws_tasks["dev-1"] = pending
-
-        await start_ws("dev-1")
-        assert record.ws_tasks["dev-1"] is pending
-
-        blocker.set()
-        await pending
-
-    asyncio.run(_run())
 
 
 def test_import_energy_history_service_handles_string_ids_and_cancelled(

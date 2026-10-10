@@ -24,7 +24,7 @@ from custom_components.termoweb.entities.heater import (
     derive_boost_state_from_domain,
     log_skipped_nodes,
 )
-from custom_components.termoweb.identifiers import build_heater_entity_unique_id
+from custom_components.termoweb.identifiers import build_heater_unique_id
 from custom_components.termoweb.inventory import (
     HEATER_NODE_TYPES,
     Inventory,
@@ -57,11 +57,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     boost_entities: list[BinarySensorEntity] = []
     for node_type, addr_str, base_name in _iter_boostable_inventory_nodes(inventory):
-        unique_id = build_heater_entity_unique_id(
+        unique_id = build_heater_unique_id(
             dev_id,
             node_type,
             addr_str,
-            ":boost_active",
+            suffix=":boost_active",
         )
         settings_resolver = build_settings_resolver(
             coord,

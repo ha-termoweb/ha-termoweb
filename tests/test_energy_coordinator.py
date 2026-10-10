@@ -1878,25 +1878,6 @@ def test_build_snapshot_skips_invalid_node_id(
 
 
 # ---------------------------------------------------------------------------
-# metrics_by_type: wrong dev_id (lines 1389-1392)
-# ---------------------------------------------------------------------------
-
-
-def test_metrics_by_type_wrong_dev_id(
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-) -> None:
-    """metrics_by_type should return empty dict for mismatched dev_id."""
-
-    hass = HomeAssistant()
-    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
-    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
-    coord.data = build_empty_snapshot("other")
-    assert coord.metrics_by_type("htr") == {}
-
-
-# ---------------------------------------------------------------------------
 # _process_energy_sample edge cases (lines 1480, 1490-1491, 1498-1499)
 # ---------------------------------------------------------------------------
 

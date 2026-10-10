@@ -7,7 +7,6 @@ import pytest
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.identifiers import (
-    build_heater_entity_unique_id,
     build_heater_unique_id,
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
@@ -21,27 +20,6 @@ def test_build_heater_unique_id_prefixes_suffix_with_colon() -> None:
     unique_id = build_heater_unique_id(" dev ", " htr ", " 01 ", suffix="status")
 
     assert unique_id == f"{DOMAIN}:dev:htr:01:status"
-
-
-def test_build_heater_entity_unique_id_defers_to_base(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The entity helper should delegate to the heater unique ID builder."""
-
-    calls: list[tuple[object, ...]] = []
-
-    def _record(
-        dev_id: object, node_type: object, addr: object, *, suffix: object | None = None
-    ) -> str:
-        calls.append((dev_id, node_type, addr, suffix))
-        return "recorded"
-
-    monkeypatch.setattr(identifiers_module, "build_heater_unique_id", _record)
-
-    assert (
-        build_heater_entity_unique_id("dev", "acm", "02", suffix="energy") == "recorded"
-    )
-    assert calls == [("dev", "acm", "02", "energy")]
 
 
 def test_power_monitor_helpers_defers_to_heater_unique_id(

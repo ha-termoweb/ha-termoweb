@@ -10,14 +10,6 @@ from .ids import NodeId, NodeType, normalize_node_type
 
 
 @dataclass(frozen=True, slots=True)
-class EnergySamplePoint:
-    """Represent a single energy counter reading."""
-
-    t: float
-    counter: float
-
-
-@dataclass(frozen=True, slots=True)
 class EnergyNodeMetrics:
     """Derived energy metrics for a node at a point in time."""
 

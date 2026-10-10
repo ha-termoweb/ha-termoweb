@@ -17,7 +17,7 @@ from custom_components.termoweb.entities.heater import (
     build_settings_resolver,
     log_skipped_nodes,
 )
-from custom_components.termoweb.identifiers import build_heater_entity_unique_id
+from custom_components.termoweb.identifiers import build_heater_unique_id
 from custom_components.termoweb.inventory import (
     Inventory,
     normalize_node_addr,
@@ -45,11 +45,11 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
 
     entities: list[LockEntity] = []
     for node_type, addr_str, base_name in _iter_lockable_inventory_nodes(inventory):
-        unique_id = build_heater_entity_unique_id(
+        unique_id = build_heater_unique_id(
             dev_id,
             node_type,
             addr_str,
-            ":child_lock",
+            suffix=":child_lock",
         )
         settings_resolver = build_settings_resolver(
             coord,

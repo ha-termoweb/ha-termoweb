@@ -10,7 +10,6 @@ from custom_components.termoweb.domain.state import (
     HeaterState,
     NodeDelta,
     NodeSettingsDelta,
-    NodeStatusDelta,
     PowerMonitorState,
     ThermostatState,
     _build_heater_state,
@@ -362,26 +361,6 @@ def test_store_apply_full_snapshot_unknown_node_skips() -> None:
 
     store = DomainStateStore([NodeId(NodeType.HEATER, "1")])
     store.apply_full_snapshot("htr", "99", {"mode": "auto"})
-    assert store.get_state("htr", "99") is None
-
-
-def test_store_apply_patch_non_mapping_skips() -> None:
-    """apply_patch should skip None delta (line 500)."""
-
-    from custom_components.termoweb.domain.state import DomainStateStore
-
-    store = DomainStateStore([NodeId(NodeType.HEATER, "1")])
-    store.apply_patch("htr", "1", None)
-    assert store.get_state("htr", "1") is None
-
-
-def test_store_apply_patch_unknown_node_skips() -> None:
-    """apply_patch for unregistered node should skip (line 504)."""
-
-    from custom_components.termoweb.domain.state import DomainStateStore
-
-    store = DomainStateStore([NodeId(NodeType.HEATER, "1")])
-    store.apply_patch("htr", "99", {"mode": "auto"})
     assert store.get_state("htr", "99") is None
 
 

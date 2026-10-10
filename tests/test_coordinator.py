@@ -256,16 +256,6 @@ def test_boost_helpers_guard_against_invalid_sections(
         inventory=inventory,
     )
 
-    calls: list[tuple[Mapping[str, Any], datetime | None]] = []
-
-    def _record(payload: Mapping[str, Any], *, now: datetime | None) -> None:
-        calls.append((payload, now))
-
-    coordinator._apply_accumulator_boost_metadata = _record  # type: ignore[assignment]
-    coordinator._apply_boost_metadata_for_settings(None, now=None)
-    coordinator._apply_boost_metadata_for_settings({"1": []}, now=None)
-
-    assert calls == []
     assert coord_module.StateCoordinator._requires_boost_resolution(None) is False
 
 
@@ -565,8 +555,10 @@ def test_mode_and_pending_key_helpers(
         inventory=inventory,
     )
 
-    assert coordinator._pending_key("", "") is None
-    assert coordinator._pending_key("htr", "1") == ("htr", "1")
+    assert coordinator._node_key("", "") is None
+    assert coordinator._node_key("htr", "") is None
+    assert coordinator._node_key("", "01") is None
+    assert coordinator._node_key("htr", "1") == ("htr", "1")
 
 
 def test_prune_and_register_pending_settings(
@@ -994,57 +986,6 @@ def test_apply_energy_snapshot_wrong_dev_id(
     )
     snapshot = EnergySnapshot(dev_id="other", metrics={}, updated_at=1.0, ws_deadline=None)
     coordinator.apply_energy_snapshot(snapshot)
-
-
-# ---------------------------------------------------------------------------
-# _filtered_settings_payload (line 345)
-# ---------------------------------------------------------------------------
-
-
-def test_filtered_settings_payload_non_mapping(
-    inventory_builder: Callable[
-        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
-    ],
-) -> None:
-    """_filtered_settings_payload should return empty dict for non-Mapping."""
-
-    hass = HomeAssistant()
-    inventory = inventory_builder("dev", {"nodes": []})
-    coordinator = coord_module.StateCoordinator(
-        hass,
-        client=AsyncMock(),
-        base_interval=30,
-        dev_id="dev",
-        device=build_device_metadata_payload("dev"),
-        inventory=inventory,
-    )
-    assert coordinator._filtered_settings_payload("not a dict") == {}  # type: ignore[arg-type]
-
-
-# ---------------------------------------------------------------------------
-# _instant_power_key empty normalization (line 361)
-# ---------------------------------------------------------------------------
-
-
-def test_instant_power_key_empty_values(
-    inventory_builder: Callable[
-        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
-    ],
-) -> None:
-    """_instant_power_key should return None for empty type or addr."""
-
-    hass = HomeAssistant()
-    inventory = inventory_builder("dev", {"nodes": []})
-    coordinator = coord_module.StateCoordinator(
-        hass,
-        client=AsyncMock(),
-        base_interval=30,
-        dev_id="dev",
-        device=build_device_metadata_payload("dev"),
-        inventory=inventory,
-    )
-    assert coordinator._instant_power_key("", "01") is None
-    assert coordinator._instant_power_key("htr", "") is None
 
 
 # ---------------------------------------------------------------------------

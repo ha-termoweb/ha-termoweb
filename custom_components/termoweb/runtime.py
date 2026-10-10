@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -33,7 +33,6 @@ class EntryRuntime:
     hourly_poller: HourlySamplesPoller
     config_entry: ConfigEntry
     base_poll_interval: int
-    stretched: bool = False
     poll_suspended: bool = False
     poll_resume_unsub: Callable[[], None] | None = None
     ws_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
@@ -50,7 +49,6 @@ class EntryRuntime:
     climate_entities: dict[str, dict[str, str]] = field(default_factory=dict)
     power_limit: int | None = None
     recalc_poll: Callable[[], None] | None = None
-    start_ws: Callable[[str], Awaitable[None]] | None = None
     unsub_ws_status: Callable[[], None] | None = None
     _shutdown_complete: bool = False
 
