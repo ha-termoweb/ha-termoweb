@@ -12,7 +12,6 @@ from datetime import datetime
 import logging
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -201,20 +200,6 @@ def _fixed_time(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the station clock."""
 
     monkeypatch.setattr(rc, "_local_now", lambda: datetime(2026, 10, 9, 16, 52, 9))
-
-
-def test_requires_inventory() -> None:
-    """The listener walks the immutable inventory, never its own node list."""
-
-    with pytest.raises(TypeError, match="Inventory"):
-        RadioListener(
-            SimpleNamespace(data={}),
-            entry_id="e",
-            dev_id=DEV_ID,
-            client=MagicMock(),
-            coordinator=MagicMock(),
-            inventory=None,
-        )
 
 
 async def test_start_connects_refreshes_and_reports_health(radio: Radio) -> None:

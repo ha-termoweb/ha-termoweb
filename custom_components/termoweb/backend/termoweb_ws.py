@@ -19,7 +19,6 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb.backend.rest_client import RESTClient
-from custom_components.termoweb.backend.sanitize import mask_identifier
 from custom_components.termoweb.const import API_BASE, BRAND_TERMOWEB, WS_NAMESPACE
 from custom_components.termoweb.domain import NodeSettingsDelta
 from custom_components.termoweb.inventory import Inventory
@@ -50,7 +49,7 @@ class TermoWebWSClient(_WSCommon):
         coordinator: Any,
         session: aiohttp.ClientSession | None = None,
         handshake_fail_threshold: int = 5,
-        inventory: Inventory | None = None,
+        inventory: Inventory,
     ) -> None:
         """Initialise the legacy websocket client container."""
 
@@ -183,10 +182,7 @@ class TermoWebWSClient(_WSCommon):
 
         nodes = self._extract_nodes(payload)
         if nodes is None:
-            nodes, deltas = self._translate_path_deltas(
-                payload,
-                inventory=inventory,
-            )
+            nodes, deltas = self._translate_path_deltas(payload)
         if nodes is None:
             # Check for system-level htr_system updates before discarding
             path = payload.get("path", "") if isinstance(payload, Mapping) else ""
@@ -200,7 +196,7 @@ class TermoWebWSClient(_WSCommon):
         nodes = self._normalise_nodes(nodes)
         if _LOGGER.isEnabledFor(logging.DEBUG) and not merge:
             _LOGGER.debug("WS: dev_data snapshot contains %d node groups", len(nodes))
-        deltas = self._nodes_to_deltas(nodes, inventory=inventory)
+        deltas = self._nodes_to_deltas(nodes)
         if deltas:
             self._apply_deltas_to_store(deltas, replace=not merge)
         self._mark_ws_payload(
@@ -226,10 +222,7 @@ class TermoWebWSClient(_WSCommon):
         self._mark_event(count_event=True)
 
     def _translate_path_deltas(
-        self,
-        payload: Any,
-        *,
-        inventory: Inventory | None = None,
+        self, payload: Any
     ) -> tuple[dict[str, Any] | None, list[NodeSettingsDelta]]:
         """Translate path frames into node dictionaries and domain deltas."""
 
@@ -237,7 +230,7 @@ class TermoWebWSClient(_WSCommon):
         if nodes is None:
             return None, []
 
-        deltas = self._nodes_to_deltas(nodes, inventory=inventory)
+        deltas = self._nodes_to_deltas(nodes)
         return nodes, deltas
 
     def _extract_nodes(self, data: Any) -> dict[str, Any] | None:
@@ -254,14 +247,7 @@ class TermoWebWSClient(_WSCommon):
     def _heater_sample_subscription_targets(self) -> Iterable[tuple[str, str]]:
         """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
 
-        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
-        if inventory is None:
-            _LOGGER.error(
-                "WS: missing inventory for heater sample subscriptions (entry=%s dev_id=%s)",
-                self.entry_id,
-                mask_identifier(self.dev_id),
-            )
-            return ()
+        inventory = self._inventory
 
         def _bind_inventory() -> Iterable[tuple[str, str]]:
             """Yield subscription targets sourced from the inventory cache."""

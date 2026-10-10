@@ -71,7 +71,7 @@ class RadioBackend(Backend):
         dev_id: str,
         coordinator: Any,
         *,
-        inventory: Inventory | None = None,
+        inventory: Inventory,
     ) -> WsClientProto:
         """Return the radio listener that plays the websocket client's role."""
 
