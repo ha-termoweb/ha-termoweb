@@ -483,3 +483,86 @@ def test_node_type_prefers_heater_for_shared_addresses() -> None:
     listener, *_ = build([{"type": "acm", "addr": "6"}, {"type": "htr", "addr": "6"}])
     assert listener._node_type_for("6") == "htr"  # noqa: SLF001
     assert listener._node_type_for("8") is None  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_unexpected_refresh_error_does_not_stop_the_loop(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A bug in one heater's refresh or in the power check is logged; the loop goes on."""
+
+    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    real_settings = client.get_node_settings
+
+    async def broken_settings(dev_id, node):
+        if node[1] == "6":
+            raise ValueError("boom")
+        return await real_settings(dev_id, node)
+
+    async def broken_balance() -> None:
+        raise ValueError("bang")
+
+    monkeypatch.setattr(client, "get_node_settings", broken_settings)
+    monkeypatch.setattr(client, "async_balance_power", broken_balance)
+    with caplog.at_level(logging.ERROR, logger=radio_ws.__name__):
+        listener.start()
+        await settle()
+    assert "refresh of heater 6 failed unexpectedly" in caplog.text
+    assert "power limit check failed unexpectedly" in caplog.text
+    assert coordinator.changes_for("7") != []  # the next heater still refreshed
+    assert listener.is_running()
+    assert sleeper.calls == [REFRESH]
+
+    links[0].sent.clear()
+    sleeper.release()  # the next iteration still runs its keepalives
+    await settle()
+    assert listener.is_running()
+    assert sleeper.calls == [REFRESH, REFRESH]
+    assert (6, bytes.fromhex("521A0A0905103409")) in links[0].sent
+    await listener.stop()
+
+
+@pytest.mark.asyncio
+async def test_unexpected_grant_error_is_logged_and_the_loop_goes_on(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A bug in a power grant is logged at ERROR; refreshes keep running."""
+
+    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener.start()
+    await settle()
+
+    async def broken_record(addr):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(client, "read_power_record", broken_record)
+    with caplog.at_level(logging.ERROR, logger=radio_ws.__name__):
+        links[0].deliver(received(HEATER, POWER_REQUEST))
+        await settle()
+    assert "Radio station reply failed unexpectedly" in caplog.text
+    assert listener._jobs == set()  # noqa: SLF001
+
+    sleeper.release()
+    await settle()
+    assert listener.is_running()
+    assert sleeper.calls == [REFRESH, REFRESH]
+    await listener.stop()
+
+
+@pytest.mark.asyncio
+async def test_cancellation_inside_a_refresh_still_stops_the_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CancelledError is not swallowed by the per-heater guard."""
+
+    listener, client, *_ = build()
+
+    async def cancelled(dev_id, node):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(client, "get_node_settings", cancelled)
+    task = listener.start()
+    await settle()
+    assert task.cancelled()
+    assert not listener.is_running()
+    await listener.stop()

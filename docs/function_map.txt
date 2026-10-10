@@ -2503,6 +2503,8 @@ custom_components/termoweb/backend/radio_ws.py :: RadioListener._node_type_for
     Return the inventory node type for heater address ``addr``.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._refresh_all
     Keepalive clock sync and status read for each heater; then apply the power limit.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._refresh_heater
+    Keepalive clock sync, status read and energy push for one heater.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._on_frame
     Dispatch a frame a heater sent to this station.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._spawn

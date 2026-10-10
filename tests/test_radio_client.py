@@ -913,3 +913,37 @@ async def test_network_id_switch_and_identity_read() -> None:
     assert await client.async_read_identity(HEATER) == IDENTITY_SHORT[2:]
     with pytest.raises(RadioCommandError, match="unknown identity reply"):
         await client.async_read_identity(HEATER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    [
+        bytes.fromhex("B90C252A02"),  # anti-frost 6.0 C: below the 7 C floor
+        bytes.fromhex("B9212A2A02"),  # eco equals comfort
+    ],
+)
+async def test_power_limit_skips_a_heater_whose_presets_cannot_be_written(
+    caplog, status: bytes
+) -> None:
+    """Dialect B re-sends the presets with the mode; invalid ones skip the heater."""
+
+    client, links, _ = make_client()
+    link = await client.async_connect()
+    await client.set_power_limit("dev", power_limit=1000)
+    client.note_max_power(HEATER, 1500.0)
+    client.power.note_heating(HEATER, True)
+    link.reply(0xB8, status)
+    with caplog.at_level(logging.ERROR):
+        await client.async_balance_power()
+    assert "could not switch heater 6 off" in caplog.text
+    assert client.power.shed() == {}  # never switched off, so nothing to restore
+    assert all(payload[0] != 0xB6 for payload in link.payloads())
+
+    caplog.clear()
+    client.power.mark_shed(HEATER, 2)
+    await client.set_power_limit("dev", power_limit=0)
+    with caplog.at_level(logging.ERROR):
+        await client.async_balance_power()
+    assert "could not restore heater 6" in caplog.text
+    assert client.power.shed() == {HEATER: 2}
