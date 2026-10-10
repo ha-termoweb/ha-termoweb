@@ -379,3 +379,60 @@ async def test_write_after_idle_restarts_only_that_gateway(
 
     await client_b.stop()
     await _stop(client_a)
+
+
+async def test_silent_first_session_is_restarted(env: Env) -> None:
+    """A session that never delivers a payload is recycled after the idle window."""
+    session = FakeSession(get=_ok_handshake)
+    client = env.client(session)
+    client.start()
+    await until(lambda: len(session.sockets) == 1, "socket")
+    ws = session.sockets[0]
+    await until(lambda: env.status() == "connected", "connected")
+    connected_at = env.clock.now
+
+    # No snapshot reply, no pushes: only server heartbeats arrive.
+    while len(session.sockets) == 1:
+        assert env.clock.now - connected_at < 600, "silent session never restarted"
+        ws.feed("2::")
+        await env.clock.advance(10)
+
+    assert ws.close_calls[0] == (aiohttp.WSCloseCode.GOING_AWAY, b"idle restart")
+    # Restarted at the first idle check at or after the 240 s window.
+    assert 240 <= env.clock.now - connected_at <= 240 + 60 + 30
+
+    await _stop(client)
+
+
+async def test_slow_snapshot_after_reconnect_is_not_restarted(env: Env) -> None:
+    """A new session is judged on its own payloads, not the previous session's."""
+    session = FakeSession(get=_ok_handshake)
+    client = env.client(session)
+    client.start()
+    await until(lambda: len(session.sockets) == 1, "socket")
+    ws = session.sockets[0]
+    ws.feed(
+        _event("dev_data", {"nodes": {"htr": {"settings": {"1": {"mode": "auto"}}}}})
+    )
+    await until(lambda: env.status() == "healthy", "healthy")
+
+    # The first session goes quiet for 200 s (inside the window), then drops.
+    await env.clock.advance(200)
+    ws.server_close()
+    await env.advance_until(lambda: len(session.sockets) == 2)
+    ws2 = session.sockets[1]
+    await until(lambda: SNAPSHOT_REQUEST in ws2.sent, "second snapshot request")
+
+    # The new session's snapshot reply takes 90 s: past its first 60 s idle
+    # check, which must not count the previous session's silence.
+    await env.clock.advance(90)
+    assert ws2.close_calls == []
+    ws2.feed(
+        _event("dev_data", {"nodes": {"htr": {"settings": {"1": {"mode": "off"}}}}})
+    )
+    await until(lambda: env.heater()["mode"] == "off", "slow snapshot applied")
+    await env.clock.advance(120)
+    assert ws2.close_calls == []
+    assert len(session.sockets) == 2
+
+    await _stop(client)

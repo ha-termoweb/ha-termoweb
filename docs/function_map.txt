@@ -435,7 +435,7 @@ custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._ws_payloa
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._record_heartbeat
     Record receipt of a heartbeat frame.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._idle_monitor
-    Monitor payload idleness and restart stale websocket sessions.
+    Restart the session when it has had no payload for the idle window.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._run_heartbeat
     Send periodic heartbeats until cancelled.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._socket_base
