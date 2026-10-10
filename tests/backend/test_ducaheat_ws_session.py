@@ -36,9 +36,9 @@ from custom_components.termoweb.domain import state_to_dict
 from tests.fakes.cloud import DEV_ID, PASSWORD, USERNAME, FakeCloud
 from tests.fakes.ws_harness import (
     FakeResponse,
-    FakeSession,
+    WSFakeSession,
     VirtualClock,
-    eio_polling_body,
+    polling_body,
     install_clock,
     leaked_tasks,
     settle,
@@ -69,14 +69,12 @@ def _update(stemp: str) -> str:
 def _polling_get(url: str) -> FakeResponse:
     """Serve the Engine.IO OPEN packet, then the drained namespace ack."""
     if "sid=" not in url:
-        return FakeResponse(body=eio_polling_body(OPEN))
-    return FakeResponse(body=eio_polling_body("40"))
+        return FakeResponse(body=polling_body(OPEN))
+    return FakeResponse(body=polling_body("40"))
 
 
-def _session(ws_frames: Callable[[int], Iterable[str]]) -> FakeSession:
-    return FakeSession(
-        get=_polling_get, post=lambda _url: FakeResponse(body="ok"), ws_frames=ws_frames
-    )
+def _session(ws_frames: Callable[[int], Iterable[str]]) -> WSFakeSession:
+    return WSFakeSession(get=_polling_get, ws_frames=ws_frames)
 
 
 class Env:
@@ -109,7 +107,7 @@ class Env:
         """Return the gateway's websocket diagnostics bucket."""
         return self.runtime.ws_state[DEV_ID]
 
-    def client(self, session: FakeSession) -> DucaheatWSClient:
+    def client(self, session: WSFakeSession) -> DucaheatWSClient:
         """Build the production client exactly as the backend factory does."""
         return DucaheatWSClient(
             self.hass,
@@ -185,7 +183,7 @@ async def _stop(client: DucaheatWSClient) -> None:
     assert leaked_tasks("DucaheatWSClient") == []
 
 
-async def _join(env: Env, session: FakeSession, index: int) -> Any:
+async def _join(env: Env, session: WSFakeSession, index: int) -> Any:
     """Wait for socket ``index`` to open its namespace, then ack it."""
     await env.advance_until(
         lambda: len(session.sockets) > index and NS_ACK in session.sockets[index].sent
@@ -220,8 +218,8 @@ async def test_probe_and_upgrade_handshake(
     await until(lambda: NS_ACK in second.sent, "namespace open")
     assert second.sent == ["2probe", "3", "5", "3", NS_ACK]
     assert "discarding frame after upgrade: '6'" in caplog.text
-    assert [method for method, _ in session.requests] == ["GET", "POST", "GET"] * 2
-    assert all(TOKEN in url for _, url in session.requests)
+    assert [method for method, _ in session.calls] == ["GET", "POST", "GET", "WS"] * 2
+    assert all(TOKEN in url for _, url in session.calls)
 
     second.feed(NS_ACK)
     await until(lambda: SUBSCRIBES[-1] in second.sent, "subscriptions")
