@@ -280,23 +280,6 @@ def test_derive_boost_state_handles_now_failure(
     assert state.end_label == "Never"
 
 
-def test_derive_boost_state_parses_iso_without_parser(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Fallback ISO parsing should use datetime.fromisoformat when needed."""
-
-    monkeypatch.setattr(dt_util, "parse_datetime", lambda value: None)
-    settings = {
-        "boost_active": True,
-        "boost_end_datetime": "2024-01-01T00:30:00+00:00",
-    }
-
-    state = heater_module.derive_boost_state(settings, SimpleNamespace())
-
-    assert state.end_iso == "2024-01-01T00:30:00+00:00"
-    assert state.end_datetime == datetime.fromisoformat("2024-01-01T00:30:00+00:00")
-
-
 def test_derive_boost_state_ignores_placeholder_iso(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

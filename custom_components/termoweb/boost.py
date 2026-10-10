@@ -112,7 +112,7 @@ def resolve_boost_end_from_fields(
         return None, None
 
     now_dt = now or dt_util.now()
-    tzinfo = now_dt.tzinfo or getattr(dt_util, "UTC", UTC)
+    tzinfo = now_dt.tzinfo or UTC
 
     candidates: list[datetime] = []
 
@@ -127,8 +127,7 @@ def resolve_boost_end_from_fields(
             candidates.append(candidate)
 
     if day >= 0:
-        epoch_timezone = getattr(dt_util, "UTC", UTC)
-        epoch_candidate = datetime(1970, 1, 1, tzinfo=epoch_timezone) + timedelta(
+        epoch_candidate = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(
             days=day,
             minutes=minute,
         )

@@ -650,7 +650,7 @@ class StateCoordinator(
         minute = coerce_int(payload.get("m"))
         second = coerce_int(payload.get("s"))
 
-        tzinfo = dt_util.now().tzinfo or getattr(dt_util, "UTC", UTC)
+        tzinfo = dt_util.now().tzinfo or UTC
         try:
             return datetime(
                 year,
