@@ -11,9 +11,9 @@ This repository provides a Home Assistant integration for the TermoWeb cloud pla
 * The Inventory of nodes, node types, node addresses and dev_id of the gateway are instantiated ONCE at startup and are IMMUTABLE and ALWAYS available. Use Inventory and methods to find that information, do not make additional lists or caches of nodes.
 
 ## Documentation Map
-* `termoweb_openapi.yaml`, `termoweb_api.md` — REST and WebSocket reference for the TermoWeb backend.
-* `ducaheat_openapi.yaml`, `ducaheat_api.md` — API documentation for the Ducaheat backend.
-* `docs/architecture.md` — Integration architecture and Python class hierarchy.
+* `docs/termoweb_openapi.yaml`, `docs/termoweb_api.md` — REST and WebSocket reference for the TermoWeb backend.
+* `docs/ducaheat_openapi.yaml`, `docs/ducaheat_api.md` — API documentation for the Ducaheat backend.
+* `docs/architecture.md` — Authoritative architecture reference: module map, state pipeline, backends, fair-use rules, migrations, testing.
 
 ## Usage and Fair Access
 * Treat the hosted TermoWeb backend as a shared resource; avoid abusive traffic patterns.
@@ -25,7 +25,7 @@ End users are non-technical Home Assistant operators. Documentation must be task
 
 ## Development Standards
 * Follow the Python version declared in `pyproject.toml` and add type hints to all new code.
-* USe uv as the package and environment manager
+* Use uv as the package and environment manager
 * Provide a concise one-line docstring for every function.
 * Apply the **minimal viable change** for each task; avoid touching unrelated code.
 * Adhere to DRY principles and practice defensive programming—anticipate invalid input, communication failures, and other error conditions, and handle them gracefully.
@@ -37,12 +37,12 @@ End users are non-technical Home Assistant operators. Documentation must be task
 * `tests/` mirrors `custom_components/termoweb/` (`tests/backend/`, `tests/backend/radio/`, `tests/codecs/`, `tests/domain/`, `tests/planner/`, `tests/services/`, one `tests/test_<module>.py` per top-level module). Add tests to the file of the module under test; do not create a new file per bug.
 * Write tests against the real `hass` fixture and `MockConfigEntry`. Fake only the backend boundary: the `cloud` fixture in `tests/conftest.py` and the doubles in `tests/fakes/`. Never patch Home Assistant internals, and never import one test module from another.
 * Warnings are errors (`filterwarnings = ["error"]`) and test order is random (pytest-randomly; re-run a failure with the printed `-p randomly --randomly-seed=N`). Close what a test opens and patch real sleeps.
-* Capture partial logs whenever the timed run aborts; treat timeouts as failures requiring investigation. 
+* Treat timeouts as failures requiring investigation; keep the partial log when a timed run aborts.
 * During debugging, run targeted, no-coverage subsets.
-* If tests approach the 60-second limit, suspect an asynchronous wait issue and stop the run rather than letting it hang.
-* Test only the code files you have changed. Do not try to fix failing tests unrelated to your changes.
-* If you remove duplicate or redundant code, remove the corresponding tests. Do not leave code or tests behind for backwards compatibility. 
-* Get 100% coverage on the code you are chaging.
+* If tests approach the 120-second limit, suspect an asynchronous wait issue and stop the run rather than letting it hang.
+* While iterating, run only the tests for the code you changed; before a PR run the full suite as CI does. Do not try to fix failing tests unrelated to your changes.
+* If you remove duplicate or redundant code, remove the corresponding tests. Do not leave code or tests behind for backwards compatibility.
+* Get 100% coverage on the code you are changing.
 * Write meaningful tests that exercise edge cases, error handling, and invalid inputs, with particular focus on component interfaces.
 
 ## Documentation Responsibilities

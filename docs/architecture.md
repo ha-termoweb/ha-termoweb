@@ -1,7 +1,9 @@
 # HA-TermoWeb Architecture Overview
 
-This document defines the authoritative **v2 architecture** for the TermoWeb
-integration. **v2.0.2** is the clean release of this architecture.
+This document is the authoritative reference for the **v2 architecture** of the
+TermoWeb integration and describes the code as it is. Function-level detail is in
+`docs/function_map.txt` (generated; see `AGENTS.md`). Radio details are in
+`radio_backend.md` and `radio_protocol.md`.
 
 ## Architecture invariants
 
@@ -41,10 +43,28 @@ integration. **v2.0.2** is the clean release of this architecture.
    `boost_temp`), the gateway connection state, the installation power limit
    and the energy snapshot. `EntryRuntime` holds only runtime handles (clients,
    coordinators, tasks), never device state.
-5. **DomainStateView** provides read-only access for entities.
+5. **DomainStateView** provides read-only access for entities. The view is
+   owned by `StateCoordinator` (`coordinator.domain_view`).
 
-Entities and services never read raw REST/WS payloads. They **only** read through
-`DomainStateView` and must not reconstruct or cache inventory data.
+What each store/view holds: per-node state (`HeaterState`, `AccumulatorState`,
+`ThermostatState`, `PowerMonitorState`), the `GatewayConnectionState`, the
+installation power limit (`apply_power_limit`) and the energy snapshot
+(`apply_energy_snapshot`). Radio and WebSocket pushes enter through
+`StateCoordinator.handle_ws_deltas`; entity-initiated writes patch the store
+optimistically through `apply_entity_patch`.
+
+Reality check on "entities only read through the view":
+
+- Device **state** (node settings, gateway connection, power limit, energy
+  metrics) is read only through `coordinator.domain_view`
+  (`entity.py`, `sensor.py`, `number.py`, `binary_sensor.py`, `button.py`,
+  `radio_pairing.py`). No entity or service reads raw REST/WS payloads or
+  `coordinator.data`.
+- Entities are **not** restricted to the view for everything else: they read
+  the immutable `runtime.inventory` (node lists, names, sample targets), the
+  coordinator's gateway metadata (`device_metadata`, `gateway_name`,
+  `gateway_model`, `gateway_connected`), and the runtime's backend for writes.
+  None of these rebuild or cache inventory.
 
 ## Vendor boundary
 
@@ -81,12 +101,20 @@ This map defines responsibilities for each module family in the final design.
   `energy.py` holds `EnergyStateCoordinator` (HH:05 REST sample polls,
   WebSocket sample leases, energy/power snapshots); `base.py` holds the shared
   `RaiseUpdateFailedCoordinator` base and logger wrapper.
-- `backend/` — vendor-specific REST/WS clients (including the REST client
-  implementation), protocol details, and brand selection.
-  `backend/ducaheat_engineio.py` holds the pure Engine.IO v3 polling framing
-  and Socket.IO event encode/decode; `backend/ducaheat_ws.py` holds the
-  stateful Ducaheat client (handshake, read loop, subscriptions, health and
-  idle recovery).
+- `backend/` — everything vendor- or transport-specific.
+  - `base.py`: `Backend` (ABC), `BackendCapabilities`, `HttpClientProto`,
+    `WsClientProto`. `factory.py`: `backend_capabilities(brand)`,
+    `create_backend`, `create_entry_client`, `create_rest_client`,
+    `create_radio_client`.
+  - `termoweb.py` / `ducaheat.py` / `radio_backend.py` / `radio_monitor.py`:
+    the four `Backend` subclasses (Tevolve uses `ducaheat.py`).
+  - `rest_client.py`: the shared `RESTClient` (both cloud brands) with its
+    `RequestLimiter`. `sanitize.py`: log redaction helpers.
+  - `ws_client.py`, `ws_health.py`, `termoweb_ws.py`, `ducaheat_ws.py`,
+    `ducaheat_engineio.py`, `radio_ws.py`: the WebSocket layer (see below).
+  - `radio_client.py`, `radio_power.py`, `radio_ws.py` and `radio/`
+    (`link`, `serial_link`, `protocol`, `dialect`, `discovery`, `pairing`,
+    `survey`, `capture`): the local radio stack.
 - `coerce.py` — the only lenient value coercers (`as_float`, `as_number`,
   `as_int`, `as_bool`, `as_percentage`); each returns `None` instead of raising
   and has one documented semantics (see the module docstring).
@@ -95,7 +123,11 @@ This map defines responsibilities for each module family in the final design.
   (strict), `safe_temperature` (inbound), `validate_units`, `validate_prog`
   and `validate_ptemp`. Vendor encoders (e.g. acm boost payloads) stay in
   their vendor codec.
+  Files: `termoweb_codec`/`termoweb_models`, `ducaheat_codec`/`ducaheat_models`/
+  `ducaheat_read_models`, `radio_codec`.
 - `planner/` — vendor-specific write orchestration and validation rules.
+  Only `ducaheat_planner.py` and `radio_planner.py` exist; TermoWeb needs no
+  planner because its writes are single requests.
 - Platform modules (`climate.py`, `sensor.py`, `binary_sensor.py`,
   `button.py`, `number.py`, `lock.py`) — vendor-agnostic entity
   implementations that read via `DomainStateView`; each exposes
@@ -111,8 +143,65 @@ This map defines responsibilities for each module family in the final design.
   discovery, pairing, entry data) and `RadioConfigFlow`, the unregistered base
   class with the ESP32 gateway and nanoCUL steps. `options_flow.py` holds
   `TermoWebOptionsFlow` (radio heater power, pairing, rehoming).
-- `services/` — Home Assistant services and rate-limited import flows that rely
-  on the runtime and domain store.
+- `services/` — one module per registered service, each with an
+  `async_register_*` function called once from `async_setup`:
+  `energy_history` (`import_energy_history`), `radio_pairing`, `radio_survey`,
+  `radio_capture`. Services look up loaded entries with
+  `runtime.loaded_runtimes(hass)`. Climate entity services are registered in
+  `climate.py`.
+- `energy.py` — the energy history import (see below). `throttle.py` — the
+  process-wide samples limiter. `diagnostics.py` — the diagnostics download.
+  `boost.py` — boost metadata parsing. `utils.py` — device-info builders and
+  small shared helpers. `const.py` — domain, brand and option constants.
+- `radio_pairing.py`, `radio_rehome.py`, `radio_survey.py` — the Home
+  Assistant side of radio pairing, rehoming and surveys (settings snapshots,
+  new nodes, saved reports); the radio protocol side is in `backend/radio/`.
+
+## WebSocket client layering
+
+`Backend.create_ws_client` returns a `WsClientProto` (`start()` returns the
+runner task, `stop()` is async). Setup stores it in `runtime.ws_clients` and
+the task in `runtime.ws_tasks`.
+
+- `ws_client.py` — `_WSStatusMixin` (status and `WsHealthTracker` updates,
+  state bucket bookkeeping) and `_WSCommon(_WSStatusMixin)` (task lifecycle,
+  backoff, the `ConnectionRateLimiter` for reconnects, payload-idle window, shared
+  delta helpers `build_settings_delta`, `translate_path_update`,
+  `forward_ws_sample_updates`).
+- `termoweb_ws.py` — `TermoWebWSClient(_WSCommon)`: legacy **Socket.IO 0.9**
+  (`GET /socket.io/1/` handshake, then `/socket.io/1/websocket/<sid>`).
+- `ducaheat_engineio.py` — pure framing: **Engine.IO v3** (`EIO=3`) polling
+  packets and Socket.IO event encode/decode. `ducaheat_ws.py` —
+  `DucaheatWSClient(_WSCommon)`: stateful client (polling handshake, upgrade to
+  websocket, subscriptions, pings, idle recovery).
+- `radio_ws.py` — `RadioListener(_WSStatusMixin)` replaces the websocket
+  client for the radio brands (it does not subclass `_WSCommon`).
+- `ws_health.py` — `WsHealthTracker`. `__init__.py` watches the trackers: when
+  every tracker is healthy with fresh payloads, REST polling is suspended
+  (`runtime.poll_suspended`); it resumes when health is lost.
+
+All clients emit domain deltas through `coordinator.handle_ws_deltas`.
+
+## Backend capabilities
+
+`BackendCapabilities` (frozen dataclass in `backend/base.py`) is declared as
+the `capabilities` class attribute of each `Backend`; read it with
+`backend_capabilities(brand)`. Nothing outside `backend/` tests the brand.
+
+| Flag (default) | Gates | TermoWeb | Ducaheat/Tevolve | Radio | Radio monitor |
+|---|---|---|---|---|---|
+| `lock` (False) | `lock` platform (`_platforms_for_brand`) | no | yes | yes | no |
+| `power_limit` (False) | installation power-limit number; limit fetch in `StateCoordinator` | yes | no | yes | no |
+| `priority` (False) | heater priority number | yes | yes | yes | no |
+| `energy_history` (False) | `import_energy_history` service | yes | yes | no | no |
+| `energy` (False) | heater energy/power and installation total sensors | yes | yes | yes | no |
+| `geo_data` (False) | installation location sensor | yes | yes | no | no |
+| `frame_monitor` (False) | monitor-only platforms and the frames-heard sensor | no | no | no | yes |
+| `local_radio` (False) | one entry per link, closed on unload, radio setup/reconfigure steps; skipped by cloud unique-ID migration | no | no | yes | yes |
+| `options_flow` (False) | the options flow (`async_supports_options_flow`) | no | no | yes | no |
+| `site_device` (True) | registration of the site device | yes | yes | yes | no |
+| `web_portal` (True) | cloud web-portal link in device info (`utils.py`) | yes | yes | no | no |
+| `account_scope` ("") | prefix of the cloud account unique ID | "" | `ducaheat` | "" | "" |
 
 ## Runtime flow diagram
 
@@ -221,6 +310,40 @@ the table of old formats. Only the unique ID changes, so the entity ID,
 history and user customisations stay. If an entity already has the new ID,
 the old entity is left as it is and a WARNING is logged.
 
+## Config entry versions
+
+`TermoWebConfigFlow` creates entries at version 1.5. `async_migrate_entry`
+applies the steps in order and refuses entries with a major version above 1:
+
+| Minor | Change |
+|---|---|
+| 1.2 | Drop the legacy `poll_interval` from data and options |
+| 1.3 | Drop the stored `supports_diagnostics` key |
+| 1.4 | Entry unique ID: case-fold the username and scope it by backend (`ducaheat:<account>` for Ducaheat and Tevolve). If another entry already has that ID, the entry keeps its own and a WARNING is logged |
+| 1.5 | Entity unique IDs move to the `identifiers.py` scheme (below) |
+
+`async_remove_entry` deletes the energy import `Store`. Legacy import progress
+kept in entry options is moved into that Store on the next import (only a
+completed legacy import is trusted; other nodes re-import).
+
+## Logging and redaction
+
+- Levels: INFO for lifecycle (setup, import start/summary), DEBUG for REST/WS
+  payloads and protocol traffic, WARNING for recoverable anomalies
+  (e.g. rate-limit pauses, skipped migrations), ERROR for unrecoverable failures.
+- Anything that can carry credentials or identifiers is passed through
+  `backend/sanitize.py` before it is logged or put in an exception message:
+  `redact_text` (bearer tokens, `token=` query values, e-mail addresses,
+  `/devs/<id>` paths, "authorization"), `redact_token_fragment`,
+  `mask_identifier`. The TermoWeb WS client logs URLs with `{token}`,
+  `{dev_id}` and `{sid}` placeholders.
+- Diagnostics use `async_redact_data` with `SENSITIVE_FIELDS`
+  (`diagnostics.py`: tokens, password, username, `dev_id`, `device_id`,
+  `serial`, `serial_id`, `client_secret`, `authorization`) and redact the
+  installation geo data. Radio surveys and captures are redacted by
+  `backend/radio` `redact` helpers (network ids, serial bytes, on-air hex)
+  before they are saved for sharing.
+
 ## Operational constraints
 
 - Entity services and writes fail loudly: invalid input or the wrong node type
@@ -235,9 +358,16 @@ the old entity is left as it is and a WARNING is logged.
   pauses all requests on that client for the `Retry-After` delay (seconds or
   HTTP date, capped at 15 min; 30 s when absent) and raises
   `BackendRateLimitError` with `retry_after` set.
-- The `import_energy_history` service must throttle to **2 queries per second**
-  (the shared samples limiter in `throttle.py`).
-- Energy history import (`energy.py`) never deletes statistics. It walks each
+- WebSocket first: once startup completes, REST polling is suspended while the
+  WS trackers are healthy (see "WebSocket client layering"). Reconnects are
+  paced by `ConnectionRateLimiter` and exponential backoff.
+- The `import_energy_history` service is held to **2 queries per second** twice
+  over: each sample request waits on the process-wide samples limiter
+  (`throttle.py`, 0.5 s interval) and then passes through the client's
+  `RequestLimiter` like every other request. One import runs at a time
+  (`runtime.energy_import_lock`).
+- Energy history import (`energy.py`) never deletes statistics (it overwrites
+  rows in place by `start` and rewrites the sums that follow). It walks each
   node's window forward one day per request, upserts the hourly rows with
   `async_import_statistics`, waits for the recorder commit, then records the
   day as done in a `helpers.storage.Store` (`termoweb.energy_import.<entry_id>`),
@@ -284,3 +414,22 @@ Implementation note for heater writes:
   `manual`, which the integration cannot set on them.
 - `climate.turn_off` selects Off; `climate.turn_on` restores the mode used
   before the last turn off (Heat or Auto; accumulators always Auto), else Auto.
+
+## Testing approach
+
+- Tests run on **real Home Assistant** (`pytest-homeassistant-custom-component`,
+  the `hass` fixture and `MockConfigEntry`). Home Assistant internals are never
+  patched.
+- Fakes exist **only at the backend boundary**: the `cloud` fixture in
+  `tests/conftest.py` (a `FakeCloud` replacing the public `RESTClient` methods
+  and the WebSocket client factory) and the doubles in `tests/fakes/`. Pure
+  modules (codecs, domain, radio protocol) are tested without `hass`.
+- `tests/` mirrors `custom_components/termoweb/`: `tests/backend/`,
+  `tests/backend/radio/`, `tests/codecs/`, `tests/domain/`, `tests/planner/`,
+  `tests/services/`, plus `tests/test_<module>.py` per top-level module. Add
+  tests to the module's file; test modules never import each other.
+- `filterwarnings = ["error"]`: warnings fail tests, so tests must close what
+  they open. Order is random (`pytest-randomly`); re-run a failure with its
+  printed `-p randomly --randomly-seed=N`.
+- Coverage gate: 95% (`fail_under` in `pyproject.toml`, branch coverage).
+  CI runs `timeout 120s uv run pytest --cov` (see `.github/workflows/`).
