@@ -15,4 +15,3 @@ stable, and **v2.0.2** is the clean release.
 - **OpenAPI specs:**
   - TermoWeb: [`termoweb_openapi.yaml`](./termoweb_openapi.yaml)
   - Ducaheat: [`ducaheat_openapi.yaml`](./ducaheat_openapi.yaml)
-- **Historical refactor docs:** [`archive/`](./archive/)

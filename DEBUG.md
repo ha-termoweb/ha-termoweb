@@ -2,6 +2,8 @@
 
 This guide shows a non-technical end‑user how to capture **startup and runtime** debug logs and diagnostics for the **Termoweb** custom integration using only the Home Assistant UI (no add‑ons, no CLI).
 
+> The old **debug** option in the TermoWeb settings and the `ws_debug_probe` action were removed. Use Home Assistant's own logger settings, as described here.
+
 > Assumptions: Home Assistant is running; the integration is installed; debug logging can be enabled per‑integration in your HA version.
 
 ---
@@ -28,7 +30,18 @@ This guide shows a non-technical end‑user how to capture **startup and runtime
    - On the **Termoweb** integration card, **⋮ → Download diagnostics**.
    - Save the downloaded `.json` file. This is often requested together with the log file.
 
-6. **(Optional) Inspect logs in the UI**
+6. **(Optional) Keep debug logging on after a restart**
+   - **Enable debug logging** on the card is switched off when Home Assistant restarts. To keep it on, add this to `configuration.yaml` and restart Home Assistant:
+     ```yaml
+     logger:
+       default: warning
+       logs:
+         custom_components.termoweb: debug
+     ```
+   - If you already have a `logger:` section, add only the line `custom_components.termoweb: debug` under `logs:`.
+   - Remove the line when you are done. Debug logs are large.
+
+7. **(Optional) Inspect logs in the UI**
    - Go to **Settings → System → Logs → Load full logs**.
    - Use the search box to filter for `custom_components.termoweb`.
 
@@ -39,13 +52,19 @@ This guide shows a non-technical end‑user how to capture **startup and runtime
 - The **Termoweb diagnostics JSON** file.
 - Optionally, screenshots of any visible errors in **Settings → System → Logs** filtered by `custom_components.termoweb`.
 
-> Tip: The TermoWeb integration hides session tokens and shortens the gateway ID (for example `012345...cdef`) in its normal log lines. Debug logging can show more detail, and many other components in Home Assistant do not hide private information, so please read the log before you post it.
+## What is hidden, and what is not
+
+- At normal log levels (INFO and above), the integration hides session tokens and email addresses, and shortens the gateway ID (for example `012345...cdef`).
+- At **DEBUG** level, the full gateway ID or other raw IDs can appear in the log. Many other components in Home Assistant also do not hide private information. **Read the log and remove private details before you post it.**
+- **Download diagnostics** removes the account email, password, tokens, the gateway ID and serial numbers, and the gateway location (city, state, country, ZIP). The time zone stays. Open the file and check it before you share it too.
 
 ---
 
 ## Energy history import service
 
 The integration exposes the `termoweb.import_energy_history` service to backfill hourly energy statistics. The service supports the following fields:
+
+It imports every heater, accumulator and power monitor that has an energy sensor. Thermostats are not imported (they have no energy sensor). Run it once; it is not needed again unless you want more days or a full re-import.
 
 - `max_history_retrieval` *(int, 1-3650, default 7)* — how many days back to import. If a node was already imported for fewer days, only the older days are fetched.
 - `reset_progress` *(bool, default false)* — forget the saved progress and import the whole period again. Existing statistics are overwritten in place, never deleted.
