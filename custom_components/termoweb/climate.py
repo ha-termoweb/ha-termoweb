@@ -9,6 +9,7 @@ import typing
 from typing import Any, cast
 
 from homeassistant.components.climate import (
+    ATTR_HVAC_MODE,
     ClimateEntity,
     ClimateEntityFeature,
     HVACAction,
@@ -631,8 +632,23 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
         low, high = self._setpoint_range()
         t = max(low, min(high, t))
+        requested = kwargs.get(ATTR_HVAC_MODE)
+        if requested is not None:
+            requested = str(getattr(requested, "value", requested)).lower()
+            if requested not in {HVACMode.OFF, HVACMode.AUTO, HVACMode.HEAT}:
+                raise ServiceValidationError(f"Unsupported hvac_mode {requested}")
+        if requested == HVACMode.OFF:
+            # Off wins: a setpoint cannot be applied while the heater is off.
+            await self.async_set_hvac_mode(HVACMode.OFF)
+            return
         self._pending_stemp = t
-        default_mode = self._default_mode_for_setpoint()
+        if requested == HVACMode.AUTO:
+            # Auto plus a setpoint is the schedule with a temporary override.
+            default_mode = "modified_auto"
+        elif requested == HVACMode.HEAT:
+            default_mode = HVACMode.HEAT
+        else:
+            default_mode = self._default_mode_for_setpoint()
         if default_mode is not None:
             self._pending_mode = default_mode
         _LOGGER.debug(
