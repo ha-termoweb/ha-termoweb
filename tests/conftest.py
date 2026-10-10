@@ -142,9 +142,13 @@ def build_entry_runtime(
         client = SimpleNamespace()
 
     if backend is None:
+        from custom_components.termoweb.backend.factory import backend_capabilities
+
         backend = SimpleNamespace(
             client=client,
             brand=brand,
+            capabilities=backend_capabilities(brand),
+            diagnostics=lambda _entry_data: None,
             create_ws_client=MagicMock(),
             set_node_settings=AsyncMock(),
             set_acm_boost_state=AsyncMock(),

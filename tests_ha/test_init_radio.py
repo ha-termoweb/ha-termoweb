@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components import termoweb
+from custom_components.termoweb.backend import factory
 from custom_components.termoweb.backend.radio import GatewayInfo, RadioLinkError
 from custom_components.termoweb.backend.radio_client import RadioClient
 from custom_components.termoweb.const import BRAND_RADIO_MONITOR, CONF_BRAND, DOMAIN
@@ -44,7 +44,7 @@ class FakeLink:
 def radio_clients() -> Generator[list[tuple[RadioClient, list[FakeLink]]]]:
     """Build real RadioClients over fake links; keep them for assertions."""
     made: list[tuple[RadioClient, list[FakeLink]]] = []
-    real_create = termoweb.create_radio_client
+    real_create = factory.create_radio_client
 
     def _create(*args: Any, **kwargs: Any) -> RadioClient:
         client = real_create(*args, **kwargs)
@@ -58,7 +58,7 @@ def radio_clients() -> Generator[list[tuple[RadioClient, list[FakeLink]]]]:
         made.append((client, links))
         return client
 
-    with patch.object(termoweb, "create_radio_client", _create):
+    with patch.object(factory, "create_radio_client", _create):
         yield made
 
 

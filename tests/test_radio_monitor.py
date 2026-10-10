@@ -26,7 +26,6 @@ from fake_radio_link import (
 from custom_components.termoweb.backend.radio import protocol as p
 from custom_components.termoweb.const import (
     BRAND_RADIO_MONITOR,
-    get_brand_configuration_url,
     get_brand_label,
     signal_radio_frames,
 )
@@ -349,7 +348,9 @@ def test_monitor_backend_wiring() -> None:
     factory = _mod(".factory")
     monitor_mod = _mod(".radio_monitor")
     caps = factory.backend_capabilities(BRAND_RADIO_MONITOR)
-    assert caps == _mod(".base").BackendCapabilities(frame_monitor=True)
+    assert caps == _mod(".base").BackendCapabilities(
+        frame_monitor=True, local_radio=True, site_device=False, web_portal=False
+    )
     assert (
         factory._backend_class(BRAND_RADIO_MONITOR) is monitor_mod.RadioMonitorBackend
     )  # noqa: SLF001
@@ -361,6 +362,9 @@ def test_monitor_backend_wiring() -> None:
         hass, "entry", DEV_ID, Coordinator(), inventory=Inventory(DEV_ID, [])
     )
     assert isinstance(ws, monitor_mod.RadioMonitor)
+    diagnostics = backend.diagnostics({"radio_type": "nanocul"})
+    assert diagnostics["listen_only"] is True
+    assert diagnostics["radio_type"] == "nanocul"
     assert (
         asyncio.run(
             backend.fetch_hourly_samples(DEV_ID, [], datetime.now(), datetime.now())
@@ -379,4 +383,5 @@ def test_monitor_brand_labels() -> None:
     """A listen-only entry shows as Radio and has no cloud portal link."""
 
     assert get_brand_label(BRAND_RADIO_MONITOR) == "Radio"
-    assert get_brand_configuration_url(BRAND_RADIO_MONITOR) is None
+    capabilities = _mod(".factory").backend_capabilities(BRAND_RADIO_MONITOR)
+    assert not capabilities.web_portal and not capabilities.site_device

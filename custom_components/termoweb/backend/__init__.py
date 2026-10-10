@@ -6,6 +6,7 @@ from .base import Backend, BackendCapabilities, HttpClientProto, WsClientProto
 from .factory import (
     backend_capabilities,
     create_backend,
+    create_entry_client,
     create_radio_client,
     create_rest_client,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "WsClientProto",
     "backend_capabilities",
     "create_backend",
+    "create_entry_client",
     "create_radio_client",
     "create_rest_client",
 ]

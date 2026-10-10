@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 import logging
 from typing import Any
@@ -12,11 +12,37 @@ from custom_components.termoweb.backend.base import (
     BackendCapabilities,
     WsClientProto,
 )
+from custom_components.termoweb.backend.radio.link import supports_survey
 from custom_components.termoweb.backend.radio_client import RadioClient
 from custom_components.termoweb.backend.radio_ws import RadioListener
+from custom_components.termoweb.const import CONF_RADIO_TYPE, RADIO_TYPE_ESP32
 from custom_components.termoweb.inventory import Inventory
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def radio_diagnostics(client: Any, entry_data: Mapping[str, Any]) -> dict[str, Any]:
+    """Return radio link facts for diagnostics; no MAC or network id."""
+
+    info = client.gateway_info
+    section: dict[str, Any] = {
+        "radio_type": entry_data.get(CONF_RADIO_TYPE, RADIO_TYPE_ESP32),
+        "dialect": client.dialect.name,
+        "connected": client.connected,
+        "listen_only": client.listen_only,
+        "gateway": None,
+    }
+    if info is not None:
+        section["gateway"] = {
+            "firmware": info.version,
+            "freq": info.freq,
+            "sync": info.sync,
+            "dialect": info.dialect,
+            "autoack": info.autoack,
+            "station_id": info.station_id,
+            "survey": supports_survey(info),
+        }
+    return section
 
 
 class RadioBackend(Backend):
@@ -28,7 +54,15 @@ class RadioBackend(Backend):
         priority=True,
         energy_history=False,
         energy=True,
+        local_radio=True,
+        options_flow=True,
+        web_portal=False,
     )
+
+    def diagnostics(self, entry_data: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Return the radio link facts."""
+
+        return radio_diagnostics(self.client, entry_data)
 
     def create_ws_client(
         self,
@@ -66,4 +100,4 @@ class RadioBackend(Backend):
         return {}
 
 
-__all__ = ["RadioBackend"]
+__all__ = ["RadioBackend", "radio_diagnostics"]

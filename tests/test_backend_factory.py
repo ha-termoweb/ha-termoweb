@@ -143,10 +143,17 @@ def test_backend_capabilities_follow_the_backend_class() -> None:
     )
     for brand in (BRAND_DUCAHEAT, BRAND_TEVOLVE):
         assert backend_capabilities(brand) == BackendCapabilities(
-            lock=True, priority=True, energy_history=True, energy=True, geo_data=True
+            lock=True,
+            priority=True,
+            energy_history=True,
+            energy=True,
+            geo_data=True,
+            account_scope="ducaheat",
         )
     radio = backend_capabilities("radio")
     assert radio.energy and not radio.geo_data  # estimated energy, no location
+    assert radio.local_radio and radio.options_flow and radio.site_device
+    assert not radio.web_portal
     assert Backend.capabilities == BackendCapabilities()
     backend = create_backend(brand=BRAND_DUCAHEAT, client=DummyHttpClient())
     assert backend.capabilities is backend_capabilities(BRAND_DUCAHEAT)

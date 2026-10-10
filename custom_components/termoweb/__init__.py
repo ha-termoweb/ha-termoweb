@@ -22,39 +22,18 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.typing import ConfigType
 
-from .backend import (
-    Backend,
-    backend_capabilities,
-    create_backend,
-    create_radio_client,
-    create_rest_client,
-)
+from .backend import Backend, backend_capabilities, create_backend, create_entry_client
 from .backend.radio import RadioLinkError
-from .backend.radio.discovery import LISTEN_PLACEHOLDER_NET
 from .backend.radio_client import RadioError
-from .backend.radio_power import PowerManager
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
 from .const import (
     BRAND_DUCAHEAT as BRAND_DUCAHEAT,
-    BRAND_RADIO,
-    BRAND_RADIO_MONITOR,
     BRAND_TEVOLVE as BRAND_TEVOLVE,
     CONF_BRAND,
-    CONF_DEVICE,
-    CONF_DIALECT,
-    CONF_HOST,
-    CONF_NETWORK_ID,
-    CONF_NODES,
-    CONF_PORT,
-    CONF_RADIO_DEVICE_ID,
-    CONF_RADIO_POWER,
-    CONF_RADIO_TYPE,
     DEFAULT_BRAND,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     MIN_POLL_INTERVAL,
-    RADIO_BRANDS,
-    RADIO_TYPE_NANOCUL,
     signal_ws_status,
 )
 from .coordinator import (
@@ -163,68 +142,6 @@ async def async_list_devices(client: RESTClient) -> Any:
         raise
 
 
-def _create_monitor_client(data: Mapping[str, Any]) -> Any:
-    """Return the listen-only radio client of a monitor entry (dialect A to start)."""
-
-    if data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
-        return create_radio_client(
-            data[CONF_DEVICE],
-            0,
-            "A",
-            [],
-            LISTEN_PLACEHOLDER_NET,
-            serial_url=data[CONF_DEVICE],
-            device_id=data.get(CONF_RADIO_DEVICE_ID),
-            listen_only=True,
-        )
-    return create_radio_client(
-        data[CONF_HOST],
-        int(data[CONF_PORT]),
-        "A",
-        [],
-        LISTEN_PLACEHOLDER_NET,
-        listen_only=True,
-    )
-
-
-def _create_client(hass: HomeAssistant, entry: ConfigEntry, brand: str) -> Any:
-    """Return the cloud REST client, or the radio gateway client for radio entries."""
-
-    data = entry.data
-    if brand == BRAND_RADIO_MONITOR:
-        return _create_monitor_client(data)
-    if brand == BRAND_RADIO:
-
-        def _save_power(settings: dict[str, Any]) -> None:
-            """Store the power manager's settings in the entry options."""
-
-            hass.config_entries.async_update_entry(
-                entry, options={**entry.options, CONF_RADIO_POWER: settings}
-            )
-
-        power = PowerManager(lambda: entry.options.get(CONF_RADIO_POWER), _save_power)
-        if data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
-            return create_radio_client(
-                data[CONF_DEVICE],
-                0,
-                data[CONF_DIALECT],
-                data.get(CONF_NODES, []),
-                bytes.fromhex(data[CONF_NETWORK_ID]),
-                power=power,
-                serial_url=data[CONF_DEVICE],
-                device_id=data.get(CONF_RADIO_DEVICE_ID),
-            )
-        return create_radio_client(
-            data[CONF_HOST],
-            int(data[CONF_PORT]),
-            data[CONF_DIALECT],
-            data.get(CONF_NODES, []),
-            bytes.fromhex(data[CONF_NETWORK_ID]),
-            power=power,
-        )
-    return create_rest_client(hass, data["username"], data["password"], brand)
-
-
 async def async_setup_entry(  # noqa: C901
     hass: HomeAssistant, entry: TermoWebConfigEntry
 ) -> bool:
@@ -234,12 +151,12 @@ async def async_setup_entry(  # noqa: C901
 
     version = await _async_get_integration_version(hass)
 
-    client = _create_client(hass, entry, brand)
-    if brand in RADIO_BRANDS:
+    client = create_entry_client(hass, entry)
+    backend = create_backend(brand=brand, client=client)
+    if backend.capabilities.local_radio:
         # Release the gateway or serial port if setup fails after connecting;
         # a retry opens a new client, and the gateway serves one at a time.
         entry.async_on_unload(client.async_close)
-    backend = create_backend(brand=brand, client=client)
     try:
         devices = await async_list_devices(client)
     except BackendAuthError as err:
@@ -678,26 +595,32 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await energy_import_store(hass, entry.entry_id).async_remove()
 
 
+def _cloud_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
+    """Return the entry's canonical account unique ID, or its own on a collision."""
+
+    username = entry.data.get("username")
+    brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
+    if not isinstance(username, str) or backend_capabilities(brand).local_radio:
+        return entry.unique_id
+    wanted = build_cloud_unique_id(brand, username)
+    duplicate = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, wanted)
+    if duplicate is None or duplicate.entry_id == entry.entry_id:
+        return wanted
+    _LOGGER.warning(
+        "Entry '%s' is the same account as entry '%s'; delete one of them",
+        entry.title,
+        duplicate.title,
+    )
+    return entry.unique_id
+
+
 def _migrate_to_1_2(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Case-fold the cloud account unique ID and drop the legacy poll interval."""
+    """Drop the legacy poll interval; 1.4 folds the account unique ID."""
 
     data = {k: v for k, v in entry.data.items() if k != "poll_interval"}
     options = {k: v for k, v in entry.options.items() if k != "poll_interval"}
-    unique_id = entry.unique_id
-    username = data.get("username")
-    if isinstance(username, str) and data.get(CONF_BRAND) not in RADIO_BRANDS:
-        folded = build_cloud_unique_id(data.get(CONF_BRAND, DEFAULT_BRAND), username)
-        duplicate = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, folded)
-        if duplicate is None or duplicate.entry_id == entry.entry_id:
-            unique_id = folded
-        else:
-            _LOGGER.warning(
-                "Entry '%s' is the same account as entry '%s'; delete one of them",
-                entry.title,
-                duplicate.title,
-            )
     hass.config_entries.async_update_entry(
-        entry, data=data, options=options, unique_id=unique_id, minor_version=2
+        entry, data=data, options=options, minor_version=2
     )
 
 
@@ -708,6 +631,14 @@ def _migrate_to_1_3(hass: HomeAssistant, entry: ConfigEntry) -> None:
     hass.config_entries.async_update_entry(entry, data=data, minor_version=3)
 
 
+def _migrate_to_1_4(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Case-fold the account unique ID and scope it by backend (Tevolve -> ducaheat)."""
+
+    hass.config_entries.async_update_entry(
+        entry, unique_id=_cloud_unique_id(hass, entry), minor_version=4
+    )
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate a config entry to the current version."""
     if entry.version > 1:
@@ -716,4 +647,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _migrate_to_1_2(hass, entry)
     if entry.minor_version < 3:
         _migrate_to_1_3(hass, entry)
+    if entry.minor_version < 4:
+        _migrate_to_1_4(hass, entry)
     return True

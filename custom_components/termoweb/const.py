@@ -27,7 +27,6 @@ BRAND_TEVOLVE: Final = "tevolve"
 BRAND_RADIO: Final = "radio"  # local ESP32 radio gateway, no cloud
 # Listen-only radio entry: records traffic next to a real gateway, never transmits
 BRAND_RADIO_MONITOR: Final = "radio_monitor"
-RADIO_BRANDS: Final = frozenset({BRAND_RADIO, BRAND_RADIO_MONITOR})
 DEFAULT_BRAND: Final = BRAND_TERMOWEB
 
 # Radio entries: the gateway address plus what discovery learned from the air
@@ -107,26 +106,18 @@ def get_brand_basic_auth(brand: str) -> str:
 
 RADIO_BRAND_LABEL: Final = "Radio"  # not in BRAND_LABELS: that feeds the login form
 CLOUD_CONFIGURATION_URL: Final = "https://control.termoweb.net"
+# Every brand's display label, the radio ones included.
+DEVICE_BRAND_LABELS: Final[Mapping[str, str]] = {
+    **BRAND_LABELS,
+    BRAND_RADIO: RADIO_BRAND_LABEL,
+    BRAND_RADIO_MONITOR: RADIO_BRAND_LABEL,
+}
 
 
 def get_brand_label(brand: str) -> str:
     """Return human-readable brand label."""
 
-    if brand in RADIO_BRANDS:
-        return RADIO_BRAND_LABEL
-    return BRAND_LABELS.get(brand, BRAND_LABELS[BRAND_TERMOWEB])
-
-
-def brand_has_site_device(brand: str | None) -> bool:
-    """Return False for listen-only radio entries: they have no site device."""
-
-    return brand != BRAND_RADIO_MONITOR
-
-
-def get_brand_configuration_url(brand: str | None) -> str | None:
-    """Return the web portal URL for a cloud brand; None for the local radio."""
-
-    return None if brand in RADIO_BRANDS else CLOUD_CONFIGURATION_URL
+    return DEVICE_BRAND_LABELS.get(brand, BRAND_LABELS[BRAND_TERMOWEB])
 
 
 def get_brand_user_agent(brand: str) -> str:

@@ -155,6 +155,11 @@ class BackendCapabilities:
     energy: bool = False  # heater energy/power and installation total sensors
     geo_data: bool = False  # installation location sensor
     frame_monitor: bool = False  # listen-only radio: frames-heard sensor, no heaters
+    local_radio: bool = False  # owns a gateway/stick link, closed on unload
+    options_flow: bool = False  # heater power, pairing and rehoming options
+    site_device: bool = True  # the gateway sits under a site (installation) device
+    web_portal: bool = True  # devices link to the cloud web portal
+    account_scope: str = ""  # prefix of cloud entry unique IDs: one per backend
 
 
 class Backend(ABC):
@@ -279,6 +284,11 @@ class Backend(ABC):
         """Set the installation-wide power limit using the backend client."""
 
         await self.client.set_power_limit(dev_id, power_limit=power_limit)
+
+    def diagnostics(self, entry_data: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Return backend-specific diagnostics for the entry, or None if it has none."""
+
+        return None
 
     @abstractmethod
     def create_ws_client(

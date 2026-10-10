@@ -11,10 +11,7 @@ from homeassistant.data_entry_flow import FlowResultType
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.termoweb import (
-    async_migrate_entry,
-    config_flow,  # noqa: F401 (registers handler)
-)
+from custom_components.termoweb import async_migrate_entry, config_flow
 from custom_components.termoweb.backend.rest_client import (
     BackendAuthError,
     BackendRateLimitError,
@@ -31,6 +28,8 @@ from custom_components.termoweb.const import (
 )
 
 from .conftest import PASSWORD, USERNAME, VERSION, FakeCloud
+
+MINOR_VERSION = config_flow.TermoWebConfigFlow.MINOR_VERSION
 
 
 async def _cloud_form(hass: HomeAssistant) -> dict[str, Any]:
@@ -74,13 +73,13 @@ def _login(brand: str = BRAND_TERMOWEB, username: str = USERNAME) -> dict[str, s
     [
         (BRAND_TERMOWEB, f"TermoWeb ({USERNAME})", USERNAME),
         (BRAND_DUCAHEAT, f"Ducaheat ({USERNAME})", f"ducaheat:{USERNAME}"),
-        (BRAND_TEVOLVE, f"Tevolve ({USERNAME})", f"tevolve:{USERNAME}"),
+        (BRAND_TEVOLVE, f"Tevolve ({USERNAME})", f"ducaheat:{USERNAME}"),
     ],
 )
 async def test_cloud_step_creates_entry(
     hass: HomeAssistant, cloud: FakeCloud, brand: str, title: str, unique_id: str
 ) -> None:
-    """Valid credentials create an entry keyed by brand and username."""
+    """Valid credentials create an entry keyed by backend and username."""
     form = await _cloud_form(hass)
 
     result = await hass.config_entries.flow.async_configure(
@@ -177,7 +176,7 @@ async def test_cloud_entry_unique_id_is_case_folded(
     )
 
     assert result["result"].unique_id == "ducaheat:user@example.com"
-    assert result["result"].minor_version == 3
+    assert result["result"].minor_version == MINOR_VERSION
 
 
 async def test_cloud_step_stores_only_credentials(
@@ -431,7 +430,7 @@ async def test_migration_case_folds_unique_id_and_drops_poll_interval(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert (entry.version, entry.minor_version) == (1, 3)
+    assert (entry.version, entry.minor_version) == (1, MINOR_VERSION)
     assert entry.unique_id == "user@example.com"
     assert entry.data["username"] == "User@Example.com"
     assert "poll_interval" not in entry.data
@@ -459,8 +458,81 @@ async def test_migration_keeps_unique_id_on_collision(
     await hass.async_block_till_done()
 
     assert [entry.unique_id for entry in entries] == [USERNAME, USERNAME.upper()]
-    assert [entry.minor_version for entry in entries] == [3, 3]
+    assert [entry.minor_version for entry in entries] == [MINOR_VERSION] * 2
     assert "is the same account as entry" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("existing", "added"),
+    [(BRAND_DUCAHEAT, BRAND_TEVOLVE), (BRAND_TEVOLVE, BRAND_DUCAHEAT)],
+)
+async def test_ducaheat_and_tevolve_are_one_account(
+    hass: HomeAssistant, cloud: FakeCloud, existing: str, added: str
+) -> None:
+    """Ducaheat and Tevolve share one backend: one account cannot be added twice."""
+    form = await _cloud_form(hass)
+    await hass.config_entries.flow.async_configure(form["flow_id"], _login(existing))
+    await hass.async_block_till_done()
+    form = await _cloud_form(hass)
+
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"], _login(added, USERNAME.upper())
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_migration_scopes_tevolve_unique_id_by_backend(
+    hass: HomeAssistant,
+) -> None:
+    """Version 1.3 Tevolve entries move to the shared ``ducaheat:`` unique id."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        minor_version=3,
+        unique_id=f"tevolve:{USERNAME}",
+        data={"username": USERNAME, "password": PASSWORD, CONF_BRAND: BRAND_TEVOLVE},
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert entry.unique_id == f"ducaheat:{USERNAME}"
+    assert entry.minor_version == MINOR_VERSION
+
+
+async def test_migration_keeps_tevolve_unique_id_when_ducaheat_has_the_account(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The same account under both brands keeps both ids and the user is told."""
+    ducaheat = MockConfigEntry(
+        domain=DOMAIN,
+        minor_version=3,
+        title=f"Ducaheat ({USERNAME})",
+        unique_id=f"ducaheat:{USERNAME}",
+        data={"username": USERNAME, "password": PASSWORD, CONF_BRAND: BRAND_DUCAHEAT},
+    )
+    tevolve = MockConfigEntry(
+        domain=DOMAIN,
+        minor_version=3,
+        title=f"Tevolve ({USERNAME})",
+        unique_id=f"tevolve:{USERNAME}",
+        data={"username": USERNAME, "password": PASSWORD, CONF_BRAND: BRAND_TEVOLVE},
+    )
+    ducaheat.add_to_hass(hass)
+    tevolve.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, tevolve)
+    assert await async_migrate_entry(hass, ducaheat)
+
+    assert tevolve.unique_id == f"tevolve:{USERNAME}"
+    assert ducaheat.unique_id == f"ducaheat:{USERNAME}"
+    assert [tevolve.minor_version, ducaheat.minor_version] == [MINOR_VERSION] * 2
+    assert (
+        f"Entry 'Tevolve ({USERNAME})' is the same account as entry "
+        f"'Ducaheat ({USERNAME})'" in caplog.text
+    )
 
 
 @pytest.mark.parametrize("brand", [BRAND_RADIO, BRAND_RADIO_MONITOR])
@@ -478,13 +550,16 @@ async def test_migration_leaves_radio_unique_id(
     assert await async_migrate_entry(hass, entry)
 
     assert entry.unique_id == f"{brand}:0A0B0C0D0E0F"
-    assert entry.minor_version == 3
+    assert entry.minor_version == MINOR_VERSION
 
 
 async def test_migration_of_current_entry_is_a_no_op(hass: HomeAssistant) -> None:
     """An entry already at the current version is left alone."""
     entry = MockConfigEntry(
-        domain=DOMAIN, minor_version=3, unique_id="Mixed", data={"username": "Mixed"}
+        domain=DOMAIN,
+        minor_version=MINOR_VERSION,
+        unique_id="Mixed",
+        data={"username": "Mixed"},
     )
     entry.add_to_hass(hass)
 
@@ -509,7 +584,7 @@ async def test_migration_drops_supports_diagnostics(
     assert await async_migrate_entry(hass, entry)
 
     assert dict(entry.data) == {CONF_BRAND: BRAND_RADIO, "host": "h"}
-    assert entry.minor_version == 3
+    assert entry.minor_version == MINOR_VERSION
 
 
 async def test_migration_refuses_newer_version(hass: HomeAssistant) -> None:

@@ -6,12 +6,6 @@ custom_components/termoweb/__init__.py :: _log_unknown_node_types
     Log node types the integration does not support yet.
 custom_components/termoweb/__init__.py :: async_list_devices
     Call ``list_devices`` logging auth/connection issues consistently.
-custom_components/termoweb/__init__.py :: _create_monitor_client
-    Return the listen-only radio client of a monitor entry (dialect A to start).
-custom_components/termoweb/__init__.py :: _create_client
-    Return the cloud REST client, or the radio gateway client for radio entries.
-custom_components/termoweb/__init__.py :: _create_client._save_power
-    Store the power manager's settings in the entry options.
 custom_components/termoweb/__init__.py :: async_setup
     Register the integration's services once; they look up loaded entries.
 custom_components/termoweb/__init__.py :: async_setup_entry
@@ -38,10 +32,14 @@ custom_components/termoweb/__init__.py :: async_unload_entry
     Unload the platforms; the runtime shuts down afterwards via async_on_unload.
 custom_components/termoweb/__init__.py :: async_remove_entry
     Delete the entry's stored energy import progress.
+custom_components/termoweb/__init__.py :: _cloud_unique_id
+    Return the entry's canonical account unique ID, or its own on a collision.
 custom_components/termoweb/__init__.py :: _migrate_to_1_2
-    Case-fold the cloud account unique ID and drop the legacy poll interval.
+    Drop the legacy poll interval; 1.4 folds the account unique ID.
 custom_components/termoweb/__init__.py :: _migrate_to_1_3
     Drop the ``supports_diagnostics`` key that old releases stored.
+custom_components/termoweb/__init__.py :: _migrate_to_1_4
+    Case-fold the account unique ID and scope it by backend (Tevolve -> ducaheat).
 custom_components/termoweb/__init__.py :: async_migrate_entry
     Migrate a config entry to the current version.
 custom_components/termoweb/backend/base.py :: HttpClientProto.list_devices
@@ -86,6 +84,8 @@ custom_components/termoweb/backend/base.py :: Backend.set_node_display_select
     Toggle display-identify cues using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_power_limit
     Set the installation-wide power limit using the backend client.
+custom_components/termoweb/backend/base.py :: Backend.diagnostics
+    Return backend-specific diagnostics for the entry, or None if it has none.
 custom_components/termoweb/backend/base.py :: Backend.create_ws_client
     Create a websocket client for the given device.
 custom_components/termoweb/backend/base.py :: Backend.fetch_hourly_samples
@@ -248,6 +248,14 @@ custom_components/termoweb/backend/factory.py :: backend_capabilities
     Return the optional features the brand's backend supports.
 custom_components/termoweb/backend/factory.py :: create_radio_client
     Return a radio client for the gateway at ``host:port`` (or a USB stick).
+custom_components/termoweb/backend/factory.py :: _create_monitor_client
+    Return the listen-only radio client of a monitor entry (dialect A to start).
+custom_components/termoweb/backend/factory.py :: _create_gateway_client
+    Return the radio client of a gateway entry; heater power lives in its options.
+custom_components/termoweb/backend/factory.py :: _create_gateway_client._save_power
+    Store the power manager's settings in the entry options.
+custom_components/termoweb/backend/factory.py :: create_entry_client
+    Return the client a config entry talks through: cloud REST or local radio.
 custom_components/termoweb/backend/factory.py :: create_rest_client
     Return a REST client configured for the selected brand.
 custom_components/termoweb/backend/radio/capture.py :: _utcnow
@@ -738,6 +746,8 @@ custom_components/termoweb/config_flow.py :: _validate_login
     Ensure the provided credentials authenticate successfully.
 custom_components/termoweb/config_flow.py :: _login_error
     Return the flow error key for a failed login, or None when it succeeds.
+custom_components/termoweb/config_flow.py :: _capabilities
+    Return the optional features of the backend serving ``entry``.
 custom_components/termoweb/config_flow.py :: _radio_key
     Return what identifies the radio connection: the serial port or host:port.
 custom_components/termoweb/config_flow.py :: _radio_in_use
@@ -864,10 +874,6 @@ custom_components/termoweb/const.py :: get_brand_basic_auth
     Return Base64-encoded client credentials for the brand.
 custom_components/termoweb/const.py :: get_brand_label
     Return human-readable brand label.
-custom_components/termoweb/const.py :: brand_has_site_device
-    Return False for listen-only radio entries: they have no site device.
-custom_components/termoweb/const.py :: get_brand_configuration_url
-    Return the web portal URL for a cloud brand; None for the local radio.
 custom_components/termoweb/const.py :: get_brand_user_agent
     Return the preferred User-Agent string for the brand.
 custom_components/termoweb/const.py :: get_brand_requested_with
@@ -985,7 +991,7 @@ custom_components/termoweb/coordinator.py :: _wrap_logger
 custom_components/termoweb/diagnostics.py :: _extract_websocket_clients
     Return websocket telemetry entries for diagnostics.
 custom_components/termoweb/diagnostics.py :: _radio_section
-    Return radio gateway facts and the last survey; no MAC or network id.
+    Return the backend's own facts plus the last radio survey and capture.
 custom_components/termoweb/diagnostics.py :: async_get_config_entry_diagnostics
     Return a diagnostics payload for ``entry``.
 custom_components/termoweb/domain/energy.py :: EnergySnapshot.metrics_for_type
@@ -1615,7 +1621,7 @@ custom_components/termoweb/identifiers.py :: build_power_monitor_power_unique_id
 custom_components/termoweb/identifiers.py :: thermostat_fallback_name
     Return the fallback friendly name for a thermostat node.
 custom_components/termoweb/identifiers.py :: build_cloud_unique_id
-    Return a cloud entry's unique ID: the case-folded account, brand-prefixed.
+    Return a cloud entry's unique ID: the case-folded account, backend-scoped.
 custom_components/termoweb/inventory.py :: _default_heater_name
     Return the default fallback name for a heater address.
 custom_components/termoweb/inventory.py :: InventorySnapshot.filtered_count
@@ -1826,10 +1832,12 @@ custom_components/termoweb/utils.py :: async_get_integration_version
     Return the installed integration version string.
 custom_components/termoweb/utils.py :: _entry_gateway_record
     Return the running runtime of ``entry_id``, or None.
+custom_components/termoweb/utils.py :: _has_capability
+    Return the running backend's capability flag; True (the cloud default) if unknown.
 custom_components/termoweb/utils.py :: apply_entry_device_overrides
     Return device info with brand and version overrides.
 custom_components/termoweb/utils.py :: _set_configuration_url
-    Link the device to the brand's web portal; the local radio has none.
+    Link the device to the cloud web portal when the backend has one.
 custom_components/termoweb/utils.py :: build_gateway_device_info
     Return canonical ``DeviceInfo`` for the TermoWeb gateway.
 custom_components/termoweb/utils.py :: build_power_monitor_device_info
@@ -2165,6 +2173,10 @@ custom_components/termoweb/backend/radio/pairing.py :: pair_new_network
     Pair heaters into ``network_id``, alternating ``dialects`` until one answers.
 custom_components/termoweb/backend/radio/pairing.py :: pair_new_network._pair
     Pair in ``dialect`` for one slice; None when no heater was paired.
+custom_components/termoweb/backend/radio_backend.py :: radio_diagnostics
+    Return radio link facts for diagnostics; no MAC or network id.
+custom_components/termoweb/backend/radio_backend.py :: RadioBackend.diagnostics
+    Return the radio link facts.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.create_ws_client
     Return the radio listener that plays the websocket client's role.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.fetch_hourly_samples
@@ -2279,6 +2291,8 @@ custom_components/termoweb/backend/radio_monitor.py :: RadioMonitor._refresh_all
     Listen in the next dialect each window, A first; dialect-A firmware stays.
 custom_components/termoweb/backend/radio_monitor.py :: RadioMonitor._on_frame
     Count a heard frame and publish the count; nothing is answered.
+custom_components/termoweb/backend/radio_monitor.py :: RadioMonitorBackend.diagnostics
+    Return the radio link facts.
 custom_components/termoweb/backend/radio_monitor.py :: RadioMonitorBackend.create_ws_client
     Return the frame-counting monitor in the websocket client's role.
 custom_components/termoweb/backend/radio_monitor.py :: RadioMonitorBackend.fetch_hourly_samples

@@ -105,19 +105,19 @@ def test_create_rest_client_selects_brand(
     monkeypatch.setattr(backend_factory, "RESTClient", DefaultClient)
     monkeypatch.setattr(ducaheat_module, "DucaheatRESTClient", DucaClient)
 
-    default_client = termoweb_init.create_rest_client(
+    default_client = backend_factory.create_rest_client(
         stub_hass,
         "user",
         "pw",
         termoweb_init.DEFAULT_BRAND,
     )
-    duca_client = termoweb_init.create_rest_client(
+    duca_client = backend_factory.create_rest_client(
         stub_hass,
         "user2",
         "pw2",
         termoweb_init.BRAND_DUCAHEAT,
     )
-    tevolve_client = termoweb_init.create_rest_client(
+    tevolve_client = backend_factory.create_rest_client(
         stub_hass,
         "user3",
         "pw3",
@@ -286,7 +286,7 @@ def test_async_setup_entry_happy_path(
 
     monkeypatch.setattr(backend_factory, "RESTClient", HappyClient)
     create_calls: list[tuple[Any, str, str, str]] = []
-    orig_create = termoweb_init.create_rest_client
+    orig_create = backend_factory.create_rest_client
 
     def fake_create(
         hass_in: HomeAssistant, username: str, password: str, brand: str
@@ -294,7 +294,7 @@ def test_async_setup_entry_happy_path(
         create_calls.append((hass_in, username, password, brand))
         return orig_create(hass_in, username, password, brand)
 
-    monkeypatch.setattr(termoweb_init, "create_rest_client", fake_create)
+    monkeypatch.setattr(backend_factory, "create_rest_client", fake_create)
 
     list_calls: list[Any] = []
     orig_list_devices = termoweb_init.async_list_devices
@@ -486,7 +486,7 @@ def test_async_setup_entry_radio_gateway_unreachable(
         created.append((*args, power))
         return UnreachableRadio(None, "", "")
 
-    monkeypatch.setattr(termoweb_init, "create_radio_client", fake_create)
+    monkeypatch.setattr(backend_factory, "create_radio_client", fake_create)
     nodes = [{"type": "htr", "addr": "6", "name": "Heater 6"}]
     entry = ConfigEntry(
         "radio",
@@ -530,7 +530,7 @@ def test_async_setup_entry_nanocul_builds_a_serial_client(
         created.append((args, kwargs))
         return UnreachableStick(None, "", "")
 
-    monkeypatch.setattr(termoweb_init, "create_radio_client", fake_create)
+    monkeypatch.setattr(backend_factory, "create_radio_client", fake_create)
     entry = ConfigEntry(
         "nanocul",
         data={
@@ -598,7 +598,7 @@ def test_async_setup_entry_monitor_builds_listen_only_client(
         created.append((args, kwargs))
         return Unreachable(None, "", "")
 
-    monkeypatch.setattr(termoweb_init, "create_radio_client", fake_create)
+    monkeypatch.setattr(backend_factory, "create_radio_client", fake_create)
     entry = ConfigEntry("monitor", data=dict(data))
     stub_hass.config_entries.add(entry)
 
@@ -637,7 +637,7 @@ def test_monitor_entry_sets_up_listen_only_and_unloads(
             listen_only=True,
         )
 
-    monkeypatch.setattr(termoweb_init, "create_radio_client", fake_create)
+    monkeypatch.setattr(backend_factory, "create_radio_client", fake_create)
     entry = ConfigEntry("monitor", data=dict(MONITOR_ESP32))
     stub_hass.config_entries.add(entry)
 

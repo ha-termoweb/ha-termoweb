@@ -6,12 +6,25 @@ from collections.abc import Iterable, Mapping
 import functools
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client
 
 from custom_components.termoweb.const import (
     BRAND_RADIO,
     BRAND_RADIO_MONITOR,
+    CONF_BRAND,
+    CONF_DEVICE,
+    CONF_DIALECT,
+    CONF_HOST,
+    CONF_NETWORK_ID,
+    CONF_NODES,
+    CONF_PORT,
+    CONF_RADIO_DEVICE_ID,
+    CONF_RADIO_POWER,
+    CONF_RADIO_TYPE,
+    DEFAULT_BRAND,
+    RADIO_TYPE_NANOCUL,
     get_brand_api_base,
     get_brand_basic_auth,
     uses_ducaheat_backend,
@@ -100,6 +113,80 @@ def create_radio_client(
         model=NANOCUL_MODEL,
         **listen,
     )
+
+
+def _create_monitor_client(data: Mapping[str, Any]) -> RadioClient:
+    """Return the listen-only radio client of a monitor entry (dialect A to start)."""
+
+    from .radio.discovery import LISTEN_PLACEHOLDER_NET  # noqa: PLC0415
+
+    if data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
+        return create_radio_client(
+            data[CONF_DEVICE],
+            0,
+            "A",
+            [],
+            LISTEN_PLACEHOLDER_NET,
+            serial_url=data[CONF_DEVICE],
+            device_id=data.get(CONF_RADIO_DEVICE_ID),
+            listen_only=True,
+        )
+    return create_radio_client(
+        data[CONF_HOST],
+        int(data[CONF_PORT]),
+        "A",
+        [],
+        LISTEN_PLACEHOLDER_NET,
+        listen_only=True,
+    )
+
+
+def _create_gateway_client(hass: HomeAssistant, entry: ConfigEntry) -> RadioClient:
+    """Return the radio client of a gateway entry; heater power lives in its options."""
+
+    from .radio_power import PowerManager  # noqa: PLC0415
+
+    data = entry.data
+
+    def _save_power(settings: dict[str, Any]) -> None:
+        """Store the power manager's settings in the entry options."""
+
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, CONF_RADIO_POWER: settings}
+        )
+
+    power = PowerManager(lambda: entry.options.get(CONF_RADIO_POWER), _save_power)
+    if data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
+        return create_radio_client(
+            data[CONF_DEVICE],
+            0,
+            data[CONF_DIALECT],
+            data.get(CONF_NODES, []),
+            bytes.fromhex(data[CONF_NETWORK_ID]),
+            power=power,
+            serial_url=data[CONF_DEVICE],
+            device_id=data.get(CONF_RADIO_DEVICE_ID),
+        )
+    return create_radio_client(
+        data[CONF_HOST],
+        int(data[CONF_PORT]),
+        data[CONF_DIALECT],
+        data.get(CONF_NODES, []),
+        bytes.fromhex(data[CONF_NETWORK_ID]),
+        power=power,
+    )
+
+
+def create_entry_client(hass: HomeAssistant, entry: ConfigEntry) -> Any:
+    """Return the client a config entry talks through: cloud REST or local radio."""
+
+    data = entry.data
+    brand = data.get(CONF_BRAND, DEFAULT_BRAND)
+    if brand == BRAND_RADIO_MONITOR:
+        return _create_monitor_client(data)
+    if brand == BRAND_RADIO:
+        return _create_gateway_client(hass, entry)
+    return create_rest_client(hass, data["username"], data["password"], brand)
 
 
 def create_rest_client(

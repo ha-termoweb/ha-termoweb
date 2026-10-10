@@ -537,7 +537,8 @@ display flash ("identify"; `5E 01` → `5F 55` is proven in dialect A only).
   id `radio_monitor:<dev_id>`, so a normal `radio:<dev_id>` entry for the
   same gateway can be added later. Only one entry can hold the TCP or serial
   port at a time.
-- Backend `RadioMonitorBackend` (capabilities: only `frame_monitor`). The
+- Backend `RadioMonitorBackend` (capabilities: `frame_monitor`, `local_radio`;
+  no `site_device`, no `web_portal`). The
   device is named **Radio monitor**. Platforms: `binary_sensor` (gateway
   online) and `sensor` (**Frames heard**: frames since start, attribute
   `last_frame` (ISO UTC), pushed on the `termoweb_<entry>_radio_frames`
