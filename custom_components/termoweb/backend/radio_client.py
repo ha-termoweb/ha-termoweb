@@ -298,6 +298,26 @@ class RadioClient:
             self._forget(heater.node_id)
         return paired
 
+    async def async_set_network_id(self, network_id: bytes) -> None:
+        """Move this station to another network id; reconnects keep using it."""
+
+        link = await self.async_connect()
+        await link.set_network_id(network_id)
+        self._network_id = bytes(network_id)
+
+    async def async_read_identity(self, addr: int) -> bytes:
+        """Return the identity tail of the heater's ``5A`` reply; raise if silent."""
+
+        reply = await self._exchange(
+            addr,
+            protocol.request_identity(),
+            (protocol.IDENTITY_E0_LEN, protocol.IDENTITY_SHORT_LEN),
+        )
+        record = protocol.decode_identity(reply.payload)
+        if record is None:
+            raise RadioCommandError(f"heater {addr} sent an unknown identity reply")
+        return record.tail
+
     async def async_factory_reset(self, addr: int) -> None:
         """Factory-reset a heater (dialect B ``C8 01 D0``): settings and pairing are wiped."""
 

@@ -899,3 +899,17 @@ async def test_restore_writes_the_manual_target_before_another_mode() -> None:
     links[0].sent.clear()
     await client.async_restore(HEATER, mode="manual", stemp=21.0, manual_stemp=20.0)
     assert links[0].payloads()[1:] == [bytes([0xB8]), bytes.fromhex("B621252A022A")]
+
+
+@pytest.mark.asyncio
+async def test_network_id_switch_and_identity_read() -> None:
+    """The client moves its link to another network and reads 5A identities."""
+
+    client, links, _ = make_client()
+    await client.async_set_network_id(bytes.fromhex("ABCD"))
+    assert links[0].network_ids == [bytes.fromhex("ABCD")]
+    assert client._network_id == bytes.fromhex("ABCD")  # noqa: SLF001
+    links[0].reply(0x5A, IDENTITY_SHORT, bytes.fromhex("5B56") + bytes(16))
+    assert await client.async_read_identity(HEATER) == IDENTITY_SHORT[2:]
+    with pytest.raises(RadioCommandError, match="unknown identity reply"):
+        await client.async_read_identity(HEATER)

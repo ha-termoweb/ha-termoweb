@@ -605,3 +605,15 @@ def test_supports_survey_gates_on_esp32_firmware(version, expected) -> None:
     info = GatewayInfo(version, None, None, None, None, None, "# Q")
     assert supports_survey(info) is expected
     assert supports_survey(None) is False
+
+
+@pytest.mark.asyncio
+async def test_set_network_id_sends_n_and_frames_use_the_new_id() -> None:
+    """``N<net>`` reaches the gateway and later frames carry the new id."""
+    gw, _ft, link = await connected()
+    await link.set_network_id(bytes.fromhex("ABCD"))
+    assert gw.commands[-1] == "NABCD"
+    assert link.network_id == bytes.fromhex("ABCD")
+    with pytest.raises(ValueError, match="two bytes"):
+        await link.set_network_id(b"\x01")
+    assert link.network_id == bytes.fromhex("ABCD")

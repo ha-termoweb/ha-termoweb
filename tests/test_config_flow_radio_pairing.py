@@ -235,7 +235,7 @@ class Options:
 
     async def run(self) -> Any:
         menu = await self.flow.async_step_init()
-        assert menu["menu_options"] == ["settings", "pair_heaters"]
+        assert menu["menu_options"] == ["settings", "pair_heaters", "rehome"]
         form = await self.flow.async_step_pair_heaters()
         assert form["step_id"] == "pair_heaters" and form["errors"] == {}
         first = await self.flow.async_step_pair_heaters({})

@@ -453,3 +453,51 @@ the heater's restorable settings (mode, manual setpoint, presets, program)
 from Home Assistant's state into the entry options (`radio_restore`), then
 sends the reset. The saved settings survive a restart and are used (and
 removed) by the next successful `radio_pair` restore of that heater.
+
+## 9. Moving heaters to the site network ("re-home")
+
+An entry set up with "Find heaters that are already paired" keeps the
+network id of the gateway the heaters came with. `radio_rehome.async_rehome`
+moves every heater onto the site network id (section 7), in this order:
+
+1. **Identity check, nothing changes yet.** Every stored heater must answer a
+   `5A` identity read. A silent heater stops the move: the user moves the
+   gateway closer and tries again.
+2. **Save and reset.** For each heater: save the restorable settings (as
+   `radio_factory_reset` does, including the manual target) under its old
+   number in `radio_restore`, then send `C8 01 D0`. A failed reset stops the
+   move; the network is not changed, and heaters reset before it are paired
+   back later with `radio_pair` and their old number.
+3. **Switch the station.** `RadioClient.async_set_network_id` sends `N<net>`
+   on the running link (`RadioLink.set_network_id`) and keeps the id for
+   reconnects. The site id is seeded with the Home Assistant instance id and
+   the gateway's `dev_id`, as in the config flow.
+4. **Pair.** `async_pair` with `max_heaters` = the number of heaters, 5 min,
+   stop 60 s after the last pairing. New ids start at 2 and skip the old
+   numbers, so a heater that is not paired keeps its node without a clash.
+5. **Map new to old.** One heater: direct. More: the `5A` identity read at
+   pairing (read again when it was missing) is matched against step 1.
+6. **Restore** each matched heater from its saved settings (clock, `B6` with
+   presets, mode and setpoint, the manual target first when the mode is not
+   manual, then `B2`). The saved settings are dropped after a restore, or
+   moved to the new number when the restore fails.
+7. **Update the entry and reload**: `network_id` = the site id; matched
+   heaters replace their old node under the new number and keep the user's
+   name; paired heaters that were not recognised are added as `Heater <id>`;
+   heaters that were not paired keep their old node and saved settings, so
+   `radio_pair` with that number pairs and restores them later.
+
+Once all heaters are reset the entry always moves to the site network, also
+when nothing was paired in time: the result lists those heaters as
+`waiting` and the summary tells the user to pair each one with `radio_pair`
+and its number. The entry never stays on a network without saying so.
+
+Dialect A: no reset over the radio is known, so the move is refused with a
+message: reset dialect-A heaters on their panel, then set the integration up
+again with "Pair new heaters".
+
+From Home Assistant: the options flow item "Move heaters to this
+installation's own network" (explanation, progress, then a summary), or the
+service `termoweb.radio_rehome` (`entry_id`, `timeout` 30-600 s, default
+300). The service returns `moved` (`from`, `to`, `restored`),
+`unidentified`, `waiting` and a plain-English `summary`.
