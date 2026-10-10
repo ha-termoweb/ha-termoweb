@@ -67,10 +67,15 @@ jobs:
       - name: Prepare badge directory
         run: mkdir -p docs/badges
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+
+      # coverage-badge must parse the source with the project's Python (3.14
+      # syntax), so run it under uv instead of the runner's system Python.
       - name: Generate coverage badge
-        uses: tj-actions/coverage-badge-py@1788babcb24544eb5bbb6e0d374df5d1e54e670f # v2.0.4
-        with:
-          output: docs/badges/coverage.svg
+        run: >-
+          uv tool run --python 3.14 --from coverage-badge==1.1.2 --with coverage==7.16.2 --with 'setuptools<81'
+          coverage-badge -f -o docs/badges/coverage.svg
 
       - name: Commit updated coverage badge
         run: |
