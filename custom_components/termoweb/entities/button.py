@@ -13,11 +13,10 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from ..const import DOMAIN
 from ..domain import DomainStateView
 from ..domain.ids import HEATING_NODE_TYPES
 from ..domain.state import DomainState
-from ..identifiers import build_heater_unique_id
+from ..identifiers import build_gateway_entity_unique_id, build_heater_unique_id
 from ..inventory import (
     AccumulatorNode,
     Inventory,
@@ -91,7 +90,6 @@ class AccumulatorBoostContext:
     inventory: Inventory
     node: AccumulatorNode
     base_name: str
-    unique_prefix: str
 
     @classmethod
     def from_inventory(
@@ -103,13 +101,7 @@ class AccumulatorBoostContext:
         """Build context for ``node`` using the shared inventory."""
 
         base_name = inventory.resolve_heater_name(node.type, node.addr)
-        unique_prefix = build_heater_unique_id(
-            inventory.dev_id,
-            node.type,
-            node.addr,
-            suffix=":boost",
-        )
-        return cls(entry_id, inventory, node, base_name, unique_prefix)
+        return cls(entry_id, inventory, node, base_name)
 
     @property
     def dev_id(self) -> str:
@@ -132,7 +124,9 @@ class AccumulatorBoostContext:
     def unique_id(self, suffix: str) -> str:
         """Return the unique ID for a boost helper with ``suffix``."""
 
-        return f"{self.unique_prefix}_{suffix}"
+        return build_heater_unique_id(
+            self.dev_id, self.node_type, self.addr, suffix=f"boost_{suffix}"
+        )
 
 
 def _iter_accumulator_contexts(
@@ -192,7 +186,7 @@ class StateRefreshButton(CoordinatorEntity, ButtonEntity):
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = dev_id
-        self._attr_unique_id = f"{DOMAIN}:{dev_id}:refresh"
+        self._attr_unique_id = build_gateway_entity_unique_id(dev_id, "refresh")
 
     @property
     def device_info(self) -> DeviceInfo:

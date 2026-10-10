@@ -709,14 +709,13 @@ def test_create_boost_sensors():
 
     minutes, end = _create_boost_sensors(
         coordinator, "entry-1", "dev", "1", "Accumulator",
-        f"{DOMAIN}:dev:acm:1:energy",
         node_type="acm", inventory=inventory,
     )
 
     assert isinstance(minutes, HeaterBoostMinutesRemainingSensor)
     assert isinstance(end, HeaterBoostEndSensor)
-    assert "boost:minutes_remaining" in minutes._attr_unique_id
-    assert "boost:end" in end._attr_unique_id
+    assert minutes._attr_unique_id == f"{DOMAIN}:dev:acm:1:boost_minutes_remaining"
+    assert end._attr_unique_id == f"{DOMAIN}:dev:acm:1:boost_end"
 
 
 # ---------------------------------------------------------------------------

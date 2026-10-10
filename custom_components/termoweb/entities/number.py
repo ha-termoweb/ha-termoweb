@@ -14,10 +14,11 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from ..boost import ALLOWED_BOOST_MINUTES, coerce_boost_minutes
 from ..backend.factory import backend_capabilities
+from ..boost import ALLOWED_BOOST_MINUTES, coerce_boost_minutes
+from ..coerce import as_float
 from ..domain.state import DomainState
-from ..identifiers import build_gateway_entity_unique_id, build_heater_unique_id
+from ..identifiers import build_heater_unique_id, build_installation_entity_unique_id
 from ..inventory import (
     Inventory,
     boostable_accumulator_details_for_entry,
@@ -25,7 +26,6 @@ from ..inventory import (
     normalize_node_type,
 )
 from ..runtime import require_runtime
-from ..coerce import as_float
 from ..utils import build_installation_device_info
 from .heater import (
     DEFAULT_BOOST_DURATION,
@@ -113,12 +113,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     new_entities: list[NumberEntity] = []
     for node_type, addr_str, base_name in accumulator_nodes:
-        unique_prefix = build_heater_unique_id(
-            dev_id,
-            node_type,
-            addr_str,
-            suffix="",
-        )
         new_entities.extend(
             (
                 AccumulatorBoostDurationNumber(
@@ -127,7 +121,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     dev_id,
                     addr_str,
                     base_name,
-                    f"{unique_prefix}:boost_duration",
+                    build_heater_unique_id(
+                        dev_id, node_type, addr_str, suffix="boost_duration"
+                    ),
                     node_type=node_type,
                     inventory=heater_details.inventory,
                 ),
@@ -137,7 +133,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     dev_id,
                     addr_str,
                     base_name,
-                    f"{unique_prefix}:boost_temperature",
+                    build_heater_unique_id(
+                        dev_id, node_type, addr_str, suffix="boost_temperature"
+                    ),
                     node_type=node_type,
                     inventory=heater_details.inventory,
                 ),
@@ -176,7 +174,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     # Installation-wide power limit (TermoWeb only)
     if backend_capabilities(runtime.brand).power_limit:
-        power_limit_uid = build_gateway_entity_unique_id(dev_id, "power_limit")
+        power_limit_uid = build_installation_entity_unique_id(dev_id, "power_limit")
         new_entities.append(
             PowerLimitNumber(
                 coordinator,
