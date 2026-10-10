@@ -107,6 +107,9 @@ class HttpClientProto(Protocol):
     ) -> Any:
         """Set the priority level for the specified node."""
 
+    def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:
+        """Normalise websocket node payloads into the shared domain shape."""
+
     async def get_power_limit(self, dev_id: str) -> int | None:
         """Return the installation-wide power limit in watts, or None."""
 

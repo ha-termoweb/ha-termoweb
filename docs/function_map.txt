@@ -48,6 +48,8 @@ custom_components/termoweb/backend/base.py :: HttpClientProto.list_devices
     Return the list of devices associated with the account.
 custom_components/termoweb/backend/base.py :: HttpClientProto.get_nodes
     Return the node description for the given device.
+custom_components/termoweb/backend/base.py :: HttpClientProto.normalise_ws_nodes
+    Normalise websocket node payloads into the shared domain shape.
 custom_components/termoweb/backend/base.py :: HttpClientProto.get_node_settings
     Return settings for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_settings
@@ -160,14 +162,14 @@ custom_components/termoweb/backend/ducaheat_ws.py :: _encode_polling_packet
     Encode Engine.IO polling payloads.
 custom_components/termoweb/backend/ducaheat_ws.py :: _decode_polling_packets
     Decode Engine.IO v3 binary polling frames.
-custom_components/termoweb/backend/ducaheat_ws.py :: _brand_headers
-    Construct brand-specific headers for polling.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.__init__
     Initialise the Ducaheat websocket client.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._ws_health
     Return the shared websocket health tracker for this client.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._send_str
     Send a websocket frame with serialized access.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._polling_headers
+    Return the browser-like headers used for the Engine.IO polling handshake.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._status_should_reset_health
     Return True when a status transition should reset health.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._increment_state_counter
@@ -180,8 +182,6 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._decode_so
     Decode a Socket.IO ``42`` payload safely.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._update_status_from_heartbeat
     Report healthy only while payloads are fresh, otherwise connected.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.start
-    Start the websocket runner task.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.stop
     Stop the websocket client and background tasks.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._build_handshake_url
@@ -214,10 +214,6 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._keepalive
     Send Engine.IO ping frames to keep the websocket alive.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._extract_dev_data_payload
     Return the mapping payload embedded in a dev_data Socket.IO event.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._coerce_dev_data_nodes
-    Convert list-style websocket snapshots into mapping payloads.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._normalise_nodes_payload
-    Normalise websocket node payloads via the REST client helper.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._normalise_cadence_value
     Return a positive cadence hint in seconds.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._extract_cadence_candidates
@@ -229,17 +225,9 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._apply_pay
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._reset_payload_window
     Reset the payload stale window to the default.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._collect_sample_updates
-    Extract heater sample updates from a websocket payload.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._nodes_to_deltas
-    Convert websocket node payloads into domain delta objects.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._apply_deltas_to_store
-    Apply deltas to the domain store via the coordinator.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._translate_path_update
-    Translate ``{"path": ..., "body": ...}`` websocket frames into nodes.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._resolve_update_section
-    Map a websocket path segment to the node section bucket.
+    Collect sample updates and widen the payload window from lease hints.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._forward_sample_updates
-    Forward websocket heater sample updates to the energy coordinator.
+    Mark payload freshness and relay sample updates to the energy coordinator.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._subscribe_feeds
     Subscribe to heater status and sample feeds.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._maybe_subscribe
@@ -358,12 +346,10 @@ custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.fetch_hourly_s
     Return hourly samples for ``nodes`` using the REST API.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient.__init__
     Initialise the legacy websocket client container.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._brand_headers
-    Return baseline headers aligned with the REST client brand.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._sanitise_url
     Return a redacted representation of the websocket URL.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient.start
-    Start the websocket client background task.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._prepare_start
+    Reset per-run state before the runner task is created.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_handshake
     Process the initial handshake payload from the server.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_dev_data
@@ -374,22 +360,10 @@ custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_po
     Apply a system-level power_limit push to the runtime.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._apply_nodes_payload
     Update cached nodes from the websocket payload and notify listeners.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._translate_path_update
-    Translate ``{"path": ..., "body": ...}`` frames into nodes.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._translate_path_deltas
     Translate path frames into node dictionaries and domain deltas.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._resolve_update_section
-    Map a websocket path segment onto the node bucket name.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._forward_sample_updates
-    Relay websocket heater sample updates to the energy coordinator.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._extract_nodes
     Extract the nodes dictionary from a websocket payload.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._translate_nodes_list
-    Convert list-based node payloads into the nested mapping schema.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._nodes_to_deltas
-    Convert websocket node payloads into domain delta objects.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._apply_deltas_to_store
-    Apply deltas to the domain store via the coordinator.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._heater_sample_subscription_targets
     Return ordered ``(node_type, addr)`` heater sample subscriptions.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._heater_sample_subscription_targets._bind_inventory
@@ -400,8 +374,6 @@ custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._schedule_
     Log idle payload detection and close the websocket for restart.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._cancel_idle_restart
     Cancel any scheduled idle restart due to new payload activity.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._get_token
-    Reuse the REST client token for websocket authentication.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._force_refresh_token
     Force the REST client to fetch a fresh access token.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._api_base
@@ -470,8 +442,6 @@ custom_components/termoweb/backend/ws_client.py :: translate_path_update
     Translate ``{"path": ..., "body": ...}`` websocket frames into nodes.
 custom_components/termoweb/backend/ws_client.py :: HandshakeError.__init__
     Initialise a handshake failure with response metadata.
-custom_components/termoweb/backend/ws_client.py :: _WsLeaseMixin.__init__
-    Initialise lease tracking and backoff state.
 custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._status_should_reset_health
     Return True when a status should clear healthy tracking.
 custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._ws_bucket_sizes
@@ -496,10 +466,40 @@ custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._update_status
     Publish websocket status updates to Home Assistant listeners.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon.__init__
     Initialise shared websocket state.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._runner
+    Run the protocol specific connection loop.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._prepare_start
+    Reset per-run state before the runner task is created.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon.start
+    Start the websocket client background task.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._reset_backoff
+    Restart the reconnect backoff sequence.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._next_backoff
+    Return the next reconnect delay and advance the sequence.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon._throttle_connection_attempt
     Apply a defensive rate limit before dialing the backend.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon._session_received_payload
     Return True when a payload arrived since ``started_at``.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._brand_headers
+    Return baseline headers aligned with the client brand.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._get_token
+    Reuse the REST client token for websocket authentication.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._open_websocket
+    Open the websocket transport with the shared timeouts.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._normalise_nodes
+    Normalise websocket node payloads via the REST client codec.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._coerce_nodes_list
+    Convert list-style node snapshots into ``{type: {section: {addr: v}}}``.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._translate_path_update
+    Translate ``{"path": ..., "body": ...}`` frames into nodes.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._nodes_to_deltas
+    Convert websocket node payloads into domain delta objects.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._apply_deltas_to_store
+    Apply deltas to the domain store via the coordinator.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._collect_sample_updates
+    Extract energy sample updates from a websocket node payload.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._forward_sample_updates
+    Relay websocket heater sample updates to the energy coordinator.
 custom_components/termoweb/backend/ws_health.py :: WsHealthTracker.update_status
     Update the tracked status and return (status_changed, health_changed).
 custom_components/termoweb/backend/ws_health.py :: WsHealthTracker.set_payload_window

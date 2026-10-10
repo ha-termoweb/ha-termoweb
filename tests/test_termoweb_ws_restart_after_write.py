@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.backend import termoweb_ws as module
 from custom_components.termoweb.backend.termoweb_ws import TermoWebWSClient
 from homeassistant.core import HomeAssistant
@@ -25,7 +26,7 @@ def termoweb_client(monkeypatch: pytest.MonkeyPatch) -> TermoWebWSClient:
         is_running=lambda: False,
     )
     hass.loop_thread_id = 0
-    hass.data.setdefault(module.DOMAIN, {})["entry"] = {}
+    hass.data.setdefault(DOMAIN, {})["entry"] = {}
 
     coordinator = SimpleNamespace(data={}, update_nodes=MagicMock())
     monkeypatch.setattr(TermoWebWSClient, "_install_write_hook", lambda self: None)
