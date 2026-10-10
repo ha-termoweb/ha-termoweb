@@ -260,13 +260,15 @@ def decode_node_settings(node_type: str, raw: Any) -> dict[str, Any]:
     return result
 
 
+_MILLISECOND_EPOCH_THRESHOLD = 1_000_000_000_000
+
+
 def decode_samples(
     raw: Any,
     *,
-    timestamp_divisor: float = 1.0,
     logger: logging.Logger | None = None,
 ) -> list[dict[str, str | int]]:
-    """Normalise heater samples payloads into {"t", "counter"} lists."""
+    """Normalise samples payloads into {"t", "counter"} lists with second timestamps."""
 
     log = logger or _LOGGER
     items: list[Any] | None = None
@@ -328,8 +330,11 @@ def decode_samples(
             log.debug("Unexpected htr sample counter: %r", item)
             continue
 
+        seconds = float(timestamp)
+        if abs(seconds) >= _MILLISECOND_EPOCH_THRESHOLD:
+            seconds /= 1000.0
         sample: dict[str, str | int] = {
-            "t": int(float(timestamp) / timestamp_divisor),
+            "t": int(seconds),
             "counter": str(counter_value),
         }
         if counter_min is not None:

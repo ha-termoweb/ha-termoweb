@@ -30,12 +30,7 @@ from custom_components.termoweb.boost import (
     validate_boost_minutes,
 )
 from custom_components.termoweb.codecs.ducaheat_codec import decode_settings
-from custom_components.termoweb.codecs.termoweb_codec import decode_samples
-from custom_components.termoweb.const import (
-    BRAND_DUCAHEAT,
-    NODE_SAMPLES_PATH_FMT,
-    WS_NAMESPACE,
-)
+from custom_components.termoweb.const import BRAND_DUCAHEAT, WS_NAMESPACE
 from custom_components.termoweb.domain.commands import (
     BaseCommand,
     SetLock,
@@ -173,12 +168,7 @@ class DucaheatRESTClient(RESTClient):
         start: float,
         end: float,
     ) -> list[dict[str, str | int]]:
-        """Return heater samples with timestamps normalised to seconds.
-
-        Non-heater nodes delegate to the base implementation. Heater payloads
-        automatically detect millisecond timestamps to preserve second
-        resolution for downstream consumers.
-        """
+        """Return node samples (seconds timestamps); thermostats have none."""
 
         node_type, addr = self._resolve_node_descriptor(node)
         if node_type == "thm":
@@ -189,54 +179,12 @@ class DucaheatRESTClient(RESTClient):
             )
             return []
 
-        if node_type != "htr":
-            return await super().get_node_samples(
-                dev_id,
-                (node_type, addr),
-                start,
-                end,
-            )
-
-        headers = await self.authed_headers()
-        path = NODE_SAMPLES_PATH_FMT.format(
-            dev_id=dev_id,
-            node_type=node_type,
-            addr=addr,
+        return await super().get_node_samples(
+            dev_id,
+            (node_type, addr),
+            start,
+            end,
         )
-        params = {
-            "start": int(start),
-            "end": int(end),
-        }
-        data = await self._request("GET", path, headers=headers, params=params)
-        self._log_non_htr_payload(
-            node_type=node_type,
-            dev_id=dev_id,
-            addr=addr,
-            stage="GET samples",
-            payload=data,
-        )
-        timestamp_divisor = 1.0
-        sample_items: list[Any] | None = None
-        if isinstance(data, dict) and isinstance(data.get("samples"), list):
-            sample_items = data["samples"]
-        elif isinstance(data, list):
-            sample_items = data
-
-        if sample_items:
-            for item in sample_items:
-                if not isinstance(item, Mapping):
-                    continue
-                raw_timestamp = item.get("t")
-                if raw_timestamp is None:
-                    raw_timestamp = item.get("timestamp")
-                if (
-                    isinstance(raw_timestamp, (int, float))
-                    and raw_timestamp >= 1_000_000_000_000
-                ):
-                    timestamp_divisor = 1000.0
-                    break
-
-        return decode_samples(data, timestamp_divisor=timestamp_divisor, logger=_LOGGER)
 
     async def _execute_segmented_commands(
         self,
