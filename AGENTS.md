@@ -33,7 +33,7 @@ End users are non-technical Home Assistant operators. Documentation must be task
 * Format and lint all changes with `ruff` before committing.
 
 ## Testing Requirements
-* Execute `timeout 60s pytest --cov=custom_components.termoweb --cov-report=term-missing`.
+* Install with `uv sync --locked --extra test`, then execute `timeout 60s uv run pytest --cov`.
 * Capture partial logs whenever the timed run aborts; treat timeouts as failures requiring investigation. 
 * During debugging, run targeted, no-coverage subsets.
 * If tests approach the 60-second limit, suspect an asynchronous wait issue and stop the run rather than letting it hang.

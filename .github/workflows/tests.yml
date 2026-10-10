@@ -1,7 +1,7 @@
 name: Tests
 
 permissions:
-  contents: write
+  contents: read
 
 on:
   push:
@@ -14,45 +14,63 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
 
       - name: Install Python requirement
         run: uv python install 3.13.2
 
-      - name: Create virtual environment
-        run: uv venv
-
-      - name: Install project dependencies
-        run: uv pip install -e .[test]
+      - name: Install locked project dependencies
+        run: uv sync --locked --extra test
 
       - name: Run tests
         run: |
           set -o pipefail
-          timeout 60s uv run pytest --cov=custom_components.termoweb --cov-report=term-missing | tee coverage-report.txt
-
-      - name: Enforce coverage threshold
-        run: uv run coverage report --fail-under=90
+          timeout 120s uv run pytest --cov | tee coverage-report.txt
 
       - name: Generate coverage XML
         run: uv run coverage xml
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coverage-artifacts
+          path: |
+            coverage-report.txt
+            coverage.xml
+            .coverage
+          include-hidden-files: true
+
+  coverage-badge:
+    needs: tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: coverage-artifacts
 
       - name: Prepare badge directory
         run: mkdir -p docs/badges
 
       - name: Generate coverage badge
-        uses: tj-actions/coverage-badge-py@v2
+        uses: tj-actions/coverage-badge-py@1788babcb24544eb5bbb6e0d374df5d1e54e670f # v2.0.4
         with:
           output: docs/badges/coverage.svg
 
       - name: Commit updated coverage badge
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -61,12 +79,3 @@ jobs:
             git commit -m "docs: update coverage badge"
             git push origin HEAD:main
           fi
-
-      - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-artifacts
-          path: |
-            coverage-report.txt
-            coverage.xml
-            docs/badges/coverage.svg

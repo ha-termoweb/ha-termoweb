@@ -173,14 +173,13 @@ See instructions in custom_components/termoweb/assets, to install the card and c
 Setup your environment:
 
 ```bash
-uv venv -p 3.13
-uv pip install --all-extras -r pyproject.toml -p 3.13
+uv sync --locked --extra test
 ```
 
-Run tests with coverage:
+Run tests with coverage (settings are in `pyproject.toml`):
 
 ```bash
-timeout 60s uv run pytest --cov=custom_components/termoweb --cov-report=term-missing
+timeout 60s uv run pytest --cov
 ```
 
 See [`docs/developer-notes.md`](docs/developer-notes.md) for backend write semantics and other
