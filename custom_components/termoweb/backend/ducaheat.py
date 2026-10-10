@@ -692,7 +692,12 @@ class DucaheatBackend(Backend):
     """Backend wiring for Ducaheat brand accounts."""
 
     capabilities = BackendCapabilities(
-        lock=True, priority=True, energy_history=True, energy=True, geo_data=True
+        lock=True,
+        priority=True,
+        energy_history=True,
+        energy=True,
+        geo_data=True,
+        account_scope="ducaheat",  # Ducaheat and Tevolve accounts are one account
     )
 
     def _should_cancel_boost(self, context: BoostContext | None) -> bool:

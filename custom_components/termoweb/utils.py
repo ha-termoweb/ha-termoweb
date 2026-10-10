@@ -6,14 +6,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration as loader_async_get_integration
 
-from .const import (
-    BRAND_LABELS,
-    DOMAIN,
-    RADIO_BRANDS,
-    brand_has_site_device,
-    get_brand_configuration_url,
-    get_brand_label,
-)
+from .const import CLOUD_CONFIGURATION_URL, DEVICE_BRAND_LABELS, DOMAIN, get_brand_label
 from .inventory import normalize_node_addr
 from .runtime import EntryRuntime, require_runtime
 
@@ -44,6 +37,12 @@ def _entry_gateway_record(
         return None
 
 
+def _has_capability(entry_data: EntryRuntime | None, name: str) -> bool:
+    """Return the running backend's capability flag; True (the cloud default) if unknown."""
+
+    return entry_data is None or getattr(entry_data.backend.capabilities, name)
+
+
 def apply_entry_device_overrides(
     info: DeviceInfo,
     entry_data: EntryRuntime | None,
@@ -60,7 +59,7 @@ def apply_entry_device_overrides(
 
     if isinstance(brand, str) and brand.strip():
         manufacturer = brand.strip()
-        if manufacturer in BRAND_LABELS or manufacturer in RADIO_BRANDS:
+        if manufacturer in DEVICE_BRAND_LABELS:
             manufacturer = get_brand_label(manufacturer)  # brand key -> label
 
     if manufacturer:
@@ -75,12 +74,10 @@ def apply_entry_device_overrides(
 
 
 def _set_configuration_url(info: DeviceInfo, entry_data: EntryRuntime | None) -> None:
-    """Link the device to the brand's web portal; the local radio has none."""
+    """Link the device to the cloud web portal when the backend has one."""
 
-    brand = entry_data.brand if entry_data is not None else None
-    url = get_brand_configuration_url(brand)
-    if url is not None:
-        info["configuration_url"] = url
+    if _has_capability(entry_data, "web_portal"):
+        info["configuration_url"] = CLOUD_CONFIGURATION_URL
 
 
 def build_installation_device_info(
@@ -137,7 +134,7 @@ def build_gateway_device_info(
         name=f"{brand_label} Gateway",
         model="Gateway/Controller",
     )
-    if entry_data is None or brand_has_site_device(entry_data.brand):
+    if _has_capability(entry_data, "site_device"):
         info["via_device"] = (DOMAIN, str(dev_id), "site")
     _set_configuration_url(info, entry_data)
 

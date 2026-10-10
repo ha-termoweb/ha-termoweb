@@ -279,6 +279,7 @@ def test_diagnostics_radio_section_without_mac_or_network_id(
 
     from fake_radio_link import FakeRadioLink, gateway_info
 
+    from custom_components.termoweb.backend.radio_backend import RadioBackend
     from custom_components.termoweb.backend.radio_client import RadioClient
 
     links: list[FakeRadioLink] = []
@@ -295,6 +296,7 @@ def test_diagnostics_radio_section_without_mac_or_network_id(
     record.client = RadioClient(
         "10.0.0.5", 2323, "B", [], network_id=b"\x12\x34", link_factory=factory
     )
+    record.backend = RadioBackend(brand="radio", client=record.client)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = record
 
     radio = asyncio.run(async_get_config_entry_diagnostics(hass, entry))["radio"]

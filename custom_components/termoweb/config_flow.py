@@ -17,7 +17,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 import voluptuous as vol
 
-from . import async_list_devices, create_rest_client
+from . import async_list_devices
+from .backend import BackendCapabilities, backend_capabilities, create_rest_client
 from .backend.radio import DIALECT_A, DIALECTS, RadioLink, RadioLinkError
 from .backend.radio.discovery import (
     DISCOVERY_DIALECTS,
@@ -124,6 +125,11 @@ async def _login_error(
     return None
 
 
+def _capabilities(entry: ConfigEntry) -> BackendCapabilities:
+    """Return the optional features of the backend serving ``entry``."""
+    return backend_capabilities(entry.data.get(CONF_BRAND, DEFAULT_BRAND))
+
+
 def _radio_key(data: Mapping[str, Any]) -> tuple[Any, ...]:
     """Return what identifies the radio connection: the serial port or host:port."""
     if data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
@@ -147,7 +153,7 @@ def _radio_in_use(
     return any(
         entry.entry_id != exclude_entry_id
         and entry.disabled_by is None
-        and entry.data.get(CONF_BRAND) in (BRAND_RADIO, BRAND_RADIO_MONITOR)
+        and _capabilities(entry).local_radio
         and _radio_key(entry.data) == wanted
         for entry in hass.config_entries.async_entries(DOMAIN)
     )
@@ -523,7 +529,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Initial setup and (optional) reconfigure without use_push."""
 
     VERSION = 1
-    MINOR_VERSION = 3
+    MINOR_VERSION = 4
 
     @staticmethod
     @callback
@@ -534,8 +540,8 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @classmethod
     @callback
     def async_supports_options_flow(cls, config_entry: ConfigEntry) -> bool:
-        """Offer options only for radio gateway entries; cloud entries have none."""
-        return config_entry.data.get(CONF_BRAND) == BRAND_RADIO
+        """Offer options only to backends that have any (the radio gateway)."""
+        return _capabilities(config_entry).options_flow
 
     def __init__(self) -> None:
         """Initialise radio discovery state."""
@@ -1025,9 +1031,10 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Change the password (or radio address) of the same account or device."""
         entry = self._get_reconfigure_entry()
-        if entry.data.get(CONF_BRAND) == BRAND_RADIO_MONITOR:
+        capabilities = _capabilities(entry)
+        if capabilities.frame_monitor:
             return self.async_abort(reason="monitor_reconfigure")
-        if entry.data.get(CONF_BRAND) == BRAND_RADIO:
+        if capabilities.local_radio:
             if entry.data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
                 return await self.async_step_reconfigure_nanocul()
             return await self.async_step_reconfigure_radio()

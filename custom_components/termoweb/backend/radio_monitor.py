@@ -10,7 +10,7 @@ runtime (ESP32), alternates the receive dialect so both dialects are heard.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 import logging
 import time
@@ -30,6 +30,7 @@ from custom_components.termoweb.inventory import Inventory
 from .radio.dialect import DIALECT_A, DIALECT_B
 from .radio.discovery import LISTEN_WINDOW_S
 from .radio.link import RadioLinkError, ReceivedFrame
+from .radio_backend import radio_diagnostics
 from .radio_client import RadioClient
 from .radio_ws import PAYLOAD_STALE_AFTER_S, RadioListener
 
@@ -102,7 +103,14 @@ class RadioMonitor(RadioListener):
 class RadioMonitorBackend(Backend):
     """Backend of a listen-only radio entry: no heaters, no station duties."""
 
-    capabilities = BackendCapabilities(frame_monitor=True)
+    capabilities = BackendCapabilities(
+        frame_monitor=True, local_radio=True, site_device=False, web_portal=False
+    )
+
+    def diagnostics(self, entry_data: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Return the radio link facts."""
+
+        return radio_diagnostics(self.client, entry_data)
 
     def create_ws_client(
         self,

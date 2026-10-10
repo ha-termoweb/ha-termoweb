@@ -155,14 +155,23 @@ reads every heater periodically and pushes `NodeSettingsDelta`s through
 coordinator polling. Cloud-only features are switched off with
 `BackendCapabilities` (`priority`, `energy_history`, `power_limit`, `lock`,
 `energy` for the heater energy/power and installation total sensors,
-`geo_data` for the installation location sensor).
+`geo_data` for the installation location sensor). Other radio differences are
+capabilities too: `local_radio` (the entry owns a gateway or serial link: one
+entry per link, closed on unload, radio reconfigure steps), `options_flow`
+(heater power, pairing, rehoming), `site_device` and `web_portal` (device
+registry layout and links). `account_scope` prefixes cloud entry unique IDs,
+so Ducaheat and Tevolve, which share one backend, share one account namespace
+(`ducaheat:<account>`). The backend factory builds each entry's client
+(`create_entry_client`), and `Backend.diagnostics` adds backend facts to the
+diagnostics download.
 See `radio_backend.md` for the capability matrix.
 
 The `radio_monitor` brand is a listen-only radio entry without heaters:
 `backend/radio_monitor.py` pairs a listen-only `RadioClient` (its link
 refuses every transmit) with `RadioMonitor`, which counts frames instead of
-performing station duties. Its only capability, `frame_monitor`, limits the
-platforms to the gateway-online binary sensor and the frames-heard sensor.
+performing station duties. Its `frame_monitor` capability limits the
+platforms to the gateway-online binary sensor and the frames-heard sensor;
+`site_device` is off, so its gateway has no site device.
 See `radio_protocol.md` section 10.
 
 ## Operational constraints

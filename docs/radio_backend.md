@@ -47,6 +47,9 @@ decoders in `backend/radio/protocol.py` return frozen dataclasses.
 | `power_limit` | True (local power manager) | TermoWeb only | power-limit number, coordinator power-limit poll |
 | `priority` | True (local power manager) | True | heater priority number entities |
 | `energy_history` | False | True | `import_energy_history` service (logs an error and skips the entry) |
+| `local_radio` | True | False | one entry per gateway/stick, link closed on unload, radio reconfigure steps |
+| `options_flow` | True | False | options flow (heater power, pairing, rehoming) |
+| `web_portal` | False | True | `configuration_url` on devices |
 
 `priority` and `energy_history` are new in this PR. Both cloud backends
 declare them True, so cloud behaviour does not change.
