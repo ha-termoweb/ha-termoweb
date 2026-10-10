@@ -143,9 +143,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         domain_view = None
 
     def default_name(addr: str) -> str:
-        """Return a placeholder name for heater nodes."""
+        """Return the fallback name for heater nodes, as every platform does."""
 
-        return f"Node {addr}"
+        return f"Heater {addr}"
 
     heater_details = heater_platform_details_for_entry(
         runtime,

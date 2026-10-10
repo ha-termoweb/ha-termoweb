@@ -17,6 +17,7 @@ test = [
     "pytest-asyncio",
     "pytest-cov",
     "pytest-homeassistant-custom-component==0.13.371",
+    "pytest-randomly>=5.0.0",
 ]
 
 
@@ -31,7 +32,6 @@ packages = ["custom_components/termoweb"]
 include = [
     "custom_components/termoweb",
     "tests",
-    "tests_ha",
     "pyproject.toml",
     "README.md",
     "LICENSE",
@@ -39,9 +39,15 @@ include = [
 
 
 [tool.pytest.ini_options]
-testpaths = ["tests_ha"]
+testpaths = ["tests"]
 addopts = "--strict-markers"
 asyncio_mode = "auto"
+filterwarnings = [
+    "error",
+    # Home Assistant's own http component (pulled in by diagnostics) stores
+    # plain-string keys on its aiohttp app and requests; not fixable here.
+    "ignore:It is recommended to use web\\.(AppKey|RequestKey) instances for keys:aiohttp.web_exceptions.NotAppKeyWarning",
+]
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.coverage.run]
@@ -49,7 +55,7 @@ branch = true
 source = ["custom_components.termoweb"]
 
 [tool.coverage.report]
-fail_under = 90
+fail_under = 95
 show_missing = true
 skip_covered = true
 
