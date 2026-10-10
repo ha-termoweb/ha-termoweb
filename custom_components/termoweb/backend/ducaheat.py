@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 import typing
 from typing import Any
@@ -381,12 +381,16 @@ class DucaheatRESTClient(RESTClient):
             boost_minutes: int | None = None
             if boost_time is not None and mode_value != "boost":
                 raise ValueError("boost_time is only supported when mode is 'boost'")
-            if mode_value == "boost" and stemp is None:
+            if mode_value == "boost":
                 boost_minutes = validate_boost_minutes(boost_time)
 
             if stemp is not None:
                 formatted_stemp = self._ensure_temperature(stemp)
-                commands.append(SetSetpoint(formatted_stemp, mode=mode_value))
+                commands.append(
+                    SetSetpoint(
+                        formatted_stemp, mode=mode_value, boost_time=boost_minutes
+                    )
+                )
             elif (
                 units_value is not None
                 and mode_value is None
@@ -405,57 +409,13 @@ class DucaheatRESTClient(RESTClient):
             if cancel_boost:
                 commands.append(StopBoost(boost_time=None, stemp=None, units=None))
 
-            responses = await self._execute_segmented_commands(
+            return await self._execute_segmented_commands(
                 dev_id,
                 node_id,
                 commands,
                 units=units_value,
                 use_acm_endpoint=True,
             )
-
-            if mode_value is not None or cancel_boost:
-                minutes_param: int | None
-                if mode_value == "boost":
-                    minutes_param = boost_minutes
-                else:
-                    minutes_param = 0
-                metadata: dict[str, Any] | None = None
-                try:
-                    metadata = await self._collect_boost_metadata(
-                        dev_id,
-                        addr,
-                        boost_active=mode_value == "boost",
-                        minutes=minutes_param,
-                    )
-                except Exception as err:  # noqa: BLE001 - defensive logging
-                    _LOGGER.debug(
-                        "Boost metadata collection failed dev=%s addr=%s: %s",
-                        mask_identifier(dev_id),
-                        mask_identifier(addr),
-                        err,
-                        exc_info=err,
-                    )
-                fallback = False
-                boost_state: dict[str, Any] | None = None
-                if isinstance(metadata, dict):
-                    fallback = bool(metadata.pop("_fallback", False))
-                    boost_state = metadata
-                elif metadata is not None:
-                    responses["boost_state"] = metadata
-
-                if fallback and mode_value != "boost" and "status" not in responses:
-                    boost_flag = bool((boost_state or {}).get("boost_active"))
-                    responses["status_refresh"] = await self._post_acm_endpoint(
-                        f"/api/v2/devs/{dev_id}/{node_type}/{addr}/boost",
-                        await self.authed_headers(),
-                        {"boost": boost_flag},
-                        dev_id=dev_id,
-                        addr=addr,
-                    )
-                if boost_state is not None:
-                    responses["boost_state"] = boost_state
-
-            return responses
 
         return await super().set_node_settings(
             dev_id,
@@ -580,101 +540,6 @@ class DucaheatRESTClient(RESTClient):
             if coerced is None:
                 continue
             target[key] = max(0, min(100, coerced))
-
-    async def _collect_boost_metadata(
-        self,
-        dev_id: str,
-        addr: str,
-        *,
-        boost_active: bool,
-        minutes: int | None,
-    ) -> dict[str, Any]:
-        """Capture RTC metadata to derive boost end timing."""
-
-        metadata: dict[str, Any] = {"boost_active": boost_active}
-        rtc_payload: Mapping[str, typing.Any] | None = None
-        try:
-            rtc_payload = await self.get_rtc_time(dev_id)
-        except Exception as err:  # noqa: BLE001 - defensive logging
-            _LOGGER.debug(
-                "RTC fetch failed after boost write dev=%s addr=%s: %s",
-                mask_identifier(dev_id),
-                mask_identifier(addr),
-                err,
-                exc_info=err,
-            )
-            metadata["_fallback"] = True
-            if boost_active and minutes is not None:
-                metadata["boost_minutes_delta"] = minutes
-            else:
-                metadata.setdefault("boost_minutes_delta", 0)
-            metadata.setdefault("boost_end_day", None)
-            metadata.setdefault("boost_end_min", None)
-            metadata.setdefault("boost_end_timestamp", None)
-            return metadata
-
-        rtc_dt = self._rtc_payload_to_datetime(rtc_payload)
-        if rtc_dt is None:
-            _LOGGER.debug(
-                "RTC payload invalid after boost write dev=%s addr=%s: %s",
-                mask_identifier(dev_id),
-                mask_identifier(addr),
-                rtc_payload,
-            )
-            metadata["_fallback"] = True
-            if boost_active and minutes is not None:
-                metadata["boost_minutes_delta"] = minutes
-            else:
-                metadata.setdefault("boost_minutes_delta", 0)
-            metadata.setdefault("boost_end_day", None)
-            metadata.setdefault("boost_end_min", None)
-            metadata.setdefault("boost_end_timestamp", None)
-            return metadata
-
-        if boost_active and minutes is not None:
-            end_dt = rtc_dt + timedelta(minutes=minutes)
-            day_of_year = end_dt.timetuple().tm_yday
-            minute_of_day = end_dt.hour * 60 + end_dt.minute
-            metadata.update(
-                {
-                    "boost_end_day": day_of_year,
-                    "boost_end_min": minute_of_day,
-                    "boost_minutes_delta": minutes,
-                    "boost_end_timestamp": end_dt.isoformat(),
-                }
-            )
-        else:
-            metadata.update(
-                {
-                    "boost_end_day": None,
-                    "boost_end_min": None,
-                    "boost_minutes_delta": 0 if minutes is None else max(0, minutes),
-                    "boost_end_timestamp": None,
-                }
-            )
-
-        return metadata
-
-    def _rtc_payload_to_datetime(
-        self, payload: Mapping[str, typing.Any] | None
-    ) -> datetime | None:
-        """Convert an RTC payload into a ``datetime`` instance."""
-
-        if not isinstance(payload, Mapping):
-            return None
-        try:
-            year = int(payload.get("y"))
-            month = int(payload.get("n"))
-            day = int(payload.get("d"))
-            hour = int(payload.get("h", 0))
-            minute = int(payload.get("m", 0))
-            second = int(payload.get("s", 0))
-        except (TypeError, ValueError):
-            return None
-        try:
-            return datetime(year, month, day, hour, minute, second)
-        except ValueError:
-            return None
 
     async def _post_acm_endpoint(
         self,
@@ -813,44 +678,26 @@ class DucaheatRESTClient(RESTClient):
             units=unit_value,
         )
         if boost:
-            minutes = validate_boost_minutes(boost_time)
             _LOGGER.info(
                 "ACM boost start dev=%s addr=%s minutes=%s",
                 mask_identifier(dev_id),
                 mask_identifier(addr_str),
-                minutes,
+                validate_boost_minutes(boost_time),
             )
         else:
-            minutes = 0
             _LOGGER.info(
                 "ACM boost cancel dev=%s addr=%s",
                 mask_identifier(dev_id),
                 mask_identifier(addr_str),
             )
 
-        response = await self._post_acm_endpoint(
+        return await self._post_acm_endpoint(
             f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/boost",
             headers,
             payload,
             dev_id=dev_id,
             addr=addr_str,
         )
-
-        metadata = await self._collect_boost_metadata(
-            dev_id,
-            addr_str,
-            boost_active=boost,
-            minutes=minutes,
-        )
-        if isinstance(response, dict):
-            if metadata:
-                response.setdefault("boost_state", metadata)
-            return response
-
-        result: dict[str, Any] = {"response": response}
-        if metadata:
-            result["boost_state"] = metadata
-        return result
 
     def _ensure_units(self, value: str | None) -> str:
         """Validate and normalise temperature units."""

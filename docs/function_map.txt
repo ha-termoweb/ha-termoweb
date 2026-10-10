@@ -122,10 +122,6 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_
     Convert preset temperature payloads into stringified list.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._set_acm_settings
     Apply segmented writes for accumulator nodes.
-custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._collect_boost_metadata
-    Capture RTC metadata to derive boost end timing.
-custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._rtc_payload_to_datetime
-    Convert an RTC payload into a ``datetime`` instance.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._post_acm_endpoint
     POST to an ACM endpoint, translating client errors.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._select_segmented_node
