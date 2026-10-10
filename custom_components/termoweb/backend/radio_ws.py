@@ -194,18 +194,30 @@ class RadioListener(_WSStatusMixin):
                 _LOGGER.error("Skipping heater with a bad radio address: %s", err)
                 continue
             try:
-                await self._client.async_sync_clock(radio_id, registering=False)
-            except (RadioLinkError, RadioCommandError) as err:
-                _LOGGER.debug("Keepalive clock sync to heater %s failed: %s", addr, err)
-            else:
-                self._mark_ws_heartbeat(reason="keepalive")
-            settings = await self._client.get_node_settings(
-                self.dev_id, (node_type, addr)
-            )
-            if settings:
-                self._push(node_type, addr, settings)
-            await self._push_energy(node_type, addr)
-        await self._client.async_balance_power()
+                await self._refresh_heater(node_type, addr, radio_id)
+            except Exception:
+                # One heater's bug must not end the loop or starve the others.
+                _LOGGER.exception(
+                    "Radio refresh of heater %s failed unexpectedly", addr
+                )
+        try:
+            await self._client.async_balance_power()
+        except Exception:
+            _LOGGER.exception("Radio power limit check failed unexpectedly")
+
+    async def _refresh_heater(self, node_type: str, addr: str, radio_id: int) -> None:
+        """Keepalive clock sync, status read and energy push for one heater."""
+
+        try:
+            await self._client.async_sync_clock(radio_id, registering=False)
+        except (RadioLinkError, RadioCommandError) as err:
+            _LOGGER.debug("Keepalive clock sync to heater %s failed: %s", addr, err)
+        else:
+            self._mark_ws_heartbeat(reason="keepalive")
+        settings = await self._client.get_node_settings(self.dev_id, (node_type, addr))
+        if settings:
+            self._push(node_type, addr, settings)
+        await self._push_energy(node_type, addr)
 
     # --- unsolicited heater frames ------------------------------------------
 
@@ -265,6 +277,8 @@ class RadioListener(_WSStatusMixin):
             await coro
         except (RadioLinkError, RadioCommandError) as err:
             _LOGGER.debug("Radio station reply failed: %s", err)
+        except Exception:
+            _LOGGER.exception("Radio station reply failed unexpectedly")
 
     async def _grant_power(self, node_type: str, addr: str, radio_id: int) -> None:
         """Acknowledge a power request, push the heating state, apply the power limit."""

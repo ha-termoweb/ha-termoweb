@@ -546,7 +546,10 @@ class RadioClient:
                 if status.mode_code == protocol.MODE_OFF:
                     continue
                 await self._write_settings(addr, mode="off")
-            except (RadioLinkError, RadioCommandError) as err:
+            # ValueError: dialect B re-sends the heater's presets with the mode, and
+            # presets outside 7-35 C ascending cannot be encoded. Never rewrite the
+            # user's presets to shed load; leave the heater as it is and say so.
+            except (RadioLinkError, RadioCommandError, ValueError) as err:
                 _LOGGER.error(
                     "Power limit: could not switch heater %s off: %s", addr, err
                 )
@@ -557,7 +560,7 @@ class RadioClient:
             try:
                 if mode is not None:
                     await self._write_settings(addr, mode=mode)
-            except (RadioLinkError, RadioCommandError) as err:
+            except (RadioLinkError, RadioCommandError, ValueError) as err:
                 _LOGGER.error("Power limit: could not restore heater %s: %s", addr, err)
                 continue
             _LOGGER.info("Power limit: heater %s back to %s", addr, mode)
