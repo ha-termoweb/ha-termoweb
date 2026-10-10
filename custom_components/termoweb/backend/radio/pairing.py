@@ -8,7 +8,9 @@ and the network id. See ``docs/radio_protocol.md`` (section 7).
 
 - Dialect B announces with tag ``03`` and payload ``55``, without an identity,
   so heaters are paired one at a time: after an assignment, further sweeps are
-  ignored for a few seconds and the new id must answer a status read.
+  ignored for a few seconds and the new id must answer a status read. The
+  heater only takes an assignment sent right after the sweep frame addressed
+  to this station, so only that frame is answered.
 - Dialect A announces with ``77`` + a 12-byte identity. Copies relayed by
   already-paired heaters are ignored: the relay sits on its own network and
   would drop an assignment sent on this station's network id.
@@ -49,8 +51,12 @@ IDLE_STOP_S = 60.0  # after a pairing, stop this long after the last announcemen
 SETTLE_S = 5.0  # ignore further sweeps this long after an assignment
 CONFIRM_TIMEOUT_S = 1.0
 CONFIRM_ATTEMPTS = 3
-ANSWER_GAP_S = 0.2  # dialect A: one assignment per identity per sweep dwell
-POLL_STEP_S = 0.1
+# Airtime: one transmission per assignment, at most one assignment a second,
+# and only for an announcement still inside its sweep dwell (120-200 ms).
+ASSIGN_GAP_S = 1.0
+ASSIGN_ACK_WAIT_S = 0.2
+ANSWER_MAX_AGE_S = 0.1
+POLL_STEP_S = 0.02
 PAIRING_DIALECTS: tuple[Dialect, ...] = (DIALECT_B, DIALECT_A)
 
 LinkFactory = Callable[..., RadioLink]
@@ -77,6 +83,7 @@ class Announcement:
     dialect: Dialect
     identity: bytes | None  # dialect A: 12 bytes; dialect B carries none
     relayed: bool  # dialect A: a copy forwarded by an already-paired heater
+    dst: int | None = None  # the swept destination of this frame
 
 
 @dataclass(frozen=True)
@@ -100,12 +107,12 @@ def classify_announcement(dialect: Dialect, frame: Frame) -> Announcement | None
             and frame.tag == ANNOUNCE_TAG_B
             and payload == ANNOUNCE_PAYLOAD_B
         ):
-            return Announcement(dialect, None, relayed=False)
+            return Announcement(dialect, None, relayed=False, dst=frame.dst)
         return None
     if len(payload) != ANNOUNCE_LEN_A or payload[0] != ANNOUNCE_MARKER_A:
         return None
     relayed = frame.path is None or frame.src != frame.path[0]
-    return Announcement(dialect, payload[1:], relayed=relayed)
+    return Announcement(dialect, payload[1:], relayed=relayed, dst=frame.dst)
 
 
 def free_node_id(used: Iterable[int]) -> int | None:
@@ -202,6 +209,10 @@ async def pair_heaters(
     exactly one heater to that id (a heater re-paired after a factory reset);
     otherwise each heater gets the lowest free id. A NoFreeAddressError carries
     the heaters paired before the ids ran out.
+
+    Dialect B is answered only for the sweep frame addressed to this station.
+    Each assignment is sent once (no blind retries), at most one a second,
+    and only while the announcement it answers is fresh.
     """
     dialect = link.dialect
     if wanted_id is not None:
@@ -212,7 +223,7 @@ async def pair_heaters(
     paired: list[PairedHeater] = []
     paired_identities: set[bytes] = set()
     identity_ids: dict[bytes, int] = {}
-    last_answer: dict[bytes, float] = {}
+    last_sent: float | None = None
     heard: list[tuple[float, Announcement]] = []
 
     def _on_frame(received: ReceivedFrame) -> None:
@@ -241,13 +252,16 @@ async def pair_heaters(
                 continue
             if heard_at < ignore_until or identity in paired_identities:
                 continue
-            if identity is not None:
-                previous = last_answer.get(identity)
-                if previous is not None and heard_at - previous < ANSWER_GAP_S:
-                    continue
-                last_answer[identity] = heard_at
             if idle_stop_s is not None:
                 deadline = max(deadline, min(hard_end, clock() + idle_stop_s))
+            if dialect is DIALECT_B and announcement.dst != link.station_id:
+                continue  # the heater only listens right after its sweep to us
+            now = clock()
+            if now - heard_at > ANSWER_MAX_AGE_S:
+                continue  # the sweep has moved on
+            if last_sent is not None and now - last_sent < ASSIGN_GAP_S:
+                continue
+            last_sent = now
             node_id = wanted_id
             if node_id is None and identity is not None:
                 node_id = identity_ids.get(identity)
@@ -262,7 +276,9 @@ async def pair_heaters(
                 identity_ids[identity] = node_id
             _LOGGER.debug("Assigning radio id %d", node_id)
             air = build_assignment(dialect, node_id, link.network_id, link.station_id)
-            result = await link.send_frame(BROADCAST_ID, air)
+            result = await link.send_frame(
+                BROADCAST_ID, air, retries=1, retry_interval=ASSIGN_ACK_WAIT_S
+            )
             if not result.ok:
                 _LOGGER.debug("No ack for the assignment of radio id %d", node_id)
                 continue
