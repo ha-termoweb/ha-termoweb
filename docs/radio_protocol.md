@@ -323,7 +323,8 @@ the network id.
 | | Dialect A | Dialect B |
 |---|---|---|
 | Announcement | payload `77` + 12-byte identity (13 bytes), tag `00` | payload `55`, tag `03`, net `00 00`, path `FF <dst> 01 01 01` |
-| Sweep | about 200 ms per destination | about one frame a second (`01, 04, 07, 08, 0A, 0B, 0E, …`) |
+| Sweep | about 200 ms per destination | 120-160 ms per destination, for example `18, 19, 1C, 1D, 1E, 02 … 15, 01` |
+| Answered frame | any direct copy (src and dst are not checked) | only the frame swept to this station (dst `01`): the heater acks an assignment only right after it |
 | Identity | in the announcement | none: heaters are paired one at a time |
 | After the assignment | (ha-termoweb-local captures) registration `50` | link ack from `FF` on the new net, an empty tag-`84` frame, then `50` registrations from the new id; `B8` reads answer at once |
 | Status | documented by ha-termoweb-local, not yet tried here | proven 2026-10-10 |
@@ -340,14 +341,20 @@ link's dialect and network id:
    else, in dialect A, the id this identity got earlier in the run, else the
    lowest id in `02..41` that no stored node uses. No free id raises
    `NoFreeAddressError`, which carries the heaters paired before.
-3. The assignment goes out with the normal link retries. Without an ack the
-   next announcement is answered again.
+3. Airtime is kept low. Dialect B answers only the sweep frame addressed to
+   this station; frames swept to other ids get no transmission. Each
+   assignment is sent once and waits 200 ms for the ack, with no link
+   retries: a retry would land after the heater moved on. An announcement
+   older than 100 ms is not answered (its dwell is over), and at most one
+   assignment goes out per second. Without an ack, the next pass of the
+   sweep is answered again. (Answering every sweep frame with three retries
+   put 34 un-acked transmissions on air in 10 s during a live test.)
 4. After an ack, announcements heard during the next 5 s are ignored: they
    are the same sweep. The new id must then answer a `B8` status read (3
    tries of 1 s). A `5A` identity read follows; its tail (and, in dialect B,
    the ASCII serial) is kept when the heater answers.
-5. Dialect A: one assignment per identity per 200 ms. An identity that is
-   already paired in this run is not answered again.
+5. Dialect A: an identity that is already paired in this run is not answered
+   again.
 
 **Relayed dialect-A announcements are ignored.** Already-paired heaters
 forward copies of an announcement under their own source id (the link sender

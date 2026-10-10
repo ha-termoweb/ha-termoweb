@@ -150,9 +150,20 @@ class Air:
         )
 
 
-def sweeps(start: float, count: int, step: float = 1.0, line=announce_b) -> list:
-    """Return ``count`` announcements ``step`` seconds apart from ``start``."""
-    return [(start + i * step, line(dst=(i % 30) + 1)) for i in range(count)]
+# One dialect-B sweep pass as heard live: 120-160 ms per destination.
+SWEEP_DSTS = (0x18, 0x19, 0x1C, 0x02, 0x03, 0x01, 0x04)
+SWEEP_STEP_S = 0.14
+
+
+def sweeps(
+    start: float, count: int, step: float = 1.0, dsts=SWEEP_DSTS, line=announce_b
+) -> list:
+    """Return ``count`` sweep passes over ``dsts``, ``step`` seconds apart."""
+    return [
+        (start + i * step + k * SWEEP_STEP_S, line(dst=dst))
+        for i in range(count)
+        for k, dst in enumerate(dsts)
+    ]
 
 
 # --- pure helpers ------------------------------------------------------------
@@ -161,11 +172,11 @@ def sweeps(start: float, count: int, step: float = 1.0, line=announce_b) -> list
 def test_classify_announcements() -> None:
     b = decode(DIALECT_B, bytes.fromhex(announce_b(4).split()[-1]))
     assert pr.classify_announcement(DIALECT_B, b) == pr.Announcement(
-        DIALECT_B, None, relayed=False
+        DIALECT_B, None, relayed=False, dst=4
     )
     direct = decode(DIALECT_A, bytes.fromhex(announce_a().split()[-1]))
     assert pr.classify_announcement(DIALECT_A, direct) == pr.Announcement(
-        DIALECT_A, IDENTITY_A, relayed=False
+        DIALECT_A, IDENTITY_A, relayed=False, dst=1
     )
     relayed = decode(DIALECT_A, bytes.fromhex(announce_a(src=4).split()[-1]))
     assert pr.classify_announcement(DIALECT_A, relayed).relayed is True
@@ -269,11 +280,11 @@ async def test_no_announcement_returns_nothing_and_sends_nothing() -> None:
 @pytest.mark.asyncio
 async def test_unacked_assignment_is_retried_on_the_next_sweep() -> None:
     air = Air(sweeps(0.5, 4, step=2.0))
-    heater = PairingHeater(refuse_acks=3)  # all three link retries go unacked
+    heater = PairingHeater(refuse_acks=1)  # the first pass at dst 01 is missed
     link = await air.link(responder=heater)
     paired = await air.pair(link, window_s=20, max_heaters=1)
     assert [h.node_id for h in paired] == [2]
-    assert len(heater.assignments) == 4
+    assert len(heater.assignments) == 2  # one per pass, no blind link retries
 
 
 @pytest.mark.asyncio
@@ -300,10 +311,10 @@ async def test_dialect_a_direct_announcement_keeps_the_identity() -> None:
 async def test_dialect_a_same_identity_gets_the_same_id_again() -> None:
     lines = [(0.5, announce_a()), (6.0, announce_a()), (6.1, announce_a(dst=2))]
     air = Air(lines)
-    heater = PairingHeater(DIALECT_A, replies={}, refuse_acks=3)  # first try lost
+    heater = PairingHeater(DIALECT_A, replies={}, refuse_acks=1)  # first try lost
     link = await air.link(DIALECT_A, heater)
     assert await air.pair(link, window_s=10) == []
-    assert [f.payload for f in heater.assignments] == [b"\x02"] * 4
+    assert [f.payload for f in heater.assignments] == [b"\x02"] * 2
 
 
 @pytest.mark.asyncio
@@ -428,10 +439,52 @@ async def test_pair_new_network_drops_dialects_the_firmware_lacks() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dialect_a_answers_one_identity_once_per_sweep_dwell() -> None:
+async def test_dialect_a_airtime_is_one_assignment_a_second() -> None:
     lines = [(0.5, announce_a()), (0.6, announce_a(dst=2)), (1.0, announce_a(dst=3))]
-    air = Air(lines)
+    air = Air([*lines, (1.6, announce_a(dst=4))])
     heater = PairingHeater(DIALECT_A, refuse_acks=99)
     link = await air.link(DIALECT_A, heater)
     assert await air.pair(link, window_s=3) == []
-    assert len(heater.assignments) == 6  # 0.5 s and 1.0 s, three link tries each
+    assert len(heater.assignments) == 2  # 0.5 s and 1.6 s, one transmission each
+
+
+@pytest.mark.asyncio
+async def test_dialect_b_sweeps_to_other_destinations_are_never_answered() -> None:
+    """Fair use: frames swept at other ids get no transmission at all."""
+    others = tuple(dst for dst in SWEEP_DSTS if dst != 1)
+    air = Air(sweeps(0.5, 10, dsts=others))
+    link = await air.link(responder=PairingHeater())
+    sent_before = len(air.gateways[-1].transmitted())
+    assert await air.pair(link, window_s=12) == []
+    assert len(air.gateways[-1].transmitted()) == sent_before
+
+
+@pytest.mark.asyncio
+async def test_dialect_b_assignment_follows_the_sweep_frame_to_us() -> None:
+    """Only the dst=01 frame of a pass is answered, once, and the heater acks it."""
+    air = Air(sweeps(0.5, 1))
+    heater = PairingHeater()
+    sent_at: list[float] = []
+
+    def _timed(air_bytes: bytes) -> list[str]:
+        if decode(DIALECT_B, air_bytes).tag == pr.ASSIGNMENT_TAG:
+            sent_at.append(air.ft.now)
+        return heater(air_bytes)
+
+    link = await air.link(responder=_timed)
+    paired = await air.pair(link, window_s=5, max_heaters=1)
+    assert [h.node_id for h in paired] == [2]
+    (assignment,) = heater.assignments
+    assert assignment.payload == b"\x02" and heater.node == 2
+    t_dst01 = 0.5 + SWEEP_DSTS.index(1) * SWEEP_STEP_S
+    assert t_dst01 <= sent_at[0] < t_dst01 + SWEEP_STEP_S  # inside our dwell
+
+
+@pytest.mark.asyncio
+async def test_stale_announcements_are_not_answered(monkeypatch) -> None:
+    monkeypatch.setattr(pr, "ANSWER_MAX_AGE_S", -1.0)  # every sweep has moved on
+    air = Air(sweeps(0.5, 3))
+    heater = PairingHeater()
+    link = await air.link(responder=heater)
+    assert await air.pair(link, window_s=5) == []
+    assert heater.assignments == []
