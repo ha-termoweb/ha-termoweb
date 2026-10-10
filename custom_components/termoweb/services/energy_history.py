@@ -1,169 +1,65 @@
-"""Service wiring for energy history import."""
+"""The ``import_energy_history`` service."""
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Awaitable, Callable, Iterable, Mapping
-from typing import Any
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
+import voluptuous as vol
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-
-from custom_components.termoweb import energy as energy_module
 from custom_components.termoweb.backend.factory import backend_capabilities
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.energy import (
-    async_import_energy_history as _async_import_energy_history_impl,
+    DEFAULT_MAX_HISTORY_DAYS,
+    MAX_HISTORY_DAYS,
+    async_import_energy_history,
 )
-from custom_components.termoweb.inventory import Inventory
 from custom_components.termoweb.runtime import EntryRuntime
-from custom_components.termoweb.throttle import default_samples_rate_limit_state
 
-_LOGGER = energy_module._LOGGER  # noqa: SLF001
-
-
-async def async_import_energy_history_with_rate_limit(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    *,
-    nodes: Inventory | None = None,
-    node_types: Iterable[str] | None = None,
-    addresses: Iterable[str] | None = None,
-    day_chunk_hours: int = 24,
-    reset_progress: bool = False,
-    max_days: int | None = None,
-) -> None:
-    """Run energy history import with rate limiting and filter defaults."""
-
-    rate_state = default_samples_rate_limit_state()
-    kwargs: dict[str, Any] = {
-        "reset_progress": reset_progress,
-        "max_days": max_days,
-        "rate_limit": rate_state,
+SERVICE_IMPORT_ENERGY_HISTORY = "import_energy_history"
+IMPORT_ENERGY_HISTORY_SCHEMA = vol.Schema(
+    {
+        vol.Optional("reset_progress", default=False): bool,
+        vol.Optional(
+            "max_history_retrieval", default=DEFAULT_MAX_HISTORY_DAYS
+        ): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_HISTORY_DAYS)),
     }
-
-    if nodes is not None:
-        kwargs["nodes"] = nodes
-    if node_types is not None:
-        kwargs["node_types"] = tuple(node_types)
-    if addresses is not None:
-        kwargs["addresses"] = tuple(addresses)
-    if day_chunk_hours != 24:
-        kwargs["day_chunk_hours"] = day_chunk_hours
-
-    await _async_import_energy_history_impl(
-        hass,
-        entry,
-        **kwargs,
-    )
+)
 
 
-async def async_register_import_energy_history_service(
-    hass: HomeAssistant,
-    import_fn: Callable[..., Awaitable[None]],
-) -> None:
+async def async_register_import_energy_history_service(hass: HomeAssistant) -> None:
     """Register the import_energy_history service if it is missing."""
 
-    if hass.services.has_service(DOMAIN, "import_energy_history"):
+    if hass.services.has_service(DOMAIN, SERVICE_IMPORT_ENERGY_HISTORY):
         return
 
-    logger = _LOGGER
-    async_mod = asyncio
-
-    async def _service_import_energy_history(call) -> None:
-        """Handle the import_energy_history service call."""
-
-        logger.debug("service import_energy_history called")
-        reset = bool(call.data.get("reset_progress", False))
-        max_days = call.data.get("max_history_retrieval")
-        node_types_raw = call.data.get("node_types")
-        addresses_raw = call.data.get("addresses")
-        day_chunk_raw = call.data.get("day_chunk_hours", 24)
-
-        node_types_filter: tuple[str, ...] | None
-        if node_types_raw is None:
-            node_types_filter = None
-        elif isinstance(node_types_raw, (list, tuple, set)):
-            node_types_filter = tuple(str(value) for value in node_types_raw)
-        else:
-            node_types_filter = (str(node_types_raw),)
-
-        addresses_filter: tuple[str, ...] | None
-        if addresses_raw is None:
-            addresses_filter = None
-        elif isinstance(addresses_raw, (list, tuple, set)):
-            addresses_filter = tuple(str(value) for value in addresses_raw)
-        else:
-            addresses_filter = (str(addresses_raw),)
-
-        try:
-            day_chunk_hours = int(day_chunk_raw)
-        except (TypeError, ValueError):
-            logger.warning(
-                "import_energy_history: invalid day_chunk_hours %s; defaulting to 24",
-                day_chunk_raw,
+    async def _service_import_energy_history(call: ServiceCall) -> None:
+        """Import energy history for every loaded entry whose backend supports it."""
+        runtimes = [
+            runtime
+            for runtime in hass.data.get(DOMAIN, {}).values()
+            if isinstance(runtime, EntryRuntime)
+            and backend_capabilities(runtime.brand).energy_history
+        ]
+        if not runtimes:
+            raise ServiceValidationError(
+                "No loaded TermoWeb entry supports energy history import"
             )
-            day_chunk_hours = 24
-
-        tasks = []
-        records = hass.data.get(DOMAIN, {})
-        if not isinstance(records, Mapping):
-            records = {}
-        for runtime in records.values():
-            if not isinstance(runtime, EntryRuntime):
-                continue
-            ent = runtime.config_entry
-            if not backend_capabilities(runtime.brand).energy_history:
-                logger.error(
-                    "%s: energy history import is not supported by this backend",
-                    runtime.dev_id,
-                )
-                continue
-            inventory = runtime.inventory
-            if not isinstance(inventory, Inventory):
-                entry_entry_id = getattr(ent, "entry_id", "<unknown>")
-                logger.error(
-                    "%s: energy import aborted; inventory missing in integration state (entry=%s)",
-                    runtime.dev_id,
-                    entry_entry_id,
-                )
-                continue
-            kwargs: dict[str, Any] = {
-                "reset_progress": reset,
-                "max_days": max_days,
-            }
-            if node_types_filter is not None:
-                kwargs["node_types"] = node_types_filter
-            if addresses_filter is not None:
-                kwargs["addresses"] = addresses_filter
-            if day_chunk_hours != 24:
-                kwargs["day_chunk_hours"] = day_chunk_hours
-
-            try:
-                coro = import_fn(
+        if any(runtime.energy_import_lock.locked() for runtime in runtimes):
+            raise ServiceValidationError(
+                "An energy history import is already running; wait for it to finish"
+            )
+        for runtime in runtimes:
+            async with runtime.energy_import_lock:
+                await async_import_energy_history(
                     hass,
-                    ent,
-                    **kwargs,
+                    runtime,
+                    max_days=call.data["max_history_retrieval"],
+                    reset_progress=call.data["reset_progress"],
                 )
-            except ValueError as err:
-                logger.error(
-                    "%s: import_energy_history rejected input: %s",
-                    runtime.dev_id,
-                    err,
-                )
-                continue
-            tasks.append(coro)
-        if tasks:
-            logger.debug("import_energy_history: awaiting %d tasks", len(tasks))
-            results = await async_mod.gather(*tasks, return_exceptions=True)
-            for res in results:
-                if isinstance(res, async_mod.CancelledError):
-                    raise res
-                if isinstance(res, Exception):
-                    logger.exception("import_energy_history task failed: %s", res)
 
     hass.services.async_register(
         DOMAIN,
-        "import_energy_history",
+        SERVICE_IMPORT_ENERGY_HISTORY,
         _service_import_energy_history,
+        schema=IMPORT_ENERGY_HISTORY_SCHEMA,
     )

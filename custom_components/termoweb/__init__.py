@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 import inspect
@@ -63,6 +63,7 @@ from .coordinator import (
     StateCoordinator,
     build_device_metadata,
 )
+from .energy import energy_import_store
 from .hourly_poller import HourlySamplesPoller
 from .inventory import (
     Inventory,
@@ -71,10 +72,7 @@ from .inventory import (
     normalize_node_type,
 )
 from .runtime import EntryRuntime
-from .services.energy_history import (
-    async_import_energy_history_with_rate_limit,
-    async_register_import_energy_history_service,
-)
+from .services.energy_history import async_register_import_energy_history_service
 from .services.radio_capture import async_register_radio_capture_service
 from .services.radio_pairing import async_register_radio_pairing_services
 from .services.radio_survey import async_register_radio_survey_service
@@ -104,31 +102,6 @@ def _platforms_for_brand(brand: str) -> list[str]:
 reset_samples_rate_limit_state()
 
 _SUPPORTED_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "pmo"})
-
-
-async def _async_import_energy_history(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    *,
-    nodes: Inventory | None = None,
-    node_types: Iterable[str] | None = None,
-    addresses: Iterable[str] | None = None,
-    day_chunk_hours: int = 24,
-    reset_progress: bool = False,
-    max_days: int | None = None,
-) -> None:
-    """Delegate to the energy helper with shared rate limiting and filters."""
-
-    await async_import_energy_history_with_rate_limit(
-        hass,
-        entry,
-        nodes=nodes,
-        node_types=node_types,
-        addresses=addresses,
-        day_chunk_hours=day_chunk_hours,
-        reset_progress=reset_progress,
-        max_days=max_days,
-    )
 
 
 def _log_unknown_node_types(inventory: Inventory) -> None:
@@ -577,10 +550,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     platforms = _platforms_for_brand(brand)
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
 
-    await async_register_import_energy_history_service(
-        hass,
-        _async_import_energy_history,
-    )
+    await async_register_import_energy_history_service(hass)
 
     if brand in RADIO_BRANDS:
         await async_register_radio_survey_service(hass)
@@ -723,6 +693,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         domain_data.pop(entry.entry_id, None)
 
     return ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the entry's stored energy import progress."""
+    await energy_import_store(hass, entry.entry_id).async_remove()
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

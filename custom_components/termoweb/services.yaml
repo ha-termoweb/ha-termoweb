@@ -108,21 +108,23 @@ cancel_boost:
 import_energy_history:
   name: Import energy history
   description: >-
-    Import historical hourly energy counters for TermoWeb heaters up to one
-    year ago into Home Assistant statistics for every configured heater.
+    Import past hourly energy use of every heater and power monitor into Home
+    Assistant statistics (the Energy dashboard). Progress is saved: if the
+    import stops, run it again to continue.
   fields:
     reset_progress:
       name: Reset progress
       description: >-
-        Clear stored progress and re-import history from scratch.
+        Forget saved progress and import the whole period again. Existing
+        statistics are overwritten, not deleted.
       default: false
       selector:
         boolean: {}
     max_history_retrieval:
       name: Max history days
       description: >-
-        Number of days of history to retrieve. Overrides the configured
-        default for this import only.
+        How many days back to import (1 to 3650, default 7). If you already
+        imported fewer days, only the older days are fetched.
       default: 7
       selector:
         number:

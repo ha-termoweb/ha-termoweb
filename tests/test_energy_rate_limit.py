@@ -18,7 +18,7 @@ def test_default_samples_rate_limit_state_round_trip(
 ) -> None:
     """Shared rate limiter is reused, throttles calls and can be reset."""
 
-    current = 0.4
+    current = 0.1
 
     def fake_monotonic() -> float:
         return current
@@ -40,15 +40,15 @@ def test_default_samples_rate_limit_state_round_trip(
     reset_samples_rate_limit_state()
 
     asyncio.run(limiter.async_throttle())
-    assert sleep_calls == [pytest.approx(0.6)]
+    assert sleep_calls == [pytest.approx(0.4)]  # 2 queries per second
 
-    current = 1.8
+    current = 0.7
     asyncio.run(limiter.async_throttle())
-    assert sleep_calls == [pytest.approx(0.6), pytest.approx(0.2)]
+    assert sleep_calls == [pytest.approx(0.4), pytest.approx(0.3)]
 
     reset_samples_rate_limit_state()
     asyncio.run(limiter.async_throttle())
-    assert sleep_calls == [pytest.approx(0.6), pytest.approx(0.2)]
+    assert sleep_calls == [pytest.approx(0.4), pytest.approx(0.3)]
 
     reset_samples_rate_limit_state()
 
