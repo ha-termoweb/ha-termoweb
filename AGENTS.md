@@ -47,8 +47,8 @@ End users are non-technical Home Assistant operators. Documentation must be task
 
 ## Documentation Responsibilities
 Document every new feature or behavior change and keep existing documentation in sync.
-Add docstrings to all functions
-Save all functions and docstrings in docs/function_map.txt
+Add docstrings to all functions.
+Regenerate `docs/function_map.txt` after adding or changing functions or docstrings: `uv run python3 scripts/generate_function_map.py`. The Lint workflow fails if the committed map is stale.
 
 ## Pull Request Expectations
 * Keep each PR focused on a single feature or test with the minimal supporting changes.
