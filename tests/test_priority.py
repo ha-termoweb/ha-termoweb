@@ -35,6 +35,7 @@ from custom_components.termoweb.planner.ducaheat_planner import (
     plan_command,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +466,7 @@ class TestHeaterPriorityNumber:
             inventory=heater_inventory,
         )
 
-        with pytest.raises(ValueError, match="Priority must be 0-30"):
+        with pytest.raises(ServiceValidationError, match="Priority must be 0-30"):
             await entity.async_set_native_value(31.0)
 
     @pytest.mark.asyncio
@@ -482,5 +483,5 @@ class TestHeaterPriorityNumber:
             inventory=heater_inventory,
         )
 
-        with pytest.raises(ValueError, match="Priority must be 0-30"):
+        with pytest.raises(ServiceValidationError, match="Priority must be 0-30"):
             await entity.async_set_native_value(-1.0)

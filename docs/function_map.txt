@@ -50,6 +50,8 @@ custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_settings
     Update node settings for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_acm_boost_state
     Toggle accumulator boost state for the specified node.
+custom_components/termoweb/backend/base.py :: HttpClientProto.set_acm_extra_options
+    Write the default boost duration/temperature for an accumulator.
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_lock
     Toggle child lock state for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_display_select
@@ -70,6 +72,8 @@ custom_components/termoweb/backend/base.py :: Backend.set_node_settings
     Update node settings using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_acm_boost_state
     Toggle accumulator boost state using the backend client.
+custom_components/termoweb/backend/base.py :: Backend.set_acm_extra_options
+    Write accumulator boost defaults using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_node_lock
     Toggle child lock state using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_node_display_select
@@ -1250,6 +1254,8 @@ custom_components/termoweb/entities/climate.py :: async_setup_entry._svc_start_b
     Handle accumulator boost start service.
 custom_components/termoweb/entities/climate.py :: async_setup_entry._svc_cancel_boost
     Handle accumulator boost cancellation service.
+custom_components/termoweb/entities/climate.py :: _require_accumulator
+    Raise ServiceValidationError when an acm-only service targets another node.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.__init__
     Initialise the climate entity for a TermoWeb heater.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.async_added_to_hass
@@ -1267,7 +1273,7 @@ custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._optimisti
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._async_write_settings
     Submit a settings update to the TermoWeb API.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._async_client_call
-    Call a backend helper while applying standard error handling.
+    Call a backend helper, raising HomeAssistantError when it fails.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._async_submit_settings
     Send settings for this heater to the backend.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.hvac_mode
@@ -1295,7 +1301,7 @@ custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._commit_wr
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.async_set_schedule
     Write the 7x24 tri-state program to the device.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.async_set_preset_temperatures
-    Write the cold/night/day preset temperatures.
+    Write the cold/night/day presets; missing ones keep their current value.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.async_set_temperature
     Set target temperature; server requires manual+stemp together (stemp string handled by API).
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._default_mode_for_setpoint
@@ -1341,7 +1347,7 @@ custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.async
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.extra_state_attributes
     Return accumulator attributes including boost and charge metadata.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity._validate_boost_minutes
-    Return a validated boost duration or ``None`` when absent.
+    Return a validated boost duration, or None when absent; raise if invalid.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.async_set_acm_preset
     Update the default boost duration and/or temperature.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.async_start_boost
@@ -1374,6 +1380,8 @@ custom_components/termoweb/entities/heater.py :: set_boost_temperature
     Persist ``temperature`` as the preferred boost setpoint.
 custom_components/termoweb/entities/heater.py :: resolve_boost_runtime_minutes
     Return the preferred boost runtime or ``default`` when unset.
+custom_components/termoweb/entities/heater.py :: async_backend_write
+    Await a backend write, raising HomeAssistantError when it fails.
 custom_components/termoweb/entities/heater.py :: resolve_state_units
     Return the temperature units (``C``/``F``) reported by ``state``.
 custom_components/termoweb/entities/heater.py :: resolve_acm_boost_setpoint

@@ -1,4 +1,4 @@
-# ruff: noqa: D100,BLE001,TRY301,TID252
+# ruff: noqa: D100,BLE001,TID252
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from homeassistant.components.climate import (
 )
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import ServiceCall
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_platform
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
@@ -39,6 +40,7 @@ from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
     HeaterPlatformDetails,
+    async_backend_write,
     async_cancel_acm_boost,
     async_start_acm_boost,
     clear_climate_entity_id,
@@ -212,11 +214,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ) -> None:
         """Handle accumulator preset updates."""
 
-        if not isinstance(entity, AccumulatorClimateEntity):
-            _LOGGER.error(
-                "termoweb.set_acm_preset only applies to accumulator entities"
-            )
-            return
+        _require_accumulator(entity, "set_acm_preset")
 
         _LOGGER.info(
             "entity-service termoweb.set_acm_preset -> %s minutes=%s temperature=%s",
@@ -232,9 +230,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async def _svc_start_boost(entity: HeaterClimateEntity, call: ServiceCall) -> None:
         """Handle accumulator boost start service."""
 
-        if not isinstance(entity, AccumulatorClimateEntity):
-            _LOGGER.error("termoweb.start_boost only applies to accumulator entities")
-            return
+        _require_accumulator(entity, "start_boost")
 
         _LOGGER.info(
             "entity-service termoweb.start_boost -> %s minutes=%s",
@@ -246,9 +242,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async def _svc_cancel_boost(entity: HeaterClimateEntity, call: ServiceCall) -> None:
         """Handle accumulator boost cancellation service."""
 
-        if not isinstance(entity, AccumulatorClimateEntity):
-            _LOGGER.error("termoweb.cancel_boost only applies to accumulator entities")
-            return
+        _require_accumulator(entity, "cancel_boost")
 
         _LOGGER.info(
             "entity-service termoweb.cancel_boost -> %s",
@@ -278,6 +272,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
         {},
         _svc_cancel_boost,
     )
+
+
+def _require_accumulator(entity: HeaterClimateEntity, service: str) -> None:
+    """Raise ServiceValidationError when an acm-only service targets another node."""
+
+    if not isinstance(entity, AccumulatorClimateEntity):
+        raise ServiceValidationError(
+            f"termoweb.{service} only applies to accumulator entities"
+        )
 
 
 class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
@@ -465,7 +468,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         stemp: float | None = None,
         prog: list[int] | None = None,
         ptemp: list[float] | None = None,
-    ) -> bool:
+    ) -> None:
         """Submit a settings update to the TermoWeb API."""
 
         async def _submit(client: Any) -> None:
@@ -478,45 +481,21 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 units=self._units(),
             )
 
-        return await self._async_client_call(log_context=log_context, call=_submit)
+        await self._async_client_call(log_context=log_context, call=_submit)
 
     async def _async_client_call(
         self,
         *,
         log_context: str,
         call: Callable[[Any], Awaitable[Any]],
-    ) -> bool:
-        """Call a backend helper while applying standard error handling."""
+    ) -> None:
+        """Call a backend helper, raising HomeAssistantError when it fails."""
 
+        description = f"{log_context} for {self._node_type} {self._addr}"
         client = self._client()
         if client is None:
-            _LOGGER.error(
-                "%s failed type=%s addr=%s: backend unavailable",
-                log_context,
-                self._node_type,
-                self._addr,
-            )
-            return False
-
-        try:
-            await call(client)
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:
-            status = getattr(err, "status", None)
-            body = (
-                getattr(err, "body", None) or getattr(err, "message", None) or str(err)
-            )
-            _LOGGER.error(
-                "%s failed type=%s addr=%s: status=%s body=%s",
-                log_context,
-                self._node_type,
-                self._addr,
-                status,
-                (str(body)[:200] if body else ""),
-            )
-            return False
-        return True
+            raise HomeAssistantError(f"{description} failed: backend unavailable")
+        await async_backend_write(description, call(client))
 
     async def _async_submit_settings(
         self,
@@ -659,12 +638,10 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         success_details: Mapping[str, typing.Any] | None = None,
     ) -> None:
         """Submit a heater write, update cached state, and schedule fallback."""
-        success = await self._async_write_settings(
+        await self._async_write_settings(
             log_context=log_context,
             **dict(write_kwargs),
         )
-        if not success:
-            return
 
         detail_suffix = ""
         if success_details:
@@ -687,26 +664,13 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         """Write the 7x24 tri-state program to the device."""
         # Validate defensively even though the schema should catch most issues
         if not isinstance(prog, list) or len(prog) != 168:
-            _LOGGER.error(
-                "Invalid prog length for type=%s addr=%s",
-                self._node_type,
-                self._addr,
-            )
-            return
+            raise ServiceValidationError("prog must be a list of 168 values")
         try:
             prog2 = [int(x) for x in prog]
-            if any(x not in (0, 1, 2) for x in prog2):
-                raise ValueError("prog values must be 0/1/2")
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            _LOGGER.error(
-                "Invalid prog for type=%s addr=%s: %s",
-                self._node_type,
-                self._addr,
-                e,
-            )
-            return
+        except (TypeError, ValueError) as err:
+            raise ServiceValidationError(f"Invalid prog: {err}") from err
+        if any(x not in (0, 1, 2) for x in prog2):
+            raise ServiceValidationError("prog values must be 0, 1 or 2")
 
         def _apply(cur: DomainState) -> None:
             if hasattr(cur, "prog"):
@@ -720,39 +684,33 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         )
 
     async def async_set_preset_temperatures(self, **kwargs) -> None:
-        """Write the cold/night/day preset temperatures."""
-        if "ptemp" in kwargs and isinstance(kwargs["ptemp"], list):
+        """Write the cold/night/day presets; missing ones keep their current value."""
+        if isinstance(kwargs.get("ptemp"), list):
             p = kwargs["ptemp"]
         else:
-            try:
-                p = [kwargs["cold"], kwargs["night"], kwargs["day"]]
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                _LOGGER.error(
-                    "Preset temperatures require either ptemp[3] or cold/night/day fields"
+            p = [kwargs.get(key) for key in ("cold", "night", "day")]
+            if all(value is None for value in p):
+                raise ServiceValidationError(
+                    "Give ptemp or at least one of cold, night and day"
                 )
-                return
+            if any(value is None for value in p):
+                current = getattr(self.heater_state(), "ptemp", None)
+                if not isinstance(current, (list, tuple)) or len(current) != 3:
+                    raise ServiceValidationError(
+                        "The current preset temperatures are unknown; "
+                        "give all of cold, night and day"
+                    )
+                p = [
+                    cur if new is None else new
+                    for new, cur in zip(p, current, strict=True)
+                ]
 
-        if not isinstance(p, list) or len(p) != 3:
-            _LOGGER.error(
-                "Invalid ptemp length for type=%s addr=%s",
-                self._node_type,
-                self._addr,
-            )
-            return
+        if len(p) != 3:
+            raise ServiceValidationError("ptemp must have 3 values")
         try:
             p2 = [float(x) for x in p]
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            _LOGGER.error(
-                "Invalid ptemp values for type=%s addr=%s: %s",
-                self._node_type,
-                self._addr,
-                e,
-            )
-            return
+        except (TypeError, ValueError) as err:
+            raise ServiceValidationError(f"Invalid preset temperatures: {err}") from err
 
         def _apply(cur: DomainState) -> None:
             if hasattr(cur, "ptemp"):
@@ -771,9 +729,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         raw = kwargs.get(ATTR_TEMPERATURE)
         try:
             t = float(raw)
-        except (TypeError, ValueError):
-            _LOGGER.error("Invalid temperature payload: %r", raw)
-            return
+        except (TypeError, ValueError) as err:
+            raise ServiceValidationError(f"Invalid temperature: {raw!r}") from err
 
         t = max(5.0, min(30.0, t))
         self._pending_stemp = t
@@ -864,7 +821,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             await self._ensure_write_task()
             return
 
-        _LOGGER.error("Unsupported hvac_mode=%s", hvac_mode)
+        raise ServiceValidationError(f"Unsupported hvac_mode {hvac_mode}")
 
     async def _ensure_write_task(self) -> None:
         """Schedule a debounced write task if one is not running."""
@@ -924,12 +881,16 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             stemp,
         )
 
-        success = await self._async_write_settings(
-            log_context="Mode/setpoint write",
-            mode=mode_api,
-            stemp=stemp,
-        )
-        if not success:
+        # This runs in the debounced background task, after the service call
+        # returned, so a failure can only be logged.
+        try:
+            await self._async_write_settings(
+                log_context="Mode/setpoint write",
+                mode=mode_api,
+                stemp=stemp,
+            )
+        except HomeAssistantError as err:
+            _LOGGER.error("%s", err)
             return
 
         register_pending = getattr(self.coordinator, "register_pending_setting", None)
@@ -1136,14 +1097,13 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         else:
             value = str(hvac_mode).lower()
         if value == "boost":
-            _LOGGER.error(
-                "Boost is exposed as a preset_mode for accumulators addr=%s",
-                self._addr,
+            raise ServiceValidationError(
+                "Boost is a preset mode for accumulators, not an HVAC mode"
             )
-            return
         if value == str(HVACMode.HEAT):
-            _LOGGER.error("Unsupported hvac_mode=%s for accumulator", hvac_mode)
-            return
+            raise ServiceValidationError(
+                f"Unsupported hvac_mode {hvac_mode} for accumulator"
+            )
         await super().async_set_hvac_mode(hvac_mode)
 
     @property
@@ -1160,8 +1120,9 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
 
         value = (preset_mode or "").lower()
         if value not in self._attr_preset_modes:
-            _LOGGER.error("Unsupported preset_mode=%s for accumulator", preset_mode)
-            return
+            raise ServiceValidationError(
+                f"Unsupported preset_mode {preset_mode} for accumulator"
+            )
 
         current_preset = self.preset_mode
         if value == current_preset:
@@ -1206,30 +1167,21 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         return attrs
 
     def _validate_boost_minutes(self, minutes: int | None) -> int | None:
-        """Return a validated boost duration or ``None`` when absent."""
+        """Return a validated boost duration, or None when absent; raise if invalid."""
 
         if minutes is None:
             return None
+        message = (
+            f"Boost duration must be one of [{ALLOWED_BOOST_MINUTES_MESSAGE}] "
+            f"minutes, got {minutes}"
+        )
         value = coerce_boost_minutes(minutes)
         if value is None:
-            _LOGGER.error(
-                "Invalid boost minutes for type=%s addr=%s: %s",
-                self._node_type,
-                self._addr,
-                minutes,
-            )
-            return None
+            raise ServiceValidationError(message)
         try:
             return validate_boost_minutes(value)
-        except ValueError:
-            _LOGGER.error(
-                "Boost duration must be one of [%s] minutes for type=%s addr=%s: %s",
-                ALLOWED_BOOST_MINUTES_MESSAGE,
-                self._node_type,
-                self._addr,
-                value,
-            )
-            return None
+        except ValueError as err:
+            raise ServiceValidationError(message) from err
 
     async def async_set_acm_preset(
         self,
@@ -1240,27 +1192,20 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         """Update the default boost duration and/or temperature."""
 
         if minutes is None and temperature is None:
-            _LOGGER.error(
+            raise ServiceValidationError(
                 "Accumulator preset update requires minutes and/or temperature"
             )
-            return
 
         validated_minutes = self._validate_boost_minutes(minutes)
-        if minutes is not None and validated_minutes is None:
-            return
 
         temp_value: float | None = None
         if temperature is not None:
             try:
                 temp_value = float(temperature)
-            except (TypeError, ValueError):
-                _LOGGER.error(
-                    "Invalid boost temperature for type=%s addr=%s: %s",
-                    self._node_type,
-                    self._addr,
-                    temperature,
-                )
-                return
+            except (TypeError, ValueError) as err:
+                raise ServiceValidationError(
+                    f"Invalid boost temperature: {temperature!r}"
+                ) from err
 
         async def _call(client: Any) -> None:
             await client.set_acm_extra_options(
@@ -1270,12 +1215,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                 boost_temp=temp_value,
             )
 
-        success = await self._async_client_call(
-            log_context="Boost preset write",
-            call=_call,
-        )
-        if not success:
-            return
+        await self._async_client_call(log_context="Boost preset write", call=_call)
 
         def _apply(cur: DomainState) -> None:
             if validated_minutes is not None and hasattr(cur, "boost_time"):
@@ -1302,19 +1242,15 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         """Start an accumulator boost session."""
 
         validated_minutes = self._validate_boost_minutes(minutes)
-        if minutes is not None and validated_minutes is None:
-            return
         if validated_minutes is None:
             validated_minutes = self._preferred_boost_minutes()
 
         state = self.accumulator_state()
         if resolve_acm_boost_setpoint(state) is None:
-            _LOGGER.error(
-                "Boost start requires a setpoint for type=%s addr=%s",
-                self._node_type,
-                self._addr,
+            raise HomeAssistantError(
+                f"Boost start needs a setpoint, but {self._node_type} "
+                f"{self._addr} has not reported one"
             )
-            return
 
         async def _call(client: Any) -> None:
             await async_start_acm_boost(
@@ -1325,12 +1261,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                 minutes=validated_minutes,
             )
 
-        success = await self._async_client_call(
-            log_context="Boost start",
-            call=_call,
-        )
-        if not success:
-            return
+        await self._async_client_call(log_context="Boost start", call=_call)
 
         def _apply(cur: DomainState) -> None:
             if hasattr(cur, "boost_active"):
@@ -1355,12 +1286,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         async def _call(client: Any) -> None:
             await async_cancel_acm_boost(client, self._dev_id, self._addr)
 
-        success = await self._async_client_call(
-            log_context="Boost cancel",
-            call=_call,
-        )
-        if not success:
-            return
+        await self._async_client_call(log_context="Boost cancel", call=_call)
 
         def _apply(cur: DomainState) -> None:
             if hasattr(cur, "boost_active"):

@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Iterable,
+    Iterator,
+    Mapping,
+    MutableMapping,
+)
 from dataclasses import dataclass, fields
 from datetime import datetime, timedelta
 import logging
@@ -10,6 +17,7 @@ import typing
 from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
@@ -310,6 +318,17 @@ def resolve_boost_runtime_minutes(
     if stored is not None:
         return stored
     return default
+
+
+async def async_backend_write(description: str, write: Awaitable[Any]) -> Any:
+    """Await a backend write, raising HomeAssistantError when it fails."""
+
+    try:
+        return await write
+    except HomeAssistantError:
+        raise
+    except Exception as err:  # any backend failure fails the call
+        raise HomeAssistantError(f"{description} failed: {err}") from err
 
 
 def resolve_state_units(state: DomainState | None) -> str:

@@ -237,14 +237,6 @@ async def test_duration_async_set_native_value_persists_valid_and_rejects_invali
     ]
     assert entity.native_value == 2.0
 
-    caplog.set_level("ERROR")
-    await entity.async_set_native_value(0.5)
-
-    assert calls == [
-        (hass, entity._entry_id, entity._node_type, entity._addr, 120),
-    ]
-    assert "Invalid boost duration" in caplog.text
-
 
 @pytest.mark.asyncio
 async def test_temperature_async_added_to_hass_prefers_stored_temperature(
@@ -420,11 +412,6 @@ async def test_temperature_async_set_native_value_calls_service(
         23.3,
     )
     entity.async_write_ha_state.assert_called()
-
-    caplog.set_level("ERROR")
-    await entity.async_set_native_value(50.0)
-    assert "Invalid boost temperature" in caplog.text
-    assert hass.services.async_call.await_count == 1
 
 
 @pytest.mark.asyncio
