@@ -103,7 +103,30 @@ def normalise_ptemp(value: Any) -> Any:
     return [_format_temperature(item) for item in value]
 
 
-class HeaterStatusPayload(BaseModel):
+class _NodeStateFields(BaseModel):
+    """Vendor state fields read as sent; the domain state normalises them."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    state: str | None = None
+    max_power: str | int | float | None = None
+    lock: bool | int | str | None = None
+
+
+class _ChargeFields(BaseModel):
+    """Accumulator charge and boost fields read as sent by the vendor."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    charging: bool | int | None = None
+    current_charge_per: int | float | str | None = None
+    target_charge_per: int | float | str | None = None
+    boost_end_day: int | None = None
+    boost_end_min: int | None = None
+    boost_remaining: int | float | str | None = None
+
+
+class HeaterStatusPayload(_NodeStateFields, _ChargeFields):
     """Settings/status fields shared by heater and accumulator nodes."""
 
     model_config = ConfigDict(extra="ignore")
@@ -141,7 +164,7 @@ class HeaterStatusPayload(BaseModel):
         return normalise_ptemp(value)
 
 
-class HeaterSettingsPayload(BaseModel):
+class HeaterSettingsPayload(_NodeStateFields, _ChargeFields):
     """Top-level heater settings payload."""
 
     model_config = ConfigDict(extra="ignore")
@@ -179,7 +202,7 @@ class HeaterSettingsPayload(BaseModel):
         return normalise_ptemp(value)
 
 
-class ThermostatSettingsPayload(BaseModel):
+class ThermostatSettingsPayload(_NodeStateFields):
     """Thermostat settings payload."""
 
     model_config = ConfigDict(extra="ignore")
@@ -191,6 +214,8 @@ class ThermostatSettingsPayload(BaseModel):
     prog: list[int | float | str] | None = None
     ptemp: list[Any] | None = None
     units: str | None = None
+    batt_level: int | str | None = None
+    priority: int | None = None
 
     @field_validator("stemp", "mtemp", "temp", mode="before")
     @classmethod
