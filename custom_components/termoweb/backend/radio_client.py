@@ -38,7 +38,14 @@ from custom_components.termoweb.planner.radio_planner import (
 
 from .radio import protocol
 from .radio.dialect import DIALECTS, Dialect, Frame, build_frame
-from .radio.link import DEFAULT_PORT, GatewayInfo, RadioLink, RadioLinkError
+from .radio.link import (
+    DEFAULT_PORT,
+    GatewayInfo,
+    RadioLink,
+    RadioLinkError,
+    supports_survey,
+)
+from .radio.survey import RawBurst
 from .radio_power import EnergyEstimator, PowerManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -241,6 +248,19 @@ class RadioClient:
                 callback()
             except Exception:
                 _LOGGER.exception("Radio disconnect listener failed")
+
+    async def async_survey(self, seconds: int) -> list[RawBurst]:
+        """Capture raw bursts of every dialect on air; heater commands wait meanwhile."""
+
+        link = await self.async_connect()
+        if not supports_survey(link.gateway_info):
+            version = getattr(link.gateway_info, "version", None)
+            raise RadioError(
+                f"gateway firmware {version or 'unknown'} has no raw survey; "
+                "update the ESP32 gateway to 3.7-esp32 or later"
+            )
+        async with self._exchange_lock:
+            return await link.survey(seconds)
 
     # --- radio exchanges -----------------------------------------------------
 

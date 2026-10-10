@@ -15,7 +15,14 @@ import time
 
 from . import protocol
 from .dialect import DIALECT_A, DIALECT_B, Dialect
-from .link import DEFAULT_PORT, RadioLink, ReceivedFrame, UnsupportedDialectError
+from .link import (
+    DEFAULT_PORT,
+    RadioLink,
+    ReceivedFrame,
+    UnsupportedDialectError,
+    supports_survey,
+)
+from .survey import RawBurst
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,6 +34,7 @@ LISTEN_GRACE_S = 5.0  # keep listening this long after the first frame
 POLL_STEP_S = 0.5
 SCAN_ADDRESSES: tuple[int, ...] = tuple(range(2, 33))
 PROBE_GAP_S = 0.2
+SURVEY_S = 120  # raw survey after silent discovery: heaters repeat within minutes
 
 LinkFactory = Callable[..., RadioLink]
 Sleep = Callable[[float], Awaitable[None]]
@@ -145,6 +153,33 @@ async def discover_network(
     return None
 
 
+async def survey_network(
+    host: str,
+    port: int,
+    seconds: int = SURVEY_S,
+    *,
+    link_factory: LinkFactory = RadioLink,
+) -> list[RawBurst] | None:
+    """Capture raw bursts of any dialect; None when the firmware has no survey."""
+
+    link = link_factory(
+        host,
+        port,
+        DIALECT_A,
+        network_id=LISTEN_PLACEHOLDER_NET,
+        auto_ack=False,
+    )
+    info = await link.connect()
+    try:
+        if not supports_survey(info):
+            _LOGGER.info("Radio gateway firmware has no raw survey")
+            return None
+        _LOGGER.info("Running a %d s raw radio survey on %s:%s", seconds, host, port)
+        return await link.survey(seconds)
+    finally:
+        await link.close()
+
+
 async def probe_heaters(
     host: str,
     port: int,
@@ -182,8 +217,10 @@ async def probe_heaters(
 __all__ = [
     "DISCOVERY_DIALECTS",
     "SCAN_ADDRESSES",
+    "SURVEY_S",
     "NetworkSighting",
     "discover_network",
     "listen_once",
     "probe_heaters",
+    "survey_network",
 ]

@@ -13,9 +13,18 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
+from .backend.radio.link import supports_survey
+from .backend.radio_client import RadioClient
 from .backend.sanitize import mask_identifier
 from .backend.ws_health import WsHealthTracker
-from .const import CONF_BRAND, DEFAULT_BRAND, DOMAIN, get_brand_label
+from .const import (
+    CONF_BRAND,
+    CONF_RADIO_TYPE,
+    DEFAULT_BRAND,
+    DOMAIN,
+    RADIO_TYPE_ESP32,
+    get_brand_label,
+)
 from .runtime import EntryRuntime, require_runtime
 from .utils import async_get_integration_version
 
@@ -58,6 +67,34 @@ def _extract_websocket_clients(runtime: EntryRuntime) -> list[dict[str, Any]]:
 
     clients.sort(key=lambda item: str(item.get("device")))
     return clients
+
+
+def _radio_section(runtime: EntryRuntime, entry: ConfigEntry) -> dict[str, Any] | None:
+    """Return radio gateway facts and the last survey; no MAC or network id."""
+
+    client = runtime.client
+    if not isinstance(client, RadioClient):
+        return None
+    info = client.gateway_info
+    section: dict[str, Any] = {
+        "radio_type": entry.data.get(CONF_RADIO_TYPE, RADIO_TYPE_ESP32),
+        "dialect": client.dialect.name,
+        "connected": client.connected,
+        "gateway": None,
+    }
+    if info is not None:
+        section["gateway"] = {
+            "firmware": info.version,
+            "freq": info.freq,
+            "sync": info.sync,
+            "dialect": info.dialect,
+            "autoack": info.autoack,
+            "station_id": info.station_id,
+            "survey": supports_survey(info),
+        }
+    if runtime.last_radio_survey is not None:
+        section["last_survey"] = dict(runtime.last_radio_survey)
+    return section
 
 
 async def async_get_config_entry_diagnostics(
@@ -146,6 +183,10 @@ async def async_get_config_entry_diagnostics(
     ws_clients = _extract_websocket_clients(runtime)
     if ws_clients:
         diagnostics["websocket"] = {"clients": ws_clients}
+
+    radio_section = _radio_section(runtime, entry)
+    if radio_section is not None:
+        diagnostics["radio"] = radio_section
 
     _LOGGER.debug(
         "Diagnostics inventory cache for %s: raw=%d, filtered=%d",

@@ -1292,14 +1292,23 @@ def _install_stubs() -> None:
     class _ServiceRegistry:
         def __init__(self) -> None:
             self._services: dict[tuple[str, str], Callable[..., Any]] = {}
+            self.schemas: dict[tuple[str, str], Any] = {}
+            self.supports_response: dict[tuple[str, str], Any] = {}
 
         def has_service(self, domain: str, service: str) -> bool:
             return (domain, service) in self._services
 
         def async_register(
-            self, domain: str, service: str, handler: Callable[..., Any]
+            self,
+            domain: str,
+            service: str,
+            handler: Callable[..., Any],
+            schema: Any = None,
+            supports_response: Any = None,
         ) -> None:
             self._services[(domain, service)] = handler
+            self.schemas[(domain, service)] = schema
+            self.supports_response[(domain, service)] = supports_response
 
         def async_remove(self, domain: str, service: str) -> None:
             self._services.pop((domain, service), None)
@@ -1527,6 +1536,24 @@ def _install_stubs() -> None:
             """Base Home Assistant exception for tests."""
 
         exceptions_mod.HomeAssistantError = HomeAssistantError
+
+    if not hasattr(exceptions_mod, "ServiceValidationError"):
+
+        class ServiceValidationError(exceptions_mod.HomeAssistantError):
+            """Invalid service call exception for tests."""
+
+        exceptions_mod.ServiceValidationError = ServiceValidationError
+
+    if not hasattr(core_mod, "SupportsResponse"):
+
+        class SupportsResponse(enum.StrEnum):
+            """Service response support levels for tests."""
+
+            NONE = "none"
+            OPTIONAL = "optional"
+            ONLY = "only"
+
+        core_mod.SupportsResponse = SupportsResponse
 
     if not hasattr(exceptions_mod, "ServiceNotFound"):
 

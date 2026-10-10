@@ -161,6 +161,43 @@ If you see "No heater radio traffic was heard":
   wants heat talks every few minutes.
 - Move the gateway closer to a heater (a few metres is best) and try again.
 
+If setup still hears nothing, it records the radio signals for 2 more
+minutes. This takes extra time. It finds your heaters if their signal is
+weak. If it hears signals it cannot read, you see "Radio bursts were heard,
+but none could be decoded". This has two possible causes:
+
+- The signal is too weak. Move the gateway closer to a heater and try again.
+- Your heaters use a radio "dialect" that the integration does not know yet.
+  You can help to add it:
+  1. The error message shows the name of a report file, for example
+     `/config/termoweb_radio_survey_setup_20261001T120000Z.json`. The file is
+     in your Home Assistant configuration folder.
+  2. Download the file. For example, use the **File editor** or **Samba**
+     add-on.
+  3. Open a new issue at
+     <https://github.com/ha-termoweb/ha-termoweb/issues/new>. Write your
+     heater brand and model, and attach the file.
+
+The report does not contain your gateway's MAC address. The network ids of
+the decoded radio messages are hidden. Signals that could not be decoded are
+included as raw bits.
+
+### Record a radio report later
+
+After setup you can record a new report at any time. Use this when a new
+heater does not show up, or when a developer asks for a report.
+
+1. Go to **Developer tools → Actions**.
+2. Choose **TermoWeb: Radio survey**.
+3. Choose your radio gateway, and set **Duration** (120 seconds is a good
+   start). Turn a heater's temperature up so it talks while you wait.
+4. Press **Perform action**. Heater control pauses while the survey runs.
+5. The response shows the result and the name of the report file. The
+   integration's diagnostics download also shows the last result.
+
+The survey needs gateway firmware 3.7-esp32 or newer (step 3). The nanoCUL
+stick cannot record surveys.
+
 If you added or removed a heater later, open the integration, choose
 **Reconfigure**, and tick **Scan for heaters again**.
 

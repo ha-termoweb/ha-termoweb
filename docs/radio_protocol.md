@@ -282,3 +282,27 @@ their opcode, and drops kept raw runs. Undecodable bursts keep their raw bits,
 which may still contain the network id: `contains_raw_bits` in the report
 says so.
 
+### From Home Assistant
+
+- `RadioLink.survey` needs ESP32 firmware 3.7-esp32 or newer
+  (`link.supports_survey(GatewayInfo)`); stock nanoCUL firmware has no `R`.
+- Config flow: when `discover_network` hears nothing, `survey_sighting` runs a
+  120 s survey (`discovery.survey_network`, auto-ack off, nothing
+  transmitted) and analyses it in the executor. `known` continues the setup
+  with the dialect and network id it heard; `silent` (or no survey firmware)
+  gives `no_traffic`; anything else saves a redacted report as
+  `<config>/termoweb_radio_survey_setup_<UTC>.json` and shows
+  `unknown_dialect` with the file name and the issue link.
+- Service `termoweb.radio_survey` (`entry_id`, `seconds` 10-600, default 120)
+  runs `RadioClient.async_survey` under the exchange lock, saves
+  `termoweb_radio_survey_<entry_id>_<UTC>.json` and returns a summary
+  (`verdict`, `dialect`, `bursts`, `confidence`, `suggestion`, `file`). The
+  summary is kept as `runtime.last_radio_survey`.
+- Diagnostics of a radio entry have a `radio` section: radio type, dialect,
+  connection, gateway firmware/frequency/sync/dialect/auto-ack/station id,
+  survey support and the last survey summary. MAC and network id are left
+  out.
+- Report file: `format`, `created`, `integration_version`, `radio_type`,
+  `configured_dialect`, `gateway` (firmware, freq, sync; no MAC),
+  `survey_seconds`, and `report` (`redact(report).as_dict()`).
+

@@ -74,6 +74,7 @@ from .services.energy_history import (
     async_import_energy_history_with_rate_limit,
     async_register_import_energy_history_service,
 )
+from .services.radio_survey import async_register_radio_survey_service
 from .services.ws_debug_probe import async_register_ws_debug_probe_service
 from .throttle import reset_samples_rate_limit_state
 from .utils import async_get_integration_version as _async_get_integration_version
@@ -606,6 +607,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     )
 
     await async_register_ws_debug_probe_service(hass)
+    if brand == BRAND_RADIO:
+        await async_register_radio_survey_service(hass)
 
     _LOGGER.info("TermoWeb setup complete (v%s)", version)
     return True

@@ -763,3 +763,26 @@ async def test_power_record_read_failure_leaves_state_out() -> None:
     settings = await client.get_node_settings("dev", ("htr", "6"))
     assert "state" not in settings
     assert await client.read_power_record(HEATER) is None
+
+
+# --- raw survey -----------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_survey_needs_survey_firmware_and_returns_bursts() -> None:
+    """Firmware 3.7-esp32 surveys under the exchange lock; older firmware refuses."""
+
+    client, links, _ = make_client()
+    await client.async_connect()
+    links[0].info = links[0].gateway_info = gateway_info(version="3.7-esp32")
+    links[0].survey_bursts = ["burst"]
+    assert await client.async_survey(30) == ["burst"]
+    assert links[0].surveys == [30]
+
+    links[0].gateway_info = gateway_info(version="3.6-esp32")
+    with pytest.raises(RadioError, match="3.6-esp32 has no raw survey"):
+        await client.async_survey(30)
+    links[0].gateway_info = None
+    with pytest.raises(RadioError, match="unknown has no raw survey"):
+        await client.async_survey(30)
+    assert links[0].surveys == [30]

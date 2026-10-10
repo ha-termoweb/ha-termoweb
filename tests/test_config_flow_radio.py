@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import json
 from typing import Any
 
 import pytest
@@ -11,7 +13,7 @@ from conftest import _install_stubs
 
 _install_stubs()
 
-from custom_components.termoweb import config_flow
+from custom_components.termoweb import config_flow, radio_survey
 from custom_components.termoweb.backend.radio import (
     DIALECT_A,
     DIALECT_B,
@@ -19,6 +21,7 @@ from custom_components.termoweb.backend.radio import (
     RadioLinkError,
 )
 from custom_components.termoweb.backend.radio.discovery import NetworkSighting
+from custom_components.termoweb.backend.radio.survey import analyse
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -341,8 +344,23 @@ async def test_discover_radio_paths(monkeypatch) -> None:
     assert calls == [("probe", "B", NET, False, True)]
 
     calls_result["sighting"] = None
+    surveyed: list[Any] = []
+
+    async def no_survey(host, port, **kwargs):
+        surveyed.append(kwargs["analyse_survey"])
+        return calls_result.get("surveyed")
+
+    monkeypatch.setattr(config_flow, "survey_sighting", no_survey)
     with pytest.raises(config_flow.RadioSetupError, match="no_traffic"):
         await config_flow.discover_radio("gw", 1, "auto", None)
+    assert surveyed == [config_flow._analyse_inline]
+
+    calls.clear()
+    calls_result["surveyed"] = NetworkSighting(DIALECT_B, NET)
+    sighting, _ = await config_flow.discover_radio("gw", 1, "auto", None)
+    assert sighting.network_id == NET
+    assert calls[-1] == ("probe", "B", NET, False, True)
+    calls_result["surveyed"] = None
     calls_result.update(sighting=sighting_b, heaters={})
     with pytest.raises(config_flow.RadioSetupError, match="no_heaters"):
         await config_flow.discover_radio("gw", 1, "auto", None)
@@ -367,3 +385,88 @@ async def test_radio_options_store_heater_rated_power() -> None:
         "debug": True,
         "radio_power": {"power_limit": 2000, "rated_power": {"6": 1500}},
     }
+
+
+def _report(verdict: str, dialect: str | None = None, nets: tuple[str, ...] = ()):
+    """Return a survey report with the given outcome and no bursts."""
+    return dataclasses.replace(
+        analyse([]), verdict=verdict, dialect=dialect, network_ids=nets
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("bursts", "report", "expected"),
+    [
+        (None, None, None),
+        (["b"], _report("silent"), None),
+        (["b"], _report("known", "B", ("1234", "5678")), (DIALECT_B, NET)),
+        (["b"], _report("known", "A"), (DIALECT_A, DIALECT_A.network_id)),
+        (["b"], _report("known", "B"), None),
+        (["b"], _report("known", "Z"), "raise"),
+        (["b"], _report("undecodable"), "raise"),
+        (["b"], _report("candidate"), "raise"),
+    ],
+)
+async def test_survey_sighting_outcomes(monkeypatch, bursts, report, expected) -> None:
+    seen: list[Any] = []
+
+    async def fake_survey(host, port, *, link_factory):
+        seen.append((host, port, link_factory))
+        return bursts
+
+    async def fake_analyse(raw):
+        seen.append(raw)
+        return report
+
+    monkeypatch.setattr(config_flow, "survey_network", fake_survey)
+    if expected == "raise":
+        with pytest.raises(config_flow.UnknownDialectError) as err:
+            await config_flow.survey_sighting("gw", 1, analyse_survey=fake_analyse)
+        assert err.value.reason == "unknown_dialect" and err.value.report is report
+        return
+    sighting = await config_flow.survey_sighting("gw", 1, analyse_survey=fake_analyse)
+    if expected is None:
+        assert sighting is None
+    else:
+        assert (sighting.dialect, sighting.network_id) == expected
+    assert seen[0] == ("gw", 1, config_flow.RadioLink)
+    assert seen[1:] == ([] if bursts is None else [bursts])
+
+
+@pytest.mark.asyncio
+async def test_analyse_inline_runs_the_analyser() -> None:
+    assert (await config_flow._analyse_inline([])).verdict == "silent"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("writable", [True, False])
+async def test_unknown_dialect_saves_report_and_links_it(
+    gateway, monkeypatch, tmp_path, writable
+) -> None:
+    gateway["discover"] = config_flow.UnknownDialectError(_report("undecodable"))
+    monkeypatch.setattr(config_flow, "_get_version", _fake_version)
+    hass = HomeAssistant()
+    folder = tmp_path if writable else tmp_path / "missing"
+    hass.config.path = lambda name: str(folder / name)
+    flow = _flow(hass)
+    result = await _run_discovery(flow, await flow.async_step_radio(dict(FORM)))
+    assert result["errors"] == {"base": "unknown_dialect"}
+    placeholders = result["description_placeholders"]
+    assert placeholders["issue_url"] == radio_survey.ISSUE_URL
+    analyse_survey = gateway["discover_kwargs"]["analyse_survey"]
+    assert (await analyse_survey([])).verdict == "silent"
+    if not writable:
+        assert "could not be saved" in placeholders["report"]
+        return
+    files = list(tmp_path.glob("termoweb_radio_survey_setup_*.json"))
+    assert [str(f) for f in files] == [placeholders["report"]]
+    saved = json.loads(files[0].read_text())
+    assert saved["integration_version"] == "9.9.9"
+    assert saved["radio_type"] == "esp32" and saved["configured_dialect"] == "auto"
+    assert saved["report"]["verdict"] == "undecodable"
+    assert saved["report"]["redacted"] is True
+
+
+async def _fake_version(_hass: Any) -> str:
+    return "9.9.9"
