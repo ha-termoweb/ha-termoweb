@@ -13,7 +13,13 @@ from homeassistant.util import dt as dt_util
 import pytest
 
 from custom_components import termoweb
-from custom_components.termoweb import config_flow, const, diagnostics, utils
+from custom_components.termoweb import (
+    config_flow,
+    config_flow_radio,
+    const,
+    diagnostics,
+    utils,
+)
 from custom_components.termoweb.backend import (
     Backend,
     create_backend,
@@ -279,7 +285,7 @@ _VENDOR_BRANCH = re.compile(
         diagnostics,
         config_flow.TermoWebConfigFlow.async_supports_options_flow,
         config_flow.TermoWebConfigFlow.async_step_reconfigure,
-        config_flow._radio_in_use,
+        config_flow_radio._radio_in_use,
         const.get_brand_label,
         build_cloud_unique_id,
     ],

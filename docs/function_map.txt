@@ -744,60 +744,6 @@ custom_components/termoweb/config_flow.py :: _validate_login
     Ensure the provided credentials authenticate successfully.
 custom_components/termoweb/config_flow.py :: _login_error
     Return the flow error key for a failed login, or None when it succeeds.
-custom_components/termoweb/config_flow.py :: _capabilities
-    Return the optional features of the backend serving ``entry``.
-custom_components/termoweb/config_flow.py :: _radio_key
-    Return what identifies the radio connection: the serial port or host:port.
-custom_components/termoweb/config_flow.py :: _radio_in_use
-    Return True when another enabled entry already talks to this gateway or stick.
-custom_components/termoweb/config_flow.py :: _is_mac_id
-    Return True when ``dev_id`` came from a radio MAC (so it names the hardware).
-custom_components/termoweb/config_flow.py :: RadioSetupError.__init__
-    Store the error key.
-custom_components/termoweb/config_flow.py :: _by_id_path
-    Return the /dev/serial/by-id link for ``device``, else ``device`` itself.
-custom_components/termoweb/config_flow.py :: list_serial_ports
-    Return the host's serial ports (blocking: run in the executor).
-custom_components/termoweb/config_flow.py :: _radio_schema
-    Build the radio gateway form schema with provided defaults.
-custom_components/termoweb/config_flow.py :: _reconfigure_radio_schema
-    Build the radio reconfigure schema: address plus an optional re-scan.
-custom_components/termoweb/config_flow.py :: _dialect_fields
-    Return the optional dialect and network id fields shared by radio forms.
-custom_components/termoweb/config_flow.py :: _nanocul_schema
-    Build the nanoCUL port choice: detected ports plus a manual entry.
-custom_components/termoweb/config_flow.py :: _nanocul_manual_schema
-    Build the manual nanoCUL form: a device path or pyserial URL.
-custom_components/termoweb/config_flow.py :: _reconfigure_nanocul_schema
-    Build the nanoCUL reconfigure schema: port plus an optional re-scan.
-custom_components/termoweb/config_flow.py :: parse_network_id
-    Return 4 hex digits as two bytes, None when blank; raise ValueError otherwise.
-custom_components/termoweb/config_flow.py :: probe_gateway
-    Connect to the radio gateway without transmitting; return its ``dev_id``.
-custom_components/termoweb/config_flow.py :: probe_nanocul
-    Connect to a nanoCUL without transmitting; return ``(dev_id, dialect_capable)``.
-custom_components/termoweb/config_flow.py :: radio_link_factory
-    Return the RadioLink factory for a flow's radio: TCP, or the nanoCUL's port.
-custom_components/termoweb/config_flow.py :: radio_address
-    Return the (host, port) label RadioLink uses for a flow's radio.
-custom_components/termoweb/config_flow.py :: UnknownDialectError.__init__
-    Store the report for the flow to save.
-custom_components/termoweb/config_flow.py :: _analyse_inline
-    Analyse survey bursts on the calling loop (tests and fallbacks).
-custom_components/termoweb/config_flow.py :: survey_sighting
-    Raw-survey after silent discovery; raise UnknownDialectError for new dialects.
-custom_components/termoweb/config_flow.py :: discover_radio
-    Learn the network (unless given), then confirm heaters by address.
-custom_components/termoweb/config_flow.py :: pair_radio
-    Pair new heaters into ``network_id``; return them like discover_radio does.
-custom_components/termoweb/config_flow.py :: _radio_connection
-    Return the entry data that says how to reach the gateway or stick.
-custom_components/termoweb/config_flow.py :: radio_monitor_entry_data
-    Return entry data for a listen-only entry: no dialect, network or heaters.
-custom_components/termoweb/config_flow.py :: radio_entry_data
-    Return config entry data for a discovered radio installation.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.__init__
-    Initialise radio discovery state.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._handle_login_workflow
     Handle shared login form validation and error handling.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_get_options_flow
@@ -808,63 +754,119 @@ custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_user
     Offer the cloud account or the local radio gateway.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_cloud
     Collect credentials and create the config entry.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio
-    Collect the radio gateway address, then discover the heater network.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_discover
-    Listen for heater traffic and scan heaters while showing progress.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_method
-    Offer to find paired heaters, to pair new ones, or to only listen.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_monitor
-    Create a listen-only entry: it records traffic and never transmits.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_pair
-    Explain pairing mode; start pairing when the user submits.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_pair_run
-    Pair heaters into the site network while showing progress.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._radio_task_done
-    Collect the finished discovery or pairing task and move to radio_finish.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_finish
-    Create (or update) the radio entry, or return to the form with the error.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._nanocul_flow
-    Return True while the flow sets up (or reconfigures) a nanoCUL.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._connect_error
-    Return the flow error key for a radio that cannot be reached.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._radio_form
-    Return the step id and schema to show again after a failed discovery.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_nanocul
-    Choose the nanoCUL's serial port (or a manual path), then discover.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_nanocul_manual
-    Type the nanoCUL's port path or pyserial URL, then discover.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._start_nanocul
-    Probe the stick, check its firmware can speak the dialect, discover.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reconfigure_nanocul
-    Change the nanoCUL's port; optionally scan for heaters again.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._reconfigure_entry
-    Return the entry being reconfigured, or None during initial setup.
-custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reconfigure_radio
-    Change the gateway address; optionally scan for heaters again.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reconfigure
     Change the password (or radio address) of the same account or device.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reauth
     Start reauthentication after the cloud rejected the stored password.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reauth_confirm
     Ask for the account's new password, then reload the entry with it.
-custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.__init__
+custom_components/termoweb/config_flow_radio.py :: entry_capabilities
+    Return the optional features of the backend serving ``entry``.
+custom_components/termoweb/config_flow_radio.py :: _radio_key
+    Return what identifies the radio connection: the serial port or host:port.
+custom_components/termoweb/config_flow_radio.py :: _radio_in_use
+    Return True when another enabled entry already talks to this gateway or stick.
+custom_components/termoweb/config_flow_radio.py :: _is_mac_id
+    Return True when ``dev_id`` came from a radio MAC (so it names the hardware).
+custom_components/termoweb/config_flow_radio.py :: RadioSetupError.__init__
+    Store the error key.
+custom_components/termoweb/config_flow_radio.py :: _by_id_path
+    Return the /dev/serial/by-id link for ``device``, else ``device`` itself.
+custom_components/termoweb/config_flow_radio.py :: list_serial_ports
+    Return the host's serial ports (blocking: run in the executor).
+custom_components/termoweb/config_flow_radio.py :: _radio_schema
+    Build the radio gateway form schema with provided defaults.
+custom_components/termoweb/config_flow_radio.py :: _reconfigure_radio_schema
+    Build the radio reconfigure schema: address plus an optional re-scan.
+custom_components/termoweb/config_flow_radio.py :: _dialect_fields
+    Return the optional dialect and network id fields shared by radio forms.
+custom_components/termoweb/config_flow_radio.py :: _nanocul_schema
+    Build the nanoCUL port choice: detected ports plus a manual entry.
+custom_components/termoweb/config_flow_radio.py :: _nanocul_manual_schema
+    Build the manual nanoCUL form: a device path or pyserial URL.
+custom_components/termoweb/config_flow_radio.py :: _reconfigure_nanocul_schema
+    Build the nanoCUL reconfigure schema: port plus an optional re-scan.
+custom_components/termoweb/config_flow_radio.py :: parse_network_id
+    Return 4 hex digits as two bytes, None when blank; raise ValueError otherwise.
+custom_components/termoweb/config_flow_radio.py :: probe_gateway
+    Connect to the radio gateway without transmitting; return its ``dev_id``.
+custom_components/termoweb/config_flow_radio.py :: probe_nanocul
+    Connect to a nanoCUL without transmitting; return ``(dev_id, dialect_capable)``.
+custom_components/termoweb/config_flow_radio.py :: radio_link_factory
+    Return the RadioLink factory for a flow's radio: TCP, or the nanoCUL's port.
+custom_components/termoweb/config_flow_radio.py :: radio_address
+    Return the (host, port) label RadioLink uses for a flow's radio.
+custom_components/termoweb/config_flow_radio.py :: UnknownDialectError.__init__
+    Store the report for the flow to save.
+custom_components/termoweb/config_flow_radio.py :: _analyse_inline
+    Analyse survey bursts on the calling loop (tests and fallbacks).
+custom_components/termoweb/config_flow_radio.py :: survey_sighting
+    Raw-survey after silent discovery; raise UnknownDialectError for new dialects.
+custom_components/termoweb/config_flow_radio.py :: discover_radio
+    Learn the network (unless given), then confirm heaters by address.
+custom_components/termoweb/config_flow_radio.py :: pair_radio
+    Pair new heaters into ``network_id``; return them like discover_radio does.
+custom_components/termoweb/config_flow_radio.py :: _radio_connection
+    Return the entry data that says how to reach the gateway or stick.
+custom_components/termoweb/config_flow_radio.py :: radio_monitor_entry_data
+    Return entry data for a listen-only entry: no dialect, network or heaters.
+custom_components/termoweb/config_flow_radio.py :: radio_entry_data
+    Return config entry data for a discovered radio installation.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.__init__
+    Initialise radio discovery state.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio
+    Collect the radio gateway address, then discover the heater network.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_discover
+    Listen for heater traffic and scan heaters while showing progress.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_method
+    Offer to find paired heaters, to pair new ones, or to only listen.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_monitor
+    Create a listen-only entry: it records traffic and never transmits.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_pair
+    Explain pairing mode; start pairing when the user submits.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_pair_run
+    Pair heaters into the site network while showing progress.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._radio_task_done
+    Collect the finished discovery or pairing task and move to radio_finish.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._save_survey_report
+    Save an unknown-dialect survey report and point the error text at it.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_finish
+    Create (or update) the radio entry, or return to the form with the error.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._nanocul_flow
+    Return True while the flow sets up (or reconfigures) a nanoCUL.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._connect_error
+    Return the flow error key for a radio that cannot be reached.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._radio_form
+    Return the step id and schema to show again after a failed discovery.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_nanocul
+    Choose the nanoCUL's serial port (or a manual path), then discover.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_nanocul_manual
+    Type the nanoCUL's port path or pyserial URL, then discover.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._start_nanocul
+    Probe the stick, check its firmware can speak the dialect, discover.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_reconfigure_nanocul
+    Change the nanoCUL's port; optionally scan for heaters again.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._reconfigure_entry
+    Return the entry being reconfigured, or None during initial setup.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_reconfigure_radio
+    Change the gateway address; optionally scan for heaters again.
+custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.__init__
     Store the entry being configured.
-custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_init
+custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_init
     Let the user choose settings, pairing or rehoming.
-custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_settings
+custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_settings
     Show or save the heater power form of a radio entry.
-custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_pair_heaters
+custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_pair_heaters
     Explain pairing mode; start pairing into this entry's network on submit.
-custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_pair_run
+custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_pair_run
     Pair heaters with the running gateway connection while showing progress.
-custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_pair_done
+custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_pair_done
     Add the paired heaters and reload, or show the pairing form with the error.
-custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_rehome
+custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_rehome
     Explain the network move; start it when the user submits.
-custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_rehome_run
+custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_rehome_run
     Reset, re-pair and restore the heaters while showing progress.
-custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_rehome_done
+custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_rehome_done
     Show what the move did; close the options when the user confirms.
 custom_components/termoweb/const.py :: get_brand_api_base
     Return API base URL for the selected brand.
