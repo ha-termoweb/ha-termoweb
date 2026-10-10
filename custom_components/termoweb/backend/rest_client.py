@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 import logging
+import math
+import time
 from time import monotonic as time_mod
 from typing import Any
 
@@ -66,6 +70,84 @@ class BackendAuthError(Exception):
 class BackendRateLimitError(Exception):
     """Server rate-limited the client (HTTP 429)."""
 
+    def __init__(
+        self, message: str = "Rate limited", *, retry_after: float | None = None
+    ) -> None:
+        """Store the message and the server-requested pause in seconds."""
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+# Minimum spacing between REST request starts on one client (<= 2 requests/s).
+# Every REST call (polling, writes, RTC keepalive, token POSTs and the energy
+# history import) goes through ``RESTClient._request``/``_ensure_token``, so
+# this caps the combined traffic of a config entry.
+REST_MIN_INTERVAL_S = 0.5
+# Pause applied after a 429 that carries no usable ``Retry-After`` header.
+RATE_LIMIT_DEFAULT_PAUSE_S = 30.0
+# Upper bound on a server-requested pause, so a bogus header cannot stall us.
+RATE_LIMIT_MAX_PAUSE_S = 900.0
+
+
+def parse_retry_after(
+    value: str | None, *, now: datetime | None = None
+) -> float | None:
+    """Return the ``Retry-After`` delay in seconds (delta or HTTP date), or None."""
+    if not value or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        seconds = float(text)
+    except ValueError:
+        try:
+            when = parsedate_to_datetime(text)
+        except TypeError, ValueError, IndexError:
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        seconds = (when - (now or datetime.now(UTC))).total_seconds()
+    if math.isnan(seconds):
+        return None
+    return min(max(seconds, 0.0), RATE_LIMIT_MAX_PAUSE_S)
+
+
+class RequestLimiter:
+    """Space out REST requests and hold all of them during a 429 pause."""
+
+    def __init__(
+        self,
+        min_interval: float | None = None,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+    ) -> None:
+        """Initialise the limiter with a clock, sleeper and minimum spacing."""
+        self._min_interval = (
+            REST_MIN_INTERVAL_S if min_interval is None else min_interval
+        )
+        self._clock = clock
+        self._sleep = sleep
+        self._lock = asyncio.Lock()
+        self._next_allowed = float("-inf")
+        self._blocked_until = float("-inf")
+
+    async def acquire(self) -> None:
+        """Wait until the next request may start, then reserve its slot."""
+        async with self._lock:
+            while True:
+                now = self._clock()
+                ready = max(self._next_allowed, self._blocked_until)
+                if now >= ready:
+                    break
+                await self._sleep(ready - now)
+            self._next_allowed = now + self._min_interval
+
+    def pause(self, seconds: float) -> None:
+        """Hold every request on this client for ``seconds`` from now."""
+        self._blocked_until = max(
+            self._blocked_until, self._clock() + max(seconds, 0.0)
+        )
+
 
 class RESTClient:
     """Thin async client for the TermoWeb cloud (HA-safe)."""
@@ -88,6 +170,7 @@ class RESTClient:
         self._access_token: str | None = None
         self._token_expiry_monotonic: float = 0.0
         self._lock = asyncio.Lock()
+        self._limiter = RequestLimiter()
         self._is_ducaheat = self._api_base == DUCAHEAT_API_BASE
         self._brand = BRAND_DUCAHEAT if self._is_ducaheat else BRAND_TERMOWEB
         self._user_agent = get_brand_user_agent(self._brand)
@@ -126,6 +209,7 @@ class RESTClient:
 
         retried_auth = False
         while True:
+            await self._limiter.acquire()
             try:
                 async with self._session.request(
                     method, url, headers=headers, timeout=timeout, **kwargs
@@ -137,37 +221,27 @@ class RESTClient:
                     except Exception:
                         body_text = "<no body>"
 
-                    if resp.status >= 400:
-                        # Log a compact, redacted error; do not log repr(RequestInfo) which includes headers.
-                        log_fn = (
-                            _LOGGER.debug
-                            if resp.status in ignore_statuses
-                            else _LOGGER.error
-                        )
-                        log_fn(
-                            "HTTP error %s %s -> %s; body=%s",
+                    _LOGGER.debug("HTTP %s -> %s, ctype=%s", url, resp.status, ctype)
+
+                    if resp.status == 401:
+                        if not retried_auth:
+                            retried_auth = True
+                            self._invalidate_token(headers.get("Authorization"))
+                            token = await self._ensure_token()
+                            headers["Authorization"] = f"Bearer {token}"
+                            continue
+                        _LOGGER.error("HTTP %s %s -> 401 after re-auth", method, url)
+                        raise BackendAuthError("Unauthorized")
+                    if resp.status == 429:
+                        raise self._rate_limited(resp, f"{method} {url}")
+                    if resp.status in ignore_statuses:
+                        _LOGGER.debug(
+                            "HTTP %s %s -> %s ignored; body=%s",
                             method,
                             url,
                             resp.status,
                             redact_text(body_text),
                         )
-                    else:
-                        _LOGGER.debug(
-                            "HTTP %s -> %s, ctype=%s", url, resp.status, ctype
-                        )
-
-                    if resp.status == 401:
-                        if not retried_auth:
-                            retried_auth = True
-                            self._access_token = None
-                            self._token_expiry_monotonic = 0.0
-                            token = await self._ensure_token()
-                            headers["Authorization"] = f"Bearer {token}"
-                            continue
-                        raise BackendAuthError("Unauthorized")
-                    if resp.status == 429:
-                        raise BackendRateLimitError("Rate limited")
-                    if resp.status in ignore_statuses:
                         return None
                     if resp.status >= 400:
                         raise aiohttp.ClientResponseError(
@@ -191,24 +265,54 @@ class RESTClient:
             except (BackendAuthError, BackendRateLimitError):
                 raise
             except aiohttp.ClientResponseError as e:
-                if e.status not in ignore_statuses:
-                    _LOGGER.error(
-                        "Request %s %s failed (sanitized): %s",
-                        method,
-                        url,
-                        redact_text(str(e)),
-                    )
+                # Single log line per failure. 5xx is transient (the caller
+                # retries on its next cycle); other statuses are real errors.
+                log_fn = _LOGGER.warning if e.status >= 500 else _LOGGER.error
+                log_fn(
+                    "HTTP error %s %s -> %s; body=%s",
+                    method,
+                    url,
+                    e.status,
+                    redact_text(str(getattr(e, "message", e))),
+                )
                 raise
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                _LOGGER.error(
+                # Timeouts and connection errors are transient.
+                _LOGGER.warning(
                     "Request %s %s failed (sanitized): %s",
                     method,
                     url,
                     redact_text(str(e)),
                 )
                 raise
+
+    def _invalidate_token(self, sent_authorization: str | None) -> None:
+        """Drop the cached token only if the rejected request used it."""
+        if (
+            self._access_token is not None
+            and sent_authorization is not None
+            and sent_authorization != f"Bearer {self._access_token}"
+        ):
+            # Another request already refreshed the token; reuse it.
+            return
+        self._access_token = None
+        self._token_expiry_monotonic = 0.0
+
+    def _rate_limited(
+        self, resp: aiohttp.ClientResponse, what: str
+    ) -> BackendRateLimitError:
+        """Pause this client per ``Retry-After`` and build the 429 error."""
+        retry_after = parse_retry_after(resp.headers.get("Retry-After"))
+        pause = RATE_LIMIT_DEFAULT_PAUSE_S if retry_after is None else retry_after
+        self._limiter.pause(pause)
+        _LOGGER.warning(
+            "Rate limited by server on %s; pausing REST requests for %.0f s",
+            what,
+            pause,
+        )
+        return BackendRateLimitError("Rate limited", retry_after=pause)
 
     async def _ensure_token(self) -> str:
         """Ensure a bearer token is present; fetch if missing."""
@@ -245,6 +349,7 @@ class RESTClient:
                     else "<no-domain>"
                 ),
             )
+            await self._limiter.acquire()
             async with self._session.post(
                 url, data=data, headers=headers, timeout=aiohttp.ClientTimeout(total=25)
             ) as resp:
@@ -255,7 +360,7 @@ class RESTClient:
                         f"Invalid credentials or client auth failed (status {resp.status})"
                     )
                 if resp.status == 429:
-                    raise BackendRateLimitError("Rate limited on token endpoint")
+                    raise self._rate_limited(resp, "token POST")
                 if resp.status >= 400:
                     text = await resp.text()
                     raise aiohttp.ClientResponseError(

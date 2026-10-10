@@ -290,12 +290,26 @@ custom_components/termoweb/backend/radio/capture.py :: redact
     Return frames and raw lines safe to share: network ids become NET1, NET2...
 custom_components/termoweb/backend/radio/capture.py :: summarise
     Return frame and ack counts, networks, node ids and a named opcode histogram.
+custom_components/termoweb/backend/rest_client.py :: BackendRateLimitError.__init__
+    Store the message and the server-requested pause in seconds.
+custom_components/termoweb/backend/rest_client.py :: parse_retry_after
+    Return the ``Retry-After`` delay in seconds (delta or HTTP date), or None.
+custom_components/termoweb/backend/rest_client.py :: RequestLimiter.__init__
+    Initialise the limiter with a clock, sleeper and minimum spacing.
+custom_components/termoweb/backend/rest_client.py :: RequestLimiter.acquire
+    Wait until the next request may start, then reserve its slot.
+custom_components/termoweb/backend/rest_client.py :: RequestLimiter.pause
+    Hold every request on this client for ``seconds`` from now.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.__init__
     Initialise the REST client with authentication context.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.api_base
     Expose API base for auxiliary clients (e.g. WS).
 custom_components/termoweb/backend/rest_client.py :: RESTClient._request
     Perform an HTTP request.
+custom_components/termoweb/backend/rest_client.py :: RESTClient._invalidate_token
+    Drop the cached token only if the rejected request used it.
+custom_components/termoweb/backend/rest_client.py :: RESTClient._rate_limited
+    Pause this client per ``Retry-After`` and build the 429 error.
 custom_components/termoweb/backend/rest_client.py :: RESTClient._ensure_token
     Ensure a bearer token is present; fetch if missing.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.authed_headers
