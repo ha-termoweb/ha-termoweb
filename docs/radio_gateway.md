@@ -189,8 +189,8 @@ ending with `\n`.
 
 | Command | Reply | Meaning |
 |---|---|---|
-| (connect) or `V` | `# termoweb_rx 3.6-esp32 freq=869.525 rate=9.6k sync=2DE5 mode=dynamic tx=paC0 mac=AA:BB:CC:DD:EE:FF` | Banner. Sent first on every new connection. |
-| `Q` | `# Q termoweb_rx 3.6-esp32 freq=869.525 pa=C0 sync=2DE5 mode=dynamic autoack=off id=01 dialect=A net=1B30 mac=AA:BB:CC:DD:EE:FF` | Status. `mac` is the WiFi MAC: a stable device id. |
+| (connect) or `V` | `# termoweb_rx 3.7-esp32 freq=869.525 rate=9.6k sync=2DE5 mode=dynamic tx=paC0 mac=AA:BB:CC:DD:EE:FF` | Banner. Sent first on every new connection. |
+| `Q` | `# Q termoweb_rx 3.7-esp32 freq=869.525 pa=C0 sync=2DE5 mode=dynamic autoack=off id=01 dialect=A net=1B30 mac=AA:BB:CC:DD:EE:FF` | Status. `mac` is the WiFi MAC: a stable device id. |
 | `Y0` / `Y1` | `# dialect=A sync=2DE5` / `# dialect=B sync=2DD4` | Select the on-air dialect (below). Error: `# Y? expected 0 or 1`. |
 | `N<hex4>`, e.g. `N1234` | `# net=1234` | Network id used in auto-acks. Error: `# N? expected 4 hex digits`. |
 | `I<hex2>`, e.g. `I01` | `# id=01` | Our station id, used by auto-ack. |
@@ -199,6 +199,7 @@ ending with `\n`.
 | `F<kHz>`, e.g. `F869525` | `# freq=869.525 word=21717A` | Retune (779000 to 928000). Error: `# F? expected kHz`. |
 | `X` | `# raw=on` / `# raw=off` | Append the 2 raw radio status bytes to RX lines. |
 | `D` | `# marcstate=.. pktstatus=.. rxbytes=.. syncs=<n> rxreset=<n>` | Radio chip state dump. |
+| `R<secs>`, e.g. `R120` | `# survey on secs=120 floor=-104.0 thr=-96.0`, then per burst `RAWB <n> <rssi>`, `RAW <n> +<us> -<us> ...`, `RAWE <n> <runs>`; finally `# survey off bursts=<n>` | Raw survey for unknown dialects (1–600 s, `R0` ends it early). The radio switches to raw bit mode, so it hears any 2-FSK signal at this frequency and bit rate range, whatever its sync word and framing. Each burst louder than the noise floor + 8 dB is sent as run lengths of the demodulated bits (sign = level, value = µs). Packet reception, auto-ack and transmit (`TXERR survey active`) are off until the survey ends. |
 
 Unprompted lines:
 
