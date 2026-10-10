@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime
 import logging
-import math
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -21,7 +20,6 @@ from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.backend.factory import backend_capabilities
-from custom_components.termoweb.backend.sanitize import mask_identifier
 from custom_components.termoweb.coerce import as_float, as_int, as_percentage
 from custom_components.termoweb.const import signal_radio_frames
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
@@ -56,80 +54,13 @@ from custom_components.termoweb.utils import (
     build_power_monitor_device_info,
 )
 
-_WH_TO_KWH = 1 / 1000.0
 _LOGGER = logging.getLogger(__name__)
-
-
-def _looks_like_integer_string(value: str) -> bool:
-    """Return True if the string looks like an integer number."""
-
-    stripped = value.strip()
-    if not stripped:
-        return False
-    if stripped[0] in "+-":
-        stripped = stripped[1:]
-    return stripped.isdigit()
-
-
-def _normalise_energy_value(coordinator: Any, raw: Any) -> float | None:
-    """Try to coerce a raw energy reading into kWh."""
-
-    numeric = as_float(raw)
-    if numeric is None:
-        return None
-
-    scale_attr = getattr(coordinator, "_termoweb_energy_scale", None)
-    scale: float | None = None
-    if isinstance(scale_attr, (int, float)):
-        if math.isfinite(scale_attr) and scale_attr > 0:
-            scale = float(scale_attr)
-    elif isinstance(scale_attr, str):
-        lowered = scale_attr.strip().lower()
-        if lowered in {"kwh", "kilowatthour", "kilowatt-hour"}:
-            scale = 1.0
-        elif lowered in {"wh", "watt-hour", "watthour"}:
-            scale = _WH_TO_KWH
-        else:
-            try:
-                parsed = float(lowered)
-            except ValueError:
-                parsed = None
-            if parsed and math.isfinite(parsed) and parsed > 0:
-                scale = parsed
-
-    if scale is None:
-        if isinstance(coordinator, EnergyStateCoordinator):
-            scale = 1.0
-        elif isinstance(raw, int) or (
-            isinstance(raw, str) and _looks_like_integer_string(raw)
-        ):
-            scale = _WH_TO_KWH
-        else:
-            scale = 1.0
-
-    return numeric * scale
 
 
 def _power_monitor_display_name(node: PowerMonitorNode, addr: str) -> str:
     """Return the display name for a power monitor address."""
 
-    raw_name = getattr(node, "name", None)
-    trimmed = raw_name.strip() if isinstance(raw_name, str) else None
-    if trimmed:
-        return trimmed
-
-    default_factory = getattr(node, "default_name", None)
-    if callable(default_factory):
-        try:
-            fallback = default_factory()
-        except Exception:  # pragma: no cover - defensive fallback  # noqa: BLE001
-            fallback = None
-        if isinstance(fallback, str):
-            fallback_trimmed = fallback.strip()
-            if fallback_trimmed:
-                return fallback_trimmed
-
-    return f"Power Monitor {addr}"
+    return node.name.strip() or f"Power Monitor {addr}"
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -138,9 +69,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = runtime.coordinator
     dev_id = runtime.dev_id
     capabilities = backend_capabilities(runtime.brand)
-    domain_view = getattr(coordinator, "domain_view", None)
-    if not isinstance(domain_view, DomainStateView):
-        domain_view = None
+    domain_view = coordinator.domain_view
 
     def default_name(addr: str) -> str:
         """Return the fallback name for heater nodes, as every platform does."""
@@ -154,22 +83,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     inventory = heater_details.inventory
 
     energy_coordinator = runtime.energy_coordinator
-    if not isinstance(energy_coordinator, EnergyStateCoordinator):
-        listener = getattr(energy_coordinator, "async_add_listener", None)
-        if not callable(listener):
-            _LOGGER.error(
-                "Energy coordinator unavailable for %s", mask_identifier(dev_id)
-            )
-            return
 
     power_monitor_entities: list[SensorEntity] = []
     discovered_power_monitors = False
     for metadata in inventory.iter_nodes_metadata(node_types=("pmo",)):
-        node = metadata.node
-        if not isinstance(node, PowerMonitorNode):
-            continue
         discovered_power_monitors = True
-        display_name = _power_monitor_display_name(node, metadata.addr)
+        display_name = _power_monitor_display_name(metadata.node, metadata.addr)
         energy_unique_id = build_power_monitor_energy_unique_id(dev_id, metadata.addr)
         power_unique_id = build_power_monitor_power_unique_id(dev_id, metadata.addr)
         power_monitor_entities.append(
@@ -213,8 +132,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
             addr_str,
             use_default_when_falsey=True,
         )
-        if not canonical_type or not addr:
-            continue
         if canonical_type == "thm":
             heater_fallback = default_name(addr)
             if base_name == heater_fallback:
@@ -304,9 +221,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if capabilities.frame_monitor:
         new_entities.append(RadioFramesSensor(entry.entry_id, dev_id))
 
-    if new_entities:
-        _LOGGER.debug("Adding %d TermoWeb sensors", len(new_entities))
-        async_add_entities(new_entities)
+    _LOGGER.debug("Adding %d TermoWeb sensors", len(new_entities))
+    async_add_entities(new_entities)
 
 
 class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
@@ -396,10 +312,7 @@ class ThermostatBatterySensor(HeaterNodeBase, SensorEntity):
             node_type=node_type,
             inventory=inventory,
         )
-        if device_name:
-            self._attr_name = f"{device_name} Battery"
-        else:
-            self._attr_name = "Thermostat Battery"
+        self._attr_name = f"{device_name} Battery"
 
     @staticmethod
     def _coerce_level(value: Any) -> int | None:
@@ -443,11 +356,6 @@ class AccumulatorChargeSensorBase(HeaterNodeBase, SensorEntity):
         state = self.accumulator_state()
         return getattr(state, self._metric_key, None) if state is not None else None
 
-    def _coerce_value(self, raw: Any) -> StateType:
-        """Convert a raw accumulator charge setting into a Home Assistant state."""
-
-        return raw
-
     @property
     def native_value(self) -> StateType:
         """Return the processed accumulator charge metric."""
@@ -471,13 +379,7 @@ class AccumulatorChargingSensor(AccumulatorChargeSensorBase):
     def _coerce_value(self, raw: Any) -> StateType:  # type: ignore[override]
         """Return a canonical boolean charging state when available."""
 
-        if isinstance(raw, bool):
-            return raw
-        if raw is None:
-            return None
-        if isinstance(raw, (int, float)):
-            return bool(raw)
-        return None
+        return raw
 
 
 class AccumulatorChargePercentageSensor(AccumulatorChargeSensorBase):
@@ -537,17 +439,12 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
             node_type=node_type,
             inventory=inventory,
         )
-        self._domain_view = (
-            domain_view if isinstance(domain_view, DomainStateView) else None
-        )
+        self._domain_view = domain_view
 
     def _metric_entry(self) -> Any:
         """Return the energy metrics for this heater from the domain view."""
 
-        view = self._domain_view
-        if view is None:
-            return None
-        return view.get_energy_metric(self._node_type, self._addr)
+        return self._domain_view.get_energy_metric(self._node_type, self._addr)
 
     def _raw_native_value(self) -> Any:
         """Return the raw metric value for this heater address."""
@@ -555,17 +452,12 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
         if metrics is None:
             return None
         if self._metric_key == "energy":
-            return getattr(metrics, "energy_kwh", None)
-        if self._metric_key == "power":
-            return getattr(metrics, "power_w", None)
-        return None
+            return metrics.energy_kwh
+        return metrics.power_w
 
     def _coerce_native_value(self, raw: Any) -> float | None:
         """Convert the raw metric value into a float."""
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            return None
+        return as_float(raw)
 
     @property
     def native_value(self) -> float | None:
@@ -590,10 +482,6 @@ class HeaterEnergyTotalSensor(HeaterEnergyBase):
     _attr_native_unit_of_measurement = "kWh"
     _attr_translation_key = "heater_energy_total"
     _metric_key = "energy"
-
-    def _coerce_native_value(self, raw: Any) -> float | None:  # type: ignore[override]
-        """Normalise the raw energy metric into kWh."""
-        return _normalise_energy_value(self.coordinator, raw)
 
 
 class HeaterPowerSensor(HeaterEnergyBase):
@@ -716,10 +604,7 @@ class HeaterBoostEndSensor(HeaterNodeBase, SensorEntity):
         if ha_state in (STATE_UNKNOWN, None):
             end_dt = state.end_datetime
             if end_dt is not None:
-                try:
-                    return end_dt.isoformat()
-                except (AttributeError, TypeError, ValueError):
-                    return ha_state
+                return end_dt.isoformat()
             if state.end_label:
                 return state.end_label
         return ha_state
@@ -760,12 +645,7 @@ def _create_heater_sensors(
         node_type,
         use_default_when_falsey=True,
     )
-    canonical_addr = normalize_node_addr(
-        addr,
-        use_default_when_falsey=True,
-    ) or normalize_node_addr(addr)
-    if not canonical_addr:
-        canonical_addr = str(addr)
+    canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
 
     target_type = canonical_type or "htr"
     temperature_unique_id = build_heater_unique_id(
@@ -958,37 +838,20 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         self._addr = normalized_addr or str(addr)
         self._attr_unique_id = unique_id
         self._device_name = device_name
-        self._inventory: Inventory | None = inventory
-        self._domain_view = (
-            domain_view if isinstance(domain_view, DomainStateView) else None
-        )
-
-    def _resolve_inventory(self) -> Inventory | None:
-        """Return the immutable inventory backing this sensor."""
-
-        inventory = getattr(self, "_inventory", None)
-        if isinstance(inventory, Inventory):
-            return inventory
-        coordinator_inventory = getattr(self.coordinator, "inventory", None)
-        if isinstance(coordinator_inventory, Inventory):
-            self._inventory = coordinator_inventory
-            return coordinator_inventory
-        return None
+        self._inventory = inventory
+        self._domain_view = domain_view
 
     def _metric_entry(self) -> Any:
         """Return the energy metrics for this power monitor from the domain view."""
 
-        view = self._domain_view
-        if view is None:
-            return None
-        return view.get_energy_metric("pmo", self._addr)
+        return self._domain_view.get_energy_metric("pmo", self._addr)
 
     def _coerce_native_value(self, raw: Any) -> float | None:
         """Convert a metric payload value to ``float`` if possible."""
 
         try:
             return float(raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     @property
@@ -1006,10 +869,7 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         metrics = self._metric_entry()
         if metrics is not None:
             return True
-        inventory = self._resolve_inventory()
-        if not isinstance(inventory, Inventory):
-            return False
-        return inventory.has_node("pmo", self._addr)
+        return self._inventory.has_node("pmo", self._addr)
 
     @property
     def native_value(self) -> float | None:
@@ -1051,11 +911,6 @@ class PowerMonitorEnergySensor(PowerMonitorSensorBase):
     _attr_translation_key = "power_monitor_energy"
     _metric_key = "energy"
 
-    def _coerce_native_value(self, raw: Any) -> float | None:  # type: ignore[override]
-        """Normalise the raw energy metric into kWh."""
-
-        return _normalise_energy_value(self.coordinator, raw)
-
 
 class PowerMonitorPowerSensor(PowerMonitorSensorBase):
     """Power sensor for a power monitor."""
@@ -1092,9 +947,7 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
         self._dev_id = dev_id
         self._attr_unique_id = unique_id
         self._details = details
-        self._domain_view = (
-            domain_view if isinstance(domain_view, DomainStateView) else None
-        )
+        self._domain_view = domain_view
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -1104,17 +957,14 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Return True if the last update succeeded and energy totals exist."""
-        view = self._domain_view
-        if view is None or not super().available:
+        if not super().available:
             return False
-        return view.get_energy_snapshot() is not None
+        return self._domain_view.get_energy_snapshot() is not None
 
     @property
     def native_value(self) -> float | None:
         """Return the summed heater energy, or None unless every heater reports."""
         view = self._domain_view
-        if view is None:
-            return None
         total = 0.0
         found = False
         for node_type, addrs in self._details.addrs_by_type.items():
@@ -1124,11 +974,7 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
             metrics_by_addr = view.get_energy_metrics_for_type(node_type)
             for addr in addrs:
                 metric = metrics_by_addr.get(addr)
-                normalised = (
-                    None
-                    if metric is None
-                    else _normalise_energy_value(self.coordinator, metric.energy_kwh)
-                )
+                normalised = None if metric is None else as_float(metric.energy_kwh)
                 if normalised is None:
                     return None
                 total += normalised
@@ -1165,46 +1011,30 @@ class InstallationInfoSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> str | None:
         """Return a summary location string as the sensor state."""
-        try:
-            runtime = require_runtime(self.hass, self._entry_id)
-            coordinator = runtime.coordinator
-            device_metadata = getattr(coordinator, "device_metadata", None)
-            geo_data = getattr(device_metadata, "geo_data", None)
-            if geo_data is not None:
-                parts = [
-                    p
-                    for p in (geo_data.city, geo_data.state, geo_data.country)
-                    if p is not None
-                ]
-                if parts:
-                    return ", ".join(parts)
-        except LookupError:
-            pass
-        return None
+        geo_data = self.coordinator.device_metadata.geo_data
+        if geo_data is None:
+            return None
+        parts = [
+            part
+            for part in (geo_data.city, geo_data.state, geo_data.country)
+            if part is not None
+        ]
+        return ", ".join(parts) if parts else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return geo location and timezone details for the installation."""
-        attrs: dict[str, Any] = {}
-        try:
-            runtime = require_runtime(self.hass, self._entry_id)
-            coordinator = runtime.coordinator
-            device_metadata = getattr(coordinator, "device_metadata", None)
-            geo_data = getattr(device_metadata, "geo_data", None)
-            if geo_data is not None:
-                if geo_data.country is not None:
-                    attrs["country"] = geo_data.country
-                if geo_data.state is not None:
-                    attrs["state"] = geo_data.state
-                if geo_data.city is not None:
-                    attrs["city"] = geo_data.city
-                if geo_data.tz_code is not None:
-                    attrs["timezone"] = geo_data.tz_code
-                if geo_data.zip is not None:
-                    attrs["zip"] = geo_data.zip
-        except LookupError:
-            pass
-        return attrs
+        geo_data = self.coordinator.device_metadata.geo_data
+        if geo_data is None:
+            return {}
+        fields = (
+            ("country", geo_data.country),
+            ("state", geo_data.state),
+            ("city", geo_data.city),
+            ("timezone", geo_data.tz_code),
+            ("zip", geo_data.zip),
+        )
+        return {key: value for key, value in fields if value is not None}
 
 
 class RadioFramesSensor(SensorEntity):
