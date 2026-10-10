@@ -8,6 +8,8 @@ custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
     Log discovery probes for node types not yet supported.
 custom_components/termoweb/__init__.py :: async_list_devices
     Call ``list_devices`` logging auth/connection issues consistently.
+custom_components/termoweb/__init__.py :: _create_monitor_client
+    Return the listen-only radio client of a monitor entry (dialect A to start).
 custom_components/termoweb/__init__.py :: _create_client
     Return the cloud REST client, or the radio gateway client for radio entries.
 custom_components/termoweb/__init__.py :: _create_client._save_power
@@ -272,6 +274,32 @@ custom_components/termoweb/backend/factory.py :: create_radio_client
     Return a radio client for the gateway at ``host:port`` (or a USB stick).
 custom_components/termoweb/backend/factory.py :: create_rest_client
     Return a REST client configured for the selected brand.
+custom_components/termoweb/backend/radio/capture.py :: _utcnow
+    Return the current UTC time.
+custom_components/termoweb/backend/radio/capture.py :: timestamp
+    Return ``at`` as an ISO 8601 UTC string with milliseconds.
+custom_components/termoweb/backend/radio/capture.py :: _hex
+    Return upper-case hex, or None.
+custom_components/termoweb/backend/radio/capture.py :: opcode_key
+    Return a data frame's histogram key and its known meaning (None: unknown).
+custom_components/termoweb/backend/radio/capture.py :: frame_record
+    Return one received frame as a capture record.
+custom_components/termoweb/backend/radio/capture.py :: line_record
+    Return one gateway line as a capture record; a gateway MAC is always masked.
+custom_components/termoweb/backend/radio/capture.py :: FrameCapture.__init__
+    Store how to read the link's current dialect and the clock.
+custom_components/termoweb/backend/radio/capture.py :: FrameCapture.on_frame
+    Record a frame the link decoded.
+custom_components/termoweb/backend/radio/capture.py :: FrameCapture.on_line
+    Record a gateway line that is not a decoded frame.
+custom_components/termoweb/backend/radio/capture.py :: _mask_identity
+    Mask the identity/serial bytes of a ``5B`` reply or dialect-A announcement.
+custom_components/termoweb/backend/radio/capture.py :: _redact_line
+    Mask network ids and on-air hex in a gateway line.
+custom_components/termoweb/backend/radio/capture.py :: redact
+    Return records safe to share: network ids become NET1, NET2...
+custom_components/termoweb/backend/radio/capture.py :: summarise
+    Return counts, networks, node ids and an opcode histogram with known names.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.__init__
     Initialise the REST client with authentication context.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.api_base
@@ -832,6 +860,10 @@ custom_components/termoweb/config_flow.py :: discover_radio
     Learn the network (unless given), then confirm heaters by address.
 custom_components/termoweb/config_flow.py :: pair_radio
     Pair new heaters into ``network_id``; return them like discover_radio does.
+custom_components/termoweb/config_flow.py :: _radio_connection
+    Return the entry data that says how to reach the gateway or stick.
+custom_components/termoweb/config_flow.py :: radio_monitor_entry_data
+    Return entry data for a listen-only entry: no dialect, network or heaters.
 custom_components/termoweb/config_flow.py :: radio_entry_data
     Return config entry data for a discovered radio installation.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.__init__
@@ -849,7 +881,9 @@ custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_discover
     Listen for heater traffic and scan heaters while showing progress.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_method
-    Offer to find heaters that are already paired, or to pair new ones.
+    Offer to find paired heaters, to pair new ones, or to only listen.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_monitor
+    Create a listen-only entry: it records traffic and never transmits.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_pair
     Explain pairing mode; start pairing when the user submits.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_pair_run
@@ -918,6 +952,8 @@ custom_components/termoweb/const.py :: uses_ducaheat_backend
     Return True when the brand maps to the Ducaheat backend.
 custom_components/termoweb/const.py :: signal_ws_status
     Signal name for WS status/health updates.
+custom_components/termoweb/const.py :: signal_radio_frames
+    Signal name for the frame count of a listen-only radio entry.
 custom_components/termoweb/coordinator.py :: RaiseUpdateFailedCoordinator.async_refresh
     Refresh data and raise ``UpdateFailed`` when polling fails.
 custom_components/termoweb/coordinator.py :: _normalise_device_name
@@ -1624,6 +1660,14 @@ custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.a
     Return True if the domain view contains energy totals.
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.native_value
     Return the summed energy usage across all heaters.
+custom_components/termoweb/entities/sensor.py :: RadioFramesSensor.__init__
+    Start at zero frames; the radio monitor pushes every new count.
+custom_components/termoweb/entities/sensor.py :: RadioFramesSensor.device_info
+    Return Home Assistant device metadata for the gateway.
+custom_components/termoweb/entities/sensor.py :: RadioFramesSensor.async_added_to_hass
+    Follow the radio monitor's frame count.
+custom_components/termoweb/entities/sensor.py :: RadioFramesSensor._handle_frames
+    Show the new frame count and the time of the last frame.
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.extra_state_attributes
     Return identifiers describing the aggregated energy value.
 custom_components/termoweb/entities/switch.py :: async_setup_entry
@@ -1876,6 +1920,12 @@ custom_components/termoweb/services/energy_history.py :: async_register_import_e
     Register the import_energy_history service if it is missing.
 custom_components/termoweb/services/energy_history.py :: async_register_import_energy_history_service._service_import_energy_history
     Handle the import_energy_history service call.
+custom_components/termoweb/services/radio_capture.py :: capture_payload
+    Return the capture file content; the gateway MAC is never included.
+custom_components/termoweb/services/radio_capture.py :: async_register_radio_capture_service
+    Register the radio_capture service once.
+custom_components/termoweb/services/radio_capture.py :: async_register_radio_capture_service._async_radio_capture
+    Record the air, save the frames as JSON and return a short summary.
 custom_components/termoweb/services/ws_debug_probe.py :: async_register_ws_debug_probe_service
     Register the ws_debug_probe debug helper service.
 custom_components/termoweb/services/ws_debug_probe.py :: async_register_ws_debug_probe_service._async_ws_debug_probe
@@ -2169,6 +2219,8 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink.station_id
     Return this station's own radio id.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.network_id
     Return the two-byte network id used for frames and firmware auto-acks.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.listen_only
+    Return True when this link refuses every transmit.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.connected
     Return True while the socket is open and the reader is running.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.connect
@@ -2181,9 +2233,15 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink._close_writer
     Close the stream writer, ignoring errors from an already dead socket.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.set_network_id
     Switch the network id for new frames and the firmware's auto-acks (``N``).
+custom_components/termoweb/backend/radio/link.py :: RadioLink.set_dialect
+    Switch the gateway's dialect at runtime (``Y``); ESP32 firmware only.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.add_listener
     Register ``callback`` for every decoded RX frame; return a remover.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.add_listener._remove
+    Unregister the callback; safe to call more than once.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.add_line_listener
+    Register ``callback`` for every gateway line that is not a decoded frame.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.add_line_listener._remove
     Unregister the callback; safe to call more than once.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.send_frame
     Transmit ``air`` and wait for ``dst``'s ack, retrying up to ``retries`` times.
@@ -2203,6 +2261,8 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink._collect_survey
     Add one ``RAWB``/``RAW``/``RAWE`` line to the running survey.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._dispatch
     Route one gateway line to waiters and listeners.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._notify_lines
+    Hand one non-frame gateway line to every line listener.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._resolve
     Complete every pending waiter whose predicate accepts ``item``.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._add_line_waiter
@@ -2273,6 +2333,10 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.link
     Return the shared link, or None before the first use.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.connected
     Return True while the gateway connection is open.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.listen_only
+    Return True when this client never transmits.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._require_transmit
+    Raise TransmitBlockedError when this client is listen-only.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.gateway_info
     Return the gateway's last ``Q`` status, if connected once.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_connect
@@ -2287,6 +2351,8 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient._handle_discon
     Fan a link disconnect out to every registered listener.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_survey
     Capture raw bursts of every dialect on air; heater commands wait meanwhile.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.async_capture
+    Record every frame and gateway line for ``seconds``; heater commands wait.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_pair
     Pair heaters into this network; heater commands wait meanwhile.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_set_network_id
@@ -2355,6 +2421,16 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.get_geo_data
     Return None: the radio gateway has no account location.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.get_rtc_time
     Return local time in the cloud RTC shape; the station is the clock master.
+custom_components/termoweb/backend/radio_monitor.py :: RadioMonitor.__init__
+    Store collaborators; the reconnect loop runs one dialect window per pass.
+custom_components/termoweb/backend/radio_monitor.py :: RadioMonitor._refresh_all
+    Switch to the next dialect each window; dialect-A-only firmware stays put.
+custom_components/termoweb/backend/radio_monitor.py :: RadioMonitor._on_frame
+    Count a heard frame and publish the count; nothing is answered.
+custom_components/termoweb/backend/radio_monitor.py :: RadioMonitorBackend.create_ws_client
+    Return the frame-counting monitor in the websocket client's role.
+custom_components/termoweb/backend/radio_monitor.py :: RadioMonitorBackend.fetch_hourly_samples
+    Return no samples: a listen-only entry has no heaters.
 custom_components/termoweb/backend/radio_power.py :: PowerManager.__init__
     Read settings through ``load`` on every use; ``save`` stores changes.
 custom_components/termoweb/backend/radio_power.py :: PowerManager._settings

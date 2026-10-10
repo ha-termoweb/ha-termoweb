@@ -171,6 +171,38 @@ radio_survey:
           max: 600
           unit_of_measurement: s
 
+radio_capture:
+  name: Radio capture
+  description: >-
+    Record every radio frame the gateway or nanoCUL hears and save it as a
+    JSON file in the configuration folder. It never transmits. On a normal
+    radio entry, heater commands wait until the capture ends.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: The radio gateway or nanoCUL config entry to use.
+      required: true
+      example: abcd1234deadbeef
+      selector:
+        config_entry:
+          integration: termoweb
+    seconds:
+      name: Duration
+      description: How long to record.
+      default: 120
+      selector:
+        number:
+          min: 10
+          max: 1800
+          unit_of_measurement: s
+    redact:
+      name: Hide private data
+      description: >-
+        Replace network ids and heater serial numbers in the file.
+      default: false
+      selector:
+        boolean:
+
 radio_factory_reset:
   name: Radio factory reset
   description: >-

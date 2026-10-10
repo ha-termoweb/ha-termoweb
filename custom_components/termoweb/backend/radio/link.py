@@ -4,6 +4,10 @@ The gateway prints one line per event (``RX``, ``TX``, ``TXERR``, ``ACK`` or a
 ``# ...`` status line) and accepts one-letter commands (``T<hex>``, ``I<id>``,
 ``A1``, ``Y<mode>``, ``N<net>``, ``Q``). RX lines carry raw on-air bytes, which
 this client decodes with its configured :class:`Dialect`.
+
+A listen-only link (``listen_only=True``) only ever writes the setup, query and
+survey commands; anything else, above all a ``T`` transmit, raises
+:class:`TransmitBlockedError` before it reaches the gateway.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from collections.abc import Awaitable, Callable
 import contextlib
 from dataclasses import dataclass
 import logging
+import re
 import time
 from typing import Any
 
@@ -41,6 +46,9 @@ SURVEY_GRACE_S = 10.0  # extra wait for the gateway's "survey off" line
 MAX_SURVEY_S = 3600
 SURVEY_MIN_VERSION = (3, 7)  # first ESP32 firmware with the R<seconds> survey
 SURVEY_FIRMWARE_SUFFIX = "-esp32"
+# Every command a listen-only link may write: station id, auto-ack OFF, dialect,
+# network id, status query, banner and raw survey. Nothing that transmits.
+LISTEN_ONLY_COMMAND = re.compile(r"I[0-9A-F]{2}|A0|Y[0-9]|N[0-9A-F]{4}|Q|V|R[0-9]+")
 
 OpenConnection = Callable[..., Awaitable[tuple[Any, Any]]]
 Sleep = Callable[[float], Awaitable[Any]]
@@ -52,6 +60,10 @@ class RadioLinkError(Exception):
 
 class UnsupportedDialectError(RadioLinkError):
     """Raised when the gateway firmware cannot speak the requested dialect."""
+
+
+class TransmitBlockedError(RadioLinkError):
+    """Raised when something tries to transmit through a listen-only link."""
 
 
 @dataclass(frozen=True)
@@ -168,6 +180,7 @@ class RadioLink:
         station_id: int = 1,
         network_id: bytes | None = None,
         auto_ack: bool = True,
+        listen_only: bool = False,
         clock: Callable[[], float] = time.monotonic,
         sleep: Sleep = asyncio.sleep,
         open_connection: OpenConnection = asyncio.open_connection,
@@ -186,7 +199,10 @@ class RadioLink:
         if net is None:
             raise ValueError(f"dialect {dialect.name} needs an explicit network_id")
         self._network_id = bytes(net)
+        if listen_only and auto_ack:
+            raise ValueError("a listen-only link cannot auto-ack")
         self._auto_ack = auto_ack
+        self._listen_only = listen_only
         if len(self._network_id) != 2:
             raise ValueError("network_id must be exactly two bytes")
         self._clock = clock
@@ -205,6 +221,7 @@ class RadioLink:
         self._send_lock = asyncio.Lock()
         self._last_command_at: float | None = None
         self._listeners: list[Callable[[ReceivedFrame], None]] = []
+        self._line_listeners: list[Callable[[str], None]] = []
         self._line_waiters: list[tuple[Callable[[str], bool], asyncio.Future[str]]] = []
         self._frame_waiters: list[
             tuple[Callable[[ReceivedFrame], bool], asyncio.Future[ReceivedFrame]]
@@ -225,6 +242,11 @@ class RadioLink:
     def network_id(self) -> bytes:
         """Return the two-byte network id used for frames and firmware auto-acks."""
         return self._network_id
+
+    @property
+    def listen_only(self) -> bool:
+        """Return True when this link refuses every transmit."""
+        return self._listen_only
 
     @property
     def connected(self) -> bool:
@@ -332,6 +354,18 @@ class RadioLink:
             self._network_id = net
         _LOGGER.info("Radio network id switched")
 
+    async def set_dialect(self, dialect: Dialect) -> None:
+        """Switch the gateway's dialect at runtime (``Y``); ESP32 firmware only."""
+        info = self.gateway_info
+        if dialect.firmware_mode != 0 and (info is None or info.dialect is None):
+            raise UnsupportedDialectError(
+                f"firmware does not support dialect {dialect.name}"
+            )
+        async with self._send_lock:
+            await self._send_command(f"Y{dialect.firmware_mode}")
+            self._dialect = dialect
+        _LOGGER.debug("Radio dialect switched to %s", dialect.name)
+
     # --- listeners -----------------------------------------------------------
 
     def add_listener(
@@ -344,6 +378,21 @@ class RadioLink:
             """Unregister the callback; safe to call more than once."""
             with contextlib.suppress(ValueError):
                 self._listeners.remove(callback)
+
+        return _remove
+
+    def add_line_listener(self, callback: Callable[[str], None]) -> Callable[[], None]:
+        """Register ``callback`` for every gateway line that is not a decoded frame.
+
+        That is status (``#``), ``TX``/``TXERR``/``ACK`` lines and RX lines that
+        cannot be parsed; raw survey lines are left out. Returns a remover.
+        """
+        self._line_listeners.append(callback)
+
+        def _remove() -> None:
+            """Unregister the callback; safe to call more than once."""
+            with contextlib.suppress(ValueError):
+                self._line_listeners.remove(callback)
 
         return _remove
 
@@ -455,6 +504,11 @@ class RadioLink:
 
     async def _send_command(self, command: str) -> None:
         """Write one command line, keeping at least MIN_COMMAND_GAP_S between commands."""
+        if self._listen_only and not LISTEN_ONLY_COMMAND.fullmatch(command):
+            _LOGGER.error("Listen-only radio link refused command %.1s", command)
+            raise TransmitBlockedError(
+                "this radio connection is listen-only and never transmits"
+            )
         writer = self._writer
         if writer is None:
             raise RadioLinkError("not connected")
@@ -545,6 +599,7 @@ class RadioLink:
         if line.startswith("RX "):
             parsed = parse_rx_line(line)
             if parsed is None:
+                self._notify_lines(line)
                 return
             air, rssi, lqi, micros = parsed
             received = ReceivedFrame(decode(self._dialect, air), rssi, lqi, micros)
@@ -555,7 +610,16 @@ class RadioLink:
                 except Exception:
                     _LOGGER.exception("Radio frame listener failed")
             return
+        self._notify_lines(line)
         self._resolve(self._line_waiters, line)
+
+    def _notify_lines(self, line: str) -> None:
+        """Hand one non-frame gateway line to every line listener."""
+        for listener in list(self._line_listeners):
+            try:
+                listener(line)
+            except Exception:
+                _LOGGER.exception("Radio line listener failed")
 
     @staticmethod
     def _resolve[T](

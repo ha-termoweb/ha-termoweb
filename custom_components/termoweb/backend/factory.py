@@ -11,6 +11,7 @@ from homeassistant.helpers import aiohttp_client
 
 from custom_components.termoweb.const import (
     BRAND_RADIO,
+    BRAND_RADIO_MONITOR,
     get_brand_api_base,
     get_brand_basic_auth,
     uses_ducaheat_backend,
@@ -31,6 +32,10 @@ def _backend_class(brand: str) -> type[Backend]:
         from .radio_backend import RadioBackend  # noqa: PLC0415
 
         return RadioBackend
+    if brand == BRAND_RADIO_MONITOR:
+        from .radio_monitor import RadioMonitorBackend  # noqa: PLC0415
+
+        return RadioMonitorBackend
     if uses_ducaheat_backend(brand):
         from . import DucaheatBackend  # noqa: PLC0415
 
@@ -63,14 +68,20 @@ def create_radio_client(
     power: PowerManager | None = None,
     serial_url: str | None = None,
     device_id: str | None = None,
+    listen_only: bool = False,
 ) -> RadioClient:
     """Return a radio client for the gateway at ``host:port`` (or a USB stick)."""
 
-    from .radio_client import NANOCUL_MODEL, RadioClient  # noqa: PLC0415
+    from .radio_client import LISTEN_ONLY_STATION_ID, NANOCUL_MODEL, RadioClient  # noqa: PLC0415
 
+    listen: dict[str, Any] = (
+        {"listen_only": True, "station_id": LISTEN_ONLY_STATION_ID}
+        if listen_only
+        else {}
+    )
     if serial_url is None:
         return RadioClient(
-            host, port, dialect, nodes, network_id=network_id, power=power
+            host, port, dialect, nodes, network_id=network_id, power=power, **listen
         )
     from .radio.link import RadioLink  # noqa: PLC0415
     from .radio.serial_link import serial_opener  # noqa: PLC0415
@@ -87,6 +98,7 @@ def create_radio_client(
         ),
         device_id=device_id,
         model=NANOCUL_MODEL,
+        **listen,
     )
 
 

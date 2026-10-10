@@ -26,6 +26,9 @@ BRAND_TERMOWEB: Final = "termoweb"
 BRAND_DUCAHEAT: Final = "ducaheat"
 BRAND_TEVOLVE: Final = "tevolve"
 BRAND_RADIO: Final = "radio"  # local ESP32 radio gateway, no cloud
+# Listen-only radio entry: records traffic next to a real gateway, never transmits
+BRAND_RADIO_MONITOR: Final = "radio_monitor"
+RADIO_BRANDS: Final = frozenset({BRAND_RADIO, BRAND_RADIO_MONITOR})
 DEFAULT_BRAND: Final = BRAND_TERMOWEB
 
 # Radio entries: the gateway address plus what discovery learned from the air
@@ -115,7 +118,7 @@ CLOUD_CONFIGURATION_URL: Final = "https://control.termoweb.net"
 def get_brand_label(brand: str) -> str:
     """Return human-readable brand label."""
 
-    if brand == BRAND_RADIO:
+    if brand in RADIO_BRANDS:
         return RADIO_BRAND_LABEL
     return BRAND_LABELS.get(brand, BRAND_LABELS[BRAND_TERMOWEB])
 
@@ -123,7 +126,7 @@ def get_brand_label(brand: str) -> str:
 def get_brand_configuration_url(brand: str | None) -> str | None:
     """Return the web portal URL for a cloud brand; None for the local radio."""
 
-    return None if brand == BRAND_RADIO else CLOUD_CONFIGURATION_URL
+    return None if brand in RADIO_BRANDS else CLOUD_CONFIGURATION_URL
 
 
 def get_brand_user_agent(brand: str) -> str:
@@ -161,6 +164,12 @@ def signal_ws_status(entry_id: str) -> str:
     """Signal name for WS status/health updates."""
 
     return f"{DOMAIN}_{entry_id}_ws_status"
+
+
+def signal_radio_frames(entry_id: str) -> str:
+    """Signal name for the frame count of a listen-only radio entry."""
+
+    return f"{DOMAIN}_{entry_id}_radio_frames"
 
 
 # Polling

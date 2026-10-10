@@ -140,6 +140,13 @@ coordinator polling. Cloud-only features are switched off with
 `geo_data` for the installation location sensor).
 See `radio_backend.md` for the capability matrix.
 
+The `radio_monitor` brand is a listen-only radio entry without heaters:
+`backend/radio_monitor.py` pairs a listen-only `RadioClient` (its link
+refuses every transmit) with `RadioMonitor`, which counts frames instead of
+performing station duties. Its only capability, `frame_monitor`, limits the
+platforms to the gateway-online binary sensor and the frames-heard sensor.
+See `radio_protocol.md` section 10.
+
 ## Operational constraints
 
 - REST requests must be rate-limited and treated as a fallback when WebSocket

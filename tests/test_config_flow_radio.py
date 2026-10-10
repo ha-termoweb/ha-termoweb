@@ -30,7 +30,7 @@ DEV_ID = "0a0b0c0d0e0f"
 METHOD_MENU = {
     "type": "menu",
     "step_id": "radio_method",
-    "menu_options": ["radio_discover", "radio_pair"],
+    "menu_options": ["radio_discover", "radio_pair", "radio_monitor"],
 }
 FORM = {
     "host": "10.0.0.5",

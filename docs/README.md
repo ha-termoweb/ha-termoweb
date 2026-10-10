@@ -8,6 +8,7 @@ stable, and **v2.0.2** is the clean release.
 - **Architecture (authoritative):** [`architecture.md`](./architecture.md)
 - **Contributor how-to:** [`developer-notes.md`](./developer-notes.md)
 - **ESP32 radio gateway (build guide):** [`radio_gateway.md`](./radio_gateway.md)
+- **Help find the identify command (radio testers):** [`radio_identify_capture.md`](./radio_identify_capture.md)
 - **API references:**
   - TermoWeb: [`termoweb_api.md`](./termoweb_api.md)
   - Ducaheat/Tevolve: [`ducaheat_api.md`](./ducaheat_api.md)

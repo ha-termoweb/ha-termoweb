@@ -80,6 +80,7 @@ def _radio_section(runtime: EntryRuntime, entry: ConfigEntry) -> dict[str, Any] 
         "radio_type": entry.data.get(CONF_RADIO_TYPE, RADIO_TYPE_ESP32),
         "dialect": client.dialect.name,
         "connected": client.connected,
+        "listen_only": client.listen_only,
         "gateway": None,
     }
     if info is not None:
@@ -94,6 +95,12 @@ def _radio_section(runtime: EntryRuntime, entry: ConfigEntry) -> dict[str, Any] 
         }
     if runtime.last_radio_survey is not None:
         section["last_survey"] = dict(runtime.last_radio_survey)
+    if runtime.last_radio_capture is not None:
+        section["last_capture"] = {
+            key: value
+            for key, value in runtime.last_radio_capture.items()
+            if key != "networks"  # network ids stay out of diagnostics
+        }
     return section
 
 

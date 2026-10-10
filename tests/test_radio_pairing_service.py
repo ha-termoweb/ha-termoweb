@@ -348,3 +348,18 @@ async def test_manual_target_is_saved_and_restored_outside_manual_mode() -> None
     rig.states["6"] = STATE  # manual mode: its own setpoint is the target
     await pair(ServiceCall({"entry_id": ENTRY_ID, "heater": 6}))
     assert rig.calls[-1] == ("restore", (6, SNAPSHOT))
+
+
+@pytest.mark.asyncio
+async def test_services_refuse_listen_only_entries() -> None:
+    rig = Rig()
+    pair = await rig.handler(service.SERVICE_RADIO_PAIR)
+    rehome = await rig.handler(service.SERVICE_RADIO_REHOME)
+    listen = RadioClient(
+        "10.0.0.5", 2323, "A", [], network_id=b"\x00\x00", listen_only=True
+    )
+    build_entry_runtime(hass=rig.hass, entry_id="listen", client=listen)
+    with pytest.raises(ServiceValidationError, match="listen-only"):
+        await pair(ServiceCall({"entry_id": "listen"}))
+    with pytest.raises(ServiceValidationError, match="listen-only"):
+        await rehome(ServiceCall({"entry_id": "listen"}))

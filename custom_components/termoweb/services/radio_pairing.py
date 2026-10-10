@@ -81,6 +81,10 @@ def _radio_runtime(
         raise ServiceValidationError(
             f"TermoWeb entry {entry_id} does not use a radio gateway"
         )
+    if client.listen_only:
+        raise ServiceValidationError(
+            f"TermoWeb entry {entry_id} is listen-only and never transmits"
+        )
     return runtime, client
 
 
