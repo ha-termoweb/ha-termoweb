@@ -17,7 +17,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.termoweb.backend.rest_client import RESTClient
-from custom_components.termoweb.entities import heater as heater_module
+from custom_components.termoweb import entity as entity_module
 
 from .conftest import FakeCloud
 
@@ -195,7 +195,7 @@ async def test_boost_write_refreshes_node_only_when_ws_down(
     refresh = AsyncMock(return_value=None)
 
     with (
-        patch.object(heater_module, "WS_ECHO_FALLBACK_REFRESH", 0.05),
+        patch.object(entity_module, "WS_ECHO_FALLBACK_REFRESH", 0.05),
         patch.object(coordinator, "async_refresh_heater", refresh),
     ):
         await _set(hass, entity_id, value)

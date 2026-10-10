@@ -25,8 +25,7 @@ from custom_components.termoweb.inventory import Inventory
 _install_stubs()
 
 from custom_components.termoweb import climate as climate_module
-from custom_components.termoweb.entities import climate as entities_climate_module
-from custom_components.termoweb.heater import DEFAULT_BOOST_DURATION
+from custom_components.termoweb.entity import DEFAULT_BOOST_DURATION
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
@@ -79,14 +78,12 @@ def _patch_climate_attr(
     *,
     raising: bool | None = None,
 ) -> None:
-    """Patch a climate module attribute across shim + entity modules."""
+    """Patch a climate module attribute."""
 
     if raising is None:
         monkeypatch.setattr(climate_module, name, value)
-        monkeypatch.setattr(entities_climate_module, name, value)
     else:
         monkeypatch.setattr(climate_module, name, value, raising=raising)
-        monkeypatch.setattr(entities_climate_module, name, value, raising=raising)
 
 
 def _make_coordinator(

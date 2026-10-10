@@ -14,28 +14,24 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from ..backend.factory import backend_capabilities
-from ..boost import ALLOWED_BOOST_MINUTES, coerce_boost_minutes
-from ..coerce import as_float
-from ..domain.state import DomainState
-from ..identifiers import build_heater_unique_id, build_installation_entity_unique_id
-from ..inventory import (
-    Inventory,
-    boostable_accumulator_details_for_entry,
-    normalize_node_addr,
-    normalize_node_type,
-)
-from ..runtime import require_runtime
-from ..utils import build_installation_device_info
-from .heater import (
+from .backend.factory import backend_capabilities
+from .boost import ALLOWED_BOOST_MINUTES, coerce_boost_minutes
+from .coerce import as_float
+from .domain.state import DomainState
+from .entity import (
     DEFAULT_BOOST_DURATION,
     DEFAULT_BOOST_TEMPERATURE,
     HeaterNodeBase,
     NodeRefreshFallback,
     async_backend_write,
+    boostable_accumulator_details_for_entry,
     heater_platform_details_for_entry,
     to_device_temperature,
 )
+from .identifiers import build_heater_unique_id, build_installation_entity_unique_id
+from .inventory import Inventory, normalize_node_addr, normalize_node_type
+from .runtime import require_runtime
+from .utils import build_installation_device_info
 
 _LOGGER = logging.getLogger(__name__)
 

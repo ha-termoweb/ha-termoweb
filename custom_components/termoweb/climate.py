@@ -1,4 +1,4 @@
-# ruff: noqa: D100,BLE001,TID252
+# ruff: noqa: D100,BLE001
 
 from __future__ import annotations
 
@@ -21,20 +21,17 @@ from homeassistant.helpers import entity_platform
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
-from ..backend.base import BoostContext
-from ..boost import (
+from .backend.base import BoostContext
+from .boost import (
     ALLOWED_BOOST_MINUTES,
     ALLOWED_BOOST_MINUTES_MESSAGE,
     coerce_boost_minutes,
     supports_boost,
     validate_boost_minutes,
 )
-from ..coerce import as_float
-from ..domain import DomainState, HeaterState
-from ..identifiers import build_heater_unique_id, thermostat_fallback_name
-from ..inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
-from ..runtime import require_runtime
-from .heater import (
+from .coerce import as_float
+from .domain import DomainState, HeaterState
+from .entity import (
     HeaterNodeBase,
     HeaterPlatformDetails,
     NodeRefreshFallback,
@@ -46,6 +43,9 @@ from .heater import (
     resolve_acm_boost_setpoint,
     resolve_boost_runtime_minutes,
 )
+from .identifiers import build_heater_unique_id, thermostat_fallback_name
+from .inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
+from .runtime import require_runtime
 
 _LOGGER = logging.getLogger(__name__)
 _CANCELLED_ERROR = asyncio.CancelledError

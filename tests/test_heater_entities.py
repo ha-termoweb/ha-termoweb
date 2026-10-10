@@ -12,8 +12,7 @@ from conftest import _install_stubs, build_entry_runtime
 
 _install_stubs()
 
-from custom_components.termoweb import boost as boost_module, heater as heater_module
-from custom_components.termoweb.entities import heater as entities_heater_module
+from custom_components.termoweb import boost as boost_module, entity as entity_module
 from custom_components.termoweb.domain import (
     DomainStateStore,
     NodeId as DomainNodeId,
@@ -35,7 +34,7 @@ from homeassistant.const import STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-HeaterNodeBase = heater_module.HeaterNodeBase
+HeaterNodeBase = entity_module.HeaterNodeBase
 
 
 def _patch_heater_attr(
@@ -45,20 +44,18 @@ def _patch_heater_attr(
     *,
     raising: bool | None = None,
 ) -> None:
-    """Patch a heater module attribute across shim + entity modules."""
+    """Patch a heater module attribute."""
 
     if raising is None:
-        monkeypatch.setattr(heater_module, name, value)
-        monkeypatch.setattr(entities_heater_module, name, value)
+        monkeypatch.setattr(entity_module, name, value)
     else:
-        monkeypatch.setattr(heater_module, name, value, raising=raising)
-        monkeypatch.setattr(entities_heater_module, name, value, raising=raising)
+        monkeypatch.setattr(entity_module, name, value, raising=raising)
 
 
 def test_heater_node_base_normalizes_address(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[object, dict]] = []
 
-    original = heater_module.normalize_node_addr
+    original = entity_module.normalize_node_addr
 
     def _record_normalize(value, **kwargs):
         calls.append((value, kwargs))
@@ -94,7 +91,7 @@ def test_heater_section_requires_inventory_for_name() -> None:
     )
     store = DomainStateStore([DomainNodeId(DomainNodeType.HEATER, "1")])
     store.apply_full_snapshot("htr", "1", {"mode": "auto"})
-    coordinator.domain_view = heater_module.DomainStateView("dev", store)
+    coordinator.domain_view = entity_module.DomainStateView("dev", store)
     heater = HeaterNodeBase(coordinator, "entry", "dev", "1", "Heater 1")
 
     section = heater._heater_section()
@@ -117,7 +114,7 @@ def test_heater_section_includes_inventory_details() -> None:
     )
     store = DomainStateStore([DomainNodeId(DomainNodeType.HEATER, "1")])
     store.apply_full_snapshot("htr", "1", {"mode": "auto"})
-    coordinator.domain_view = heater_module.DomainStateView("dev", store)
+    coordinator.domain_view = entity_module.DomainStateView("dev", store)
     heater = HeaterNodeBase(coordinator, "entry", "dev", "1", None)
 
     section = heater._heater_section()
@@ -160,7 +157,7 @@ def test_heater_platform_details_missing_inventory(
     )
     runtime.inventory = None  # type: ignore[assignment]
     with pytest.raises(ValueError):
-        heater_module.heater_platform_details_for_entry(
+        entity_module.heater_platform_details_for_entry(
             runtime,
             default_name_simple=lambda addr: addr,
         )
@@ -196,7 +193,7 @@ def test_derive_boost_state_uses_resolver(monkeypatch: pytest.MonkeyPatch) -> No
             return expected_end, 60
 
     settings = {"mode": "boost", "boost_end_day": 1, "boost_end_min": 60}
-    state = heater_module.derive_boost_state(settings, _Coordinator())
+    state = entity_module.derive_boost_state(settings, _Coordinator())
 
     assert state.active is True
     assert state.minutes_remaining == 60
@@ -212,7 +209,7 @@ def test_derive_boost_state_from_remaining(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(dt_util, "now", lambda: base_now)
 
     settings = {"boost_remaining": "15"}
-    state = heater_module.derive_boost_state(settings, SimpleNamespace())
+    state = entity_module.derive_boost_state(settings, SimpleNamespace())
 
     assert state.active is False
     assert state.minutes_remaining == 15
@@ -232,7 +229,7 @@ def test_derive_boost_state_ignores_placeholder_iso(
         "boost_end_datetime": "1970-01-02T00:00:00UTC",
     }
 
-    state = heater_module.derive_boost_state(settings, SimpleNamespace())
+    state = entity_module.derive_boost_state(settings, SimpleNamespace())
 
     assert state.end_datetime is None
     assert state.end_iso is None
@@ -247,7 +244,7 @@ def test_derive_boost_state_parses_string_end(monkeypatch: pytest.MonkeyPatch) -
 
     iso = "2024-01-01T00:30:00+00:00"
     settings = {"boost_active": True, "boost_end_datetime": iso}
-    state = heater_module.derive_boost_state(settings, SimpleNamespace())
+    state = entity_module.derive_boost_state(settings, SimpleNamespace())
 
     assert state.active is True
     assert state.minutes_remaining == 30
@@ -267,7 +264,7 @@ def test_derive_boost_state_handles_now_failure(
     monkeypatch.setattr(dt_util, "now", _raise_now)
 
     coordinator = SimpleNamespace(resolve_boost_end=None)
-    state = heater_module.derive_boost_state({"boost_remaining": "30"}, coordinator)
+    state = entity_module.derive_boost_state({"boost_remaining": "30"}, coordinator)
 
     assert state.minutes_remaining == 30
     assert state.end_datetime is None
@@ -289,7 +286,7 @@ def test_derive_boost_state_normalises_epoch_placeholder(
     coordinator = SimpleNamespace(resolve_boost_end=_resolver)
     settings = {"boost_end_day": 0, "boost_end_min": 0}
 
-    state = heater_module.derive_boost_state(settings, coordinator)
+    state = entity_module.derive_boost_state(settings, coordinator)
 
     assert state.active is False
     assert state.minutes_remaining is None
@@ -314,7 +311,7 @@ def test_derive_boost_state_uses_parse_datetime(
     monkeypatch.setattr(dt_util, "parse_datetime", _fake_parse, raising=False)
 
     coordinator = SimpleNamespace(resolve_boost_end=None)
-    state = heater_module.derive_boost_state(
+    state = entity_module.derive_boost_state(
         {"boost_end_datetime": iso_value}, coordinator
     )
 
@@ -353,7 +350,7 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     store = DomainStateStore([DomainNodeId(DomainNodeType.ACCUMULATOR, "1")])
     store.apply_full_snapshot("acm", "1", settings)
-    coordinator.domain_view = heater_module.DomainStateView("dev", store)
+    coordinator.domain_view = entity_module.DomainStateView("dev", store)
 
     def _settings_resolver() -> dict[str, Any] | None:
         return settings_map["acm"].get("1")
@@ -492,7 +489,7 @@ def test_boost_end_sensor_returns_base_state_when_available() -> None:
     )
 
     sensor.boost_state = MagicMock(  # type: ignore[assignment]
-        return_value=heater_module.BoostState(
+        return_value=entity_module.BoostState(
             active=None,
             minutes_remaining=None,
             end_datetime=None,
@@ -534,7 +531,7 @@ def test_boost_end_sensor_handles_isoformat_error() -> None:
     faulty = SimpleNamespace(isoformat=_raise)
 
     sensor.boost_state = MagicMock(  # type: ignore[assignment]
-        return_value=heater_module.BoostState(
+        return_value=entity_module.BoostState(
             active=True,
             minutes_remaining=None,
             end_datetime=faulty,
@@ -673,7 +670,7 @@ def test_heater_platform_details_addrs_by_type() -> None:
         {"type": "acm", "addr": "3"},
     ]
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
-    details = heater_module.HeaterPlatformDetails(
+    details = entity_module.HeaterPlatformDetails(
         inventory=inventory,
         default_name_simple=lambda addr: f"Heater {addr}",
     )
@@ -689,7 +686,7 @@ def test_heater_platform_details_resolve_name() -> None:
     """resolve_name should delegate to inventory.resolve_heater_name."""
     raw_nodes = [{"type": "htr", "addr": "1", "name": "Living Room"}]
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
-    details = heater_module.HeaterPlatformDetails(
+    details = entity_module.HeaterPlatformDetails(
         inventory=inventory,
         default_name_simple=lambda addr: f"Heater {addr}",
     )
@@ -708,13 +705,13 @@ def test_iter_boostable_heater_nodes_filters_by_type() -> None:
         {"type": "acm", "addr": "2", "name": "Accumulator"},
     ]
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
-    details = heater_module.HeaterPlatformDetails(
+    details = entity_module.HeaterPlatformDetails(
         inventory=inventory,
         default_name_simple=lambda addr: f"Node {addr}",
     )
 
     # Only request acm type
-    results = list(heater_module.iter_boostable_heater_nodes(details, node_types=["acm"]))
+    results = list(entity_module.iter_boostable_heater_nodes(details, node_types=["acm"]))
     assert len(results) == 1
     assert results[0][0] == "acm"
 
@@ -725,12 +722,12 @@ def test_iter_boostable_heater_nodes_string_node_types() -> None:
         {"type": "acm", "addr": "1"},
     ]
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
-    details = heater_module.HeaterPlatformDetails(
+    details = entity_module.HeaterPlatformDetails(
         inventory=inventory,
         default_name_simple=lambda addr: f"Node {addr}",
     )
 
-    results = list(heater_module.iter_boostable_heater_nodes(details, node_types="acm"))
+    results = list(entity_module.iter_boostable_heater_nodes(details, node_types="acm"))
     assert len(results) == 1
     assert results[0][0] == "acm"
 
@@ -742,12 +739,12 @@ def test_iter_boostable_heater_nodes_accumulators_only() -> None:
         {"type": "acm", "addr": "2"},
     ]
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
-    details = heater_module.HeaterPlatformDetails(
+    details = entity_module.HeaterPlatformDetails(
         inventory=inventory,
         default_name_simple=lambda addr: f"Node {addr}",
     )
 
-    results = list(heater_module.iter_boostable_heater_nodes(details, accumulators_only=True))
+    results = list(entity_module.iter_boostable_heater_nodes(details, accumulators_only=True))
     # Only acm nodes should appear (htr doesn't have boost)
     for r in results:
         assert r[0] == "acm"
@@ -767,7 +764,7 @@ def test_log_skipped_nodes_with_inventory(caplog: pytest.LogCaptureFixture) -> N
     ]
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
 
-    heater_module.log_skipped_nodes(
+    entity_module.log_skipped_nodes(
         "sensor",
         inventory,
         skipped_types=("thm",),
@@ -782,7 +779,7 @@ def test_log_skipped_nodes_empty_platform_name(caplog: pytest.LogCaptureFixture)
     raw_nodes = [{"type": "pmo", "addr": "01"}]
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
 
-    heater_module.log_skipped_nodes("", inventory, skipped_types=("pmo",))
+    entity_module.log_skipped_nodes("", inventory, skipped_types=("pmo",))
     assert "platform" in caplog.text
 
 
@@ -791,17 +788,17 @@ def test_log_skipped_nodes_with_details(caplog: pytest.LogCaptureFixture) -> Non
     caplog.set_level("DEBUG")
     raw_nodes = [{"type": "pmo", "addr": "01"}]
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
-    details = heater_module.HeaterPlatformDetails(
+    details = entity_module.HeaterPlatformDetails(
         inventory=inventory,
         default_name_simple=lambda addr: addr,
     )
-    heater_module.log_skipped_nodes("climate", details, skipped_types=("pmo",))
+    entity_module.log_skipped_nodes("climate", details, skipped_types=("pmo",))
     assert "pmo" in caplog.text
 
 
 def test_log_skipped_nodes_none_inventory() -> None:
     """log_skipped_nodes should return early when inventory is None."""
-    heater_module.log_skipped_nodes("sensor", None, skipped_types=("thm",))
+    entity_module.log_skipped_nodes("sensor", None, skipped_types=("thm",))
     # No error raised
 
 
@@ -821,7 +818,7 @@ def test_build_settings_resolver_with_domain_view() -> None:
     view = DomainStateView("dev", store)
     coordinator = SimpleNamespace(domain_view=view)
 
-    resolver = heater_module.build_settings_resolver(coordinator, "dev", "htr", "01")
+    resolver = entity_module.build_settings_resolver(coordinator, "dev", "htr", "01")
     state = resolver()
     assert state is not None
     assert state.mode == "comfort"
@@ -830,7 +827,7 @@ def test_build_settings_resolver_with_domain_view() -> None:
 def test_build_settings_resolver_no_domain_view() -> None:
     """Settings resolver should return None without domain view."""
     coordinator = SimpleNamespace(domain_view=None)
-    resolver = heater_module.build_settings_resolver(coordinator, "dev", "htr", "01")
+    resolver = entity_module.build_settings_resolver(coordinator, "dev", "htr", "01")
     assert resolver() is None
 
 
@@ -848,7 +845,7 @@ def test_heater_node_base_thermostat_state() -> None:
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
     store = DomainStateStore([DomainNodeId(DomainNodeType.THERMOSTAT, "T1")])
     store.apply_full_snapshot("thm", "T1", {"batt_level": 4})
-    view = heater_module.DomainStateView("dev", store)
+    view = entity_module.DomainStateView("dev", store)
 
     coordinator = SimpleNamespace(
         data={"dev": {"settings": {"thm": {"T1": {"batt_level": 4}}}}},
@@ -886,7 +883,7 @@ def test_heater_node_base_units_fahrenheit() -> None:
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
     store = DomainStateStore([DomainNodeId(DomainNodeType.HEATER, "01")])
     store.apply_full_snapshot("htr", "01", {"units": "F"})
-    view = heater_module.DomainStateView("dev", store)
+    view = entity_module.DomainStateView("dev", store)
 
     coordinator = SimpleNamespace(domain_view=view, inventory=inventory)
     heater = HeaterNodeBase(
@@ -905,7 +902,7 @@ def test_heater_node_base_units_unknown() -> None:
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
     store = DomainStateStore([DomainNodeId(DomainNodeType.HEATER, "01")])
     store.apply_full_snapshot("htr", "01", {"units": "K"})
-    view = heater_module.DomainStateView("dev", store)
+    view = entity_module.DomainStateView("dev", store)
 
     coordinator = SimpleNamespace(domain_view=view, inventory=inventory)
     heater = HeaterNodeBase(
@@ -943,7 +940,7 @@ def test_heater_platform_details_non_standard_inventory(
     )
     runtime.inventory = FakeInventory()  # type: ignore[assignment]
 
-    details = heater_module.heater_platform_details_for_entry(
+    details = entity_module.heater_platform_details_for_entry(
         runtime,
         default_name_simple=lambda addr: addr,
     )
@@ -966,6 +963,6 @@ def test_derive_boost_state_iso_without_datetime(monkeypatch: pytest.MonkeyPatch
         "boost_active": True,
         "boost_end_datetime": datetime(2024, 1, 1, 1, 0, tzinfo=timezone.utc),
     }
-    state = heater_module.derive_boost_state(settings, SimpleNamespace())
+    state = entity_module.derive_boost_state(settings, SimpleNamespace())
     assert state.end_datetime is not None
     assert state.end_iso is not None

@@ -13,19 +13,10 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from ..domain import DomainStateView
-from ..domain.ids import HEATING_NODE_TYPES
-from ..domain.state import DomainState
-from ..identifiers import build_gateway_entity_unique_id, build_heater_unique_id
-from ..inventory import (
-    AccumulatorNode,
-    Inventory,
-    normalize_node_addr,
-    normalize_node_type,
-)
-from ..runtime import require_runtime
-from ..utils import build_gateway_device_info, build_node_device_info
-from .heater import (
+from .domain import DomainStateView
+from .domain.ids import HEATING_NODE_TYPES
+from .domain.state import DomainState
+from .entity import (
     BOOST_BUTTON_METADATA,
     BoostButtonMetadata,
     async_cancel_acm_boost,
@@ -34,6 +25,15 @@ from .heater import (
     log_skipped_nodes,
     resolve_boost_runtime_minutes,
 )
+from .identifiers import build_gateway_entity_unique_id, build_heater_unique_id
+from .inventory import (
+    AccumulatorNode,
+    Inventory,
+    normalize_node_addr,
+    normalize_node_type,
+)
+from .runtime import require_runtime
+from .utils import build_gateway_device_info, build_node_device_info
 
 _LOGGER = logging.getLogger(__name__)
 

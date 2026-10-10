@@ -20,9 +20,9 @@ from custom_components.termoweb.backend.ducaheat import (
 )
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.const import BRAND_DUCAHEAT, CONF_BRAND, DOMAIN
-from custom_components.termoweb.entities import (
+from custom_components.termoweb import (
     climate as climate_module,
-    heater as heater_module,
+    entity as entity_module,
 )
 
 from .conftest import PASSWORD, USERNAME, FakeCloud
@@ -80,7 +80,7 @@ def ducaheat(cloud: FakeCloud) -> Generator[Ducaheat]:
             lambda _self, hass, *a, **kw: cloud.create_ws_client(hass, *a, **kw),
         ),
         patch.object(climate_module, "_WRITE_DEBOUNCE", 0),
-        patch.object(heater_module, "WS_ECHO_FALLBACK_REFRESH", 0),
+        patch.object(entity_module, "WS_ECHO_FALLBACK_REFRESH", 0),
     ):
         yield fake
 
@@ -224,7 +224,7 @@ async def test_fallback_cancelled_when_entity_removed(
     _set_ws(hass, entry, healthy=False)
     ducaheat.reads.clear()
 
-    with patch.object(heater_module, "WS_ECHO_FALLBACK_REFRESH", 3600):
+    with patch.object(entity_module, "WS_ECHO_FALLBACK_REFRESH", 3600):
         await _write(hass, entry, "lock")
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()

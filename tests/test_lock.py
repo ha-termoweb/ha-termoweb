@@ -12,7 +12,7 @@ from custom_components.termoweb.domain import (
     NodeType,
 )
 from custom_components.termoweb.domain.state import HeaterState
-from custom_components.termoweb.entities.lock import ChildLockEntity
+from custom_components.termoweb.lock import ChildLockEntity
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 
 
@@ -297,7 +297,7 @@ async def test_lock_async_setup_entry_creates_entities(
     from conftest import _install_stubs
     _install_stubs()
     from homeassistant.core import HomeAssistant
-    from custom_components.termoweb.entities.lock import async_setup_entry
+    from custom_components.termoweb.lock import async_setup_entry
 
     payload = {
         "nodes": [
@@ -344,7 +344,7 @@ async def test_lock_async_setup_entry_raises_without_inventory(
     from conftest import _install_stubs
     _install_stubs()
     from homeassistant.core import HomeAssistant
-    from custom_components.termoweb.entities.lock import async_setup_entry
+    from custom_components.termoweb.lock import async_setup_entry
 
     coordinator = SimpleNamespace(hass=None, data={})
     hass = HomeAssistant()
@@ -364,7 +364,7 @@ async def test_lock_async_setup_entry_raises_without_inventory(
 def test_iter_lockable_inventory_nodes_filters_types() -> None:
     """_iter_lockable_inventory_nodes should yield only htr and acm nodes."""
 
-    from custom_components.termoweb.entities.lock import _iter_lockable_inventory_nodes
+    from custom_components.termoweb.lock import _iter_lockable_inventory_nodes
 
     payload = {
         "nodes": [

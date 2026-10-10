@@ -13,7 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from custom_components.termoweb.coordinator import StateCoordinator
 from custom_components.termoweb.domain.ids import HEATING_NODE_TYPES
 from custom_components.termoweb.domain.state import DomainState
-from custom_components.termoweb.entities.heater import (
+from custom_components.termoweb.entity import (
     NodeRefreshFallback,
     SettingsResolver,
     async_backend_write,

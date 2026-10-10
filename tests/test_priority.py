@@ -27,7 +27,7 @@ from custom_components.termoweb.domain.state import (
     _populate_heater_state,
     canonicalize_settings_payload,
 )
-from custom_components.termoweb.entities.number import HeaterPriorityNumber
+from custom_components.termoweb.number import HeaterPriorityNumber
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from custom_components.termoweb.planner.ducaheat_planner import (
     PlannedHttpCall,

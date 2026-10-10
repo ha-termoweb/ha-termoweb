@@ -8,12 +8,11 @@ import pytest
 from conftest import FakeCoordinator, _install_stubs, build_entry_runtime
 
 from custom_components.termoweb.inventory import build_node_inventory
-import custom_components.termoweb.heater as heater_module
+import custom_components.termoweb.entity as entity_module
 
 _install_stubs()
 
 import custom_components.termoweb.number as number_module
-from custom_components.termoweb.entities import number as entities_number_module
 from custom_components.termoweb.const import DOMAIN
 from homeassistant.core import HomeAssistant
 
@@ -29,14 +28,12 @@ def _patch_number_attr(
     *,
     raising: bool | None = None,
 ) -> None:
-    """Patch a number module attribute across shim + entity modules."""
+    """Patch a number module attribute."""
 
     if raising is None:
         monkeypatch.setattr(number_module, name, value)
-        monkeypatch.setattr(entities_number_module, name, value)
     else:
         monkeypatch.setattr(number_module, name, value, raising=raising)
-        monkeypatch.setattr(entities_number_module, name, value, raising=raising)
 
 
 def _make_duration_entity() -> AccumulatorBoostDurationNumber:
@@ -204,11 +201,11 @@ async def test_async_setup_entry_creates_number_entities(
     ]
     payload = {"nodes": raw_nodes}
     node_inventory = build_node_inventory(raw_nodes)
-    InventoryType = heater_module.Inventory
+    InventoryType = entity_module.Inventory
     inventory = InventoryType(dev_id, node_inventory)
     coordinator = FakeCoordinator(hass, dev_id=dev_id)
 
-    heater_details = heater_module.HeaterPlatformDetails(
+    heater_details = entity_module.HeaterPlatformDetails(
         inventory=inventory,
         default_name_simple=lambda addr: f"Heater {addr}",
     )
@@ -268,7 +265,7 @@ async def test_async_setup_entry_radio_gets_local_priority_and_limit() -> None:
     entry_id = "entry-radio-number"
     dev_id = "dev-radio-number"
     raw_nodes = [{"addr": "6", "name": "Heater 6", "type": "htr"}]
-    inventory = heater_module.Inventory(dev_id, build_node_inventory(raw_nodes))
+    inventory = entity_module.Inventory(dev_id, build_node_inventory(raw_nodes))
     build_entry_runtime(
         hass=hass,
         entry_id=entry_id,

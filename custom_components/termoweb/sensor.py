@@ -26,7 +26,7 @@ from custom_components.termoweb.const import signal_radio_frames
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
 from custom_components.termoweb.domain.ids import HEATING_NODE_TYPES
 from custom_components.termoweb.domain.view import DomainStateView
-from custom_components.termoweb.entities.heater import (
+from custom_components.termoweb.entity import (
     HeaterNodeBase,
     HeaterPlatformDetails,
     heater_platform_details_for_entry,
