@@ -384,7 +384,7 @@ async def test_radio_options_store_heater_rated_power() -> None:
     flow.hass = hass
 
     menu = await flow.async_step_init()
-    assert menu["menu_options"] == ["settings", "pair_heaters"]
+    assert menu["menu_options"] == ["settings", "pair_heaters", "rehome"]
     form = await flow.async_step_settings()
     assert form["step_id"] == "settings"
     fields = {str(getattr(k, "schema", k)): k for k in form["data_schema"].schema}

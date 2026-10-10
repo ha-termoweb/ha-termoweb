@@ -81,6 +81,17 @@ def heater_snapshot(runtime: Any, addr: int) -> dict[str, Any] | None:
     return settings_snapshot(view.get_heater_state("htr", str(addr)))
 
 
+def with_manual_target(
+    snapshot: dict[str, Any] | None, client: Any, addr: int
+) -> dict[str, Any] | None:
+    """Add the last manual target the client saw when the mode was not manual."""
+
+    manual = client.manual_setpoint(addr)
+    if snapshot is None or "stemp" in snapshot or manual is None:
+        return snapshot
+    return {**snapshot, "manual_stemp": manual}
+
+
 def saved_snapshot(entry: ConfigEntry, addr: int) -> dict[str, Any] | None:
     """Return the settings saved for ``addr`` before its factory reset, if any."""
 
@@ -130,4 +141,5 @@ __all__ = [
     "saved_snapshot",
     "settings_snapshot",
     "store_snapshot",
+    "with_manual_target",
 ]

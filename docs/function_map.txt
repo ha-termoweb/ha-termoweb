@@ -894,6 +894,12 @@ custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_pair
     Pair heaters with the running gateway connection while showing progress.
 custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_pair_done
     Add the paired heaters and reload, or show the pairing form with the error.
+custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_rehome
+    Explain the network move; start it when the user submits.
+custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_rehome_run
+    Reset, re-pair and restore the heaters while showing progress.
+custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_rehome_done
+    Show what the move did; close the options when the user confirms.
 custom_components/termoweb/const.py :: get_brand_api_base
     Return API base URL for the selected brand.
 custom_components/termoweb/const.py :: get_brand_basic_auth
@@ -1840,12 +1846,28 @@ custom_components/termoweb/radio_pairing.py :: settings_snapshot
     Return the restorable settings of a heater state, or None if it has none.
 custom_components/termoweb/radio_pairing.py :: heater_snapshot
     Return the restorable settings Home Assistant last saw for heater ``addr``.
+custom_components/termoweb/radio_pairing.py :: with_manual_target
+    Add the last manual target the client saw when the mode was not manual.
 custom_components/termoweb/radio_pairing.py :: saved_snapshot
     Return the settings saved for ``addr`` before its factory reset, if any.
 custom_components/termoweb/radio_pairing.py :: store_snapshot
     Save (or with None, drop) the settings to restore for heater ``addr``.
 custom_components/termoweb/radio_pairing.py :: add_nodes
     Add heaters to the entry's node list and reload it; False if none were new.
+custom_components/termoweb/radio_rehome.py :: _addr
+    Return a stored node's radio id, or None for an invalid address.
+custom_components/termoweb/radio_rehome.py :: _read_identities
+    Return every heater's ``5A`` identity; raise RehomeError before any change.
+custom_components/termoweb/radio_rehome.py :: _reset_all
+    Save each heater's settings, then factory-reset it; stop at the first failure.
+custom_components/termoweb/radio_rehome.py :: _identified
+    Return ``heater`` with its 5A identity, reading it again if pairing had none.
+custom_components/termoweb/radio_rehome.py :: _match
+    Return ``{new id: old id}``: direct for one heater, else by 5A identity.
+custom_components/termoweb/radio_rehome.py :: async_rehome
+    Reset, re-pair and restore every heater on the site network; reload the entry.
+custom_components/termoweb/radio_rehome.py :: rehome_summary
+    Return a plain-English summary of a finished network move.
 custom_components/termoweb/runtime.py :: require_runtime
     Return the runtime container stored for ``entry_id``.
 custom_components/termoweb/services/energy_history.py :: async_import_energy_history_with_rate_limit
@@ -1866,14 +1888,14 @@ custom_components/termoweb/services/radio_pairing.py :: _radio_runtime
     Return the loaded radio entry's runtime and client, or raise for the user.
 custom_components/termoweb/services/radio_pairing.py :: _require_node
     Raise unless heater ``addr`` is one of the entry's stored nodes.
-custom_components/termoweb/services/radio_pairing.py :: _with_manual_target
-    Add the last manual target the client saw when the mode was not manual.
 custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services
-    Register the radio_factory_reset and radio_pair services once.
+    Register the radio_factory_reset, radio_pair and radio_rehome services once.
 custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services._async_factory_reset
     Save the heater's settings, then factory-reset it (it leaves the network).
 custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services._async_pair
     Pair one heater: to its old address (and restore it), or as a new heater.
+custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services._async_rehome
+    Move every heater onto this installation's own network and restore it.
 custom_components/termoweb/throttle.py :: MonotonicRateLimiter.async_throttle
     Sleep if required to honour ``min_interval`` seconds between calls.
 custom_components/termoweb/throttle.py :: MonotonicRateLimiter.reset
@@ -2157,6 +2179,8 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink.close
     Close the socket and stop the reader; pending waits fail.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._close_writer
     Close the stream writer, ignoring errors from an already dead socket.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.set_network_id
+    Switch the network id for new frames and the firmware's auto-acks (``N``).
 custom_components/termoweb/backend/radio/link.py :: RadioLink.add_listener
     Register ``callback`` for every decoded RX frame; return a remover.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.add_listener._remove
@@ -2265,6 +2289,10 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.async_survey
     Capture raw bursts of every dialect on air; heater commands wait meanwhile.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_pair
     Pair heaters into this network; heater commands wait meanwhile.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.async_set_network_id
+    Move this station to another network id; reconnects keep using it.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.async_read_identity
+    Return the identity tail of the heater's ``5A`` reply; raise if silent.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_factory_reset
     Factory-reset a heater (dialect B ``C8 01 D0``): settings and pairing are wiped.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_restore

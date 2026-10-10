@@ -246,6 +246,29 @@ a new heater, or for a heater that you reset (below).
 Heater control pauses while pairing runs. If the action says that no heater
 was paired, move the gateway closer to the heater and try again.
 
+### Move your heaters to this installation's own network
+
+If you found your heaters with **Find heaters that are already paired**, they
+still use the radio network of their old TermoWeb gateway. You can move them
+to a network of their own. Only dialect-B heaters can be moved.
+
+1. Open the integration and choose **Configure**.
+2. Choose **Move heaters to this installation's own network**.
+3. Read the steps on the screen and press **Submit**.
+4. Wait about 10 seconds. Home Assistant saves the settings of each heater
+   and resets it.
+5. Put one heater into pairing mode. Wait about 10 seconds, then the next
+   heater. Do one heater at a time. You have 5 minutes.
+6. Read the result. It tells you the new number of each heater, for example
+   "Heater 6 is now heater 2". The settings are restored. The entity ids
+   change, so check your automations and dashboards.
+
+If a heater was not paired in time, the result says so. Pair it later with
+**TermoWeb: Radio pair** and its old number: it gets its settings back.
+
+You can also start the move with the action **TermoWeb: Radio move heaters
+to own network**.
+
 ### Reset a heater to factory settings
 
 **Warning: this deletes all settings on the heater.** The heater forgets its

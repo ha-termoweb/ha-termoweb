@@ -109,7 +109,8 @@
         "data": { "debug": "Enable debug helpers" },
         "menu_options": {
           "settings": "Settings",
-          "pair_heaters": "Pair a new heater"
+          "pair_heaters": "Pair a new heater",
+          "rehome": "Move heaters to this installation's own network"
         }
       },
       "settings": {
@@ -121,7 +122,13 @@
         "title": "Pair a new heater",
         "description": "1. Press **Submit**. You then have 5 minutes.\n2. Put the new heater into pairing mode. The heater's manual tells you which buttons to press.\n3. To add more heaters, wait about 10 seconds, then put the next heater into pairing mode. Do one heater at a time.\n\nHeater control pauses while pairing runs. Pairing stops 1 minute after the last heater was paired, or after 5 minutes. Then the integration reloads and the new heaters appear under Devices."
       },
-      "pair_run": { "title": "Pairing your heaters" }
+      "pair_run": { "title": "Pairing your heaters" },
+      "rehome": {
+        "title": "Move heaters to this installation's own network",
+        "description": "Use this when your heaters still use the radio network of an old TermoWeb gateway. Heaters: {heaters}.\n\nWhat happens:\n1. Each heater is reset to factory settings. Home Assistant saves its settings first.\n2. You put the heaters into pairing mode, one at a time. The heater's manual tells you which buttons to press. Wait about 10 seconds between heaters. You have 5 minutes.\n3. The heaters get new numbers, from 2 upwards. Their entity ids change. Heater names stay the same when Home Assistant recognises the heater.\n4. Home Assistant gives each heater its settings back: mode, preset temperatures, manual temperature and weekly program.\n\nHeater control pauses while this runs. Only dialect-B heaters can be moved. Press **Submit** to start, then put the first heater into pairing mode after about 10 seconds."
+      },
+      "rehome_run": { "title": "Moving your heaters" },
+      "rehome_done": { "title": "Move finished", "description": "{summary}" }
     },
     "error": {
       "no_heaters_paired": "No heater was paired. Put the heater into pairing mode while the integration waits, move the gateway closer to it, and try again.",
@@ -133,6 +140,7 @@
       "not_loaded": "The integration is not running. Start it first, then try again."
     },
     "progress": {
+      "rehome": "Resetting the heaters, then waiting for heaters in pairing mode. Put one heater into pairing mode now, then the next one. This stops 1 minute after the last heater was paired, or after 5 minutes.",
       "pair_heaters": "Waiting for heaters in pairing mode. Put one heater into pairing mode now. This stops 1 minute after the last heater was paired, or after 5 minutes."
     }
   },

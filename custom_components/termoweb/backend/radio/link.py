@@ -322,6 +322,16 @@ class RadioLink:
         with contextlib.suppress(Exception):
             await writer.wait_closed()
 
+    async def set_network_id(self, network_id: bytes) -> None:
+        """Switch the network id for new frames and the firmware's auto-acks (``N``)."""
+        net = bytes(network_id)
+        if len(net) != 2:
+            raise ValueError("network_id must be exactly two bytes")
+        async with self._send_lock:
+            await self._send_command(f"N{net.hex().upper()}")
+            self._network_id = net
+        _LOGGER.info("Radio network id switched")
+
     # --- listeners -----------------------------------------------------------
 
     def add_listener(

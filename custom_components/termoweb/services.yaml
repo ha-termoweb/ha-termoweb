@@ -245,3 +245,30 @@ radio_pair:
           min: 30
           max: 600
           unit_of_measurement: s
+
+radio_rehome:
+  name: Radio move heaters to own network
+  description: >-
+    Move all heaters of a radio entry onto this installation's own radio
+    network. Each heater is reset first (its settings are saved), then you
+    put the heaters into pairing mode one at a time. The heaters get new
+    numbers from 2 upwards and their settings are restored. Only dialect-B
+    heaters can be moved. Heater control pauses while this runs.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: The radio gateway or nanoCUL config entry to use.
+      required: true
+      example: abcd1234deadbeef
+      selector:
+        config_entry:
+          integration: termoweb
+    timeout:
+      name: Wait time
+      description: How long to wait for the heaters' pairing buttons.
+      default: 300
+      selector:
+        number:
+          min: 30
+          max: 600
+          unit_of_measurement: s
