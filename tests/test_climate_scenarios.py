@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 from homeassistant.components.climate import ATTR_PRESET_MODE, HVACMode
 from homeassistant.const import ATTR_ENTITY_ID, ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -232,3 +233,79 @@ async def test_cancel_boost_on_an_idle_accumulator_keeps_its_mode(
     assert state.state == HVACMode.AUTO
     assert state.attributes[ATTR_PRESET_MODE] == "none"
     assert state.attributes["boost_active"] is False
+
+
+async def test_set_temperature_with_auto_mode_starts_a_temporary_override(
+    hass: HomeAssistant, home: FakeHome, config_entry: MockConfigEntry
+) -> None:
+    """Auto plus a setpoint on a manual heater is the schedule with an override."""
+    await _setup(hass, config_entry)
+
+    await _service(
+        hass,
+        "climate",
+        "set_temperature",
+        HTR,
+        **{ATTR_TEMPERATURE: 23, "hvac_mode": HVACMode.AUTO},
+    )
+    await _settle(hass)
+
+    home.settings_writes.assert_awaited_once()
+    assert home.last_settings_write()["mode"] == "modified_auto"
+    assert home.last_settings_write()["stemp"] == 23.0
+    assert hass.states.get(HTR).state == HVACMode.AUTO
+
+
+async def test_set_temperature_with_off_mode_turns_the_heater_off(
+    hass: HomeAssistant, home: FakeHome, config_entry: MockConfigEntry
+) -> None:
+    """Off plus a setpoint turns the heater off without a manual write."""
+    await _setup(hass, config_entry)
+
+    await _service(
+        hass,
+        "climate",
+        "set_temperature",
+        HTR,
+        **{ATTR_TEMPERATURE: 23, "hvac_mode": HVACMode.OFF},
+    )
+    await _settle(hass)
+
+    home.settings_writes.assert_awaited_once()
+    assert home.last_settings_write()["mode"] == "off"
+    assert home.last_settings_write()["stemp"] is None
+    assert hass.states.get(HTR).state == HVACMode.OFF
+
+
+async def test_set_temperature_with_heat_mode_forces_manual(
+    hass: HomeAssistant, home: FakeHome, config_entry: MockConfigEntry
+) -> None:
+    """Heat plus a setpoint on an auto heater writes manual, not an override."""
+    home.settings[("htr", "1")]["mode"] = "auto"
+    await _setup(hass, config_entry)
+
+    await _service(
+        hass,
+        "climate",
+        "set_temperature",
+        HTR,
+        **{ATTR_TEMPERATURE: 23, "hvac_mode": HVACMode.HEAT},
+    )
+    await _settle(hass)
+
+    assert home.last_settings_write()["mode"] == "manual"
+    assert home.last_settings_write()["stemp"] == 23.0
+
+
+async def test_set_temperature_with_unsupported_mode_is_rejected(
+    hass: HomeAssistant, home: FakeHome, config_entry: MockConfigEntry
+) -> None:
+    """A mode the heater does not offer is refused before anything is queued."""
+    await _setup(hass, config_entry)
+    entity = hass.data["climate"].get_entity(HTR)
+
+    with pytest.raises(ServiceValidationError):
+        await entity.async_set_temperature(temperature=23, hvac_mode="cool")
+    await _settle(hass)
+
+    home.settings_writes.assert_not_awaited()
