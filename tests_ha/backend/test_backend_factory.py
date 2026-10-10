@@ -8,7 +8,17 @@ from custom_components.termoweb.backend import (
     termoweb as termoweb_backend,
 )
 from custom_components.termoweb.backend.ducaheat import DucaheatBackend
-from custom_components.termoweb.const import BRAND_DUCAHEAT, BRAND_TEVOLVE
+import pytest
+
+from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
+from custom_components.termoweb.backend.factory import create_rest_client
+from custom_components.termoweb.backend.rest_client import RESTClient
+from custom_components.termoweb.const import (
+    BRAND_DUCAHEAT,
+    BRAND_TEVOLVE,
+    get_brand_api_base,
+    get_brand_basic_auth,
+)
 from tests_ha.fakes.runtime import build_entry_runtime
 
 
@@ -148,3 +158,22 @@ def test_backend_capabilities_follow_the_backend_class() -> None:
     assert Backend.capabilities == BackendCapabilities()
     backend = create_backend(brand=BRAND_DUCAHEAT, client=DummyHttpClient())
     assert backend.capabilities is backend_capabilities(BRAND_DUCAHEAT)
+
+
+@pytest.mark.parametrize(
+    ("brand", "client_cls"),
+    [
+        ("termoweb", RESTClient),
+        (BRAND_DUCAHEAT, DucaheatRESTClient),
+        (BRAND_TEVOLVE, DucaheatRESTClient),
+    ],
+)
+async def test_create_rest_client_selects_the_brand_backend(
+    hass, brand: str, client_cls: type[RESTClient]
+) -> None:
+    """Each brand gets its client class, API base and basic-auth credentials."""
+    client = create_rest_client(hass, "user", "pw", brand)
+
+    assert type(client) is client_cls
+    assert client.api_base == get_brand_api_base(brand)
+    assert client._basic_auth_b64 == get_brand_basic_auth(brand)  # noqa: SLF001

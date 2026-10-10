@@ -5,17 +5,11 @@ from __future__ import annotations
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.loader import async_get_integration as loader_async_get_integration
+from homeassistant.loader import async_get_integration
 
 from .const import CLOUD_CONFIGURATION_URL, DEVICE_BRAND_LABELS, DOMAIN, get_brand_label
 from .inventory import normalize_node_addr
 from .runtime import EntryRuntime, require_runtime
-
-
-async def async_get_integration(*args, **kwargs):
-    """Proxy ``homeassistant.loader.async_get_integration`` for monkeypatching."""
-
-    return await loader_async_get_integration(*args, **kwargs)
 
 
 async def async_get_integration_version(hass: HomeAssistant) -> str:
@@ -120,8 +114,6 @@ def build_installation_device_info(
     coordinator = entry_data.coordinator
     if coordinator is not None:
         gateway_name = getattr(coordinator, "gateway_name", None)
-        if callable(gateway_name):
-            gateway_name = gateway_name()
         if gateway_name not in (None, ""):
             info["name"] = str(gateway_name)
 
@@ -164,8 +156,6 @@ def build_gateway_device_info(
     coordinator = entry_data.coordinator
     if coordinator is not None:
         model = getattr(coordinator, "gateway_model", None)
-        if callable(model):
-            model = model()
         if model not in (None, ""):
             info["model"] = str(model)
 

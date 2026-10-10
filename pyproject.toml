@@ -39,11 +39,9 @@ include = [
 
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-# The real-HA plugin (pytest-homeassistant-custom-component) breaks the stubbed
-# suite in tests/, so it is off by default; tests_ha/ turns it back on with
-# `-p homeassistant -o asyncio_mode=auto` (see AGENTS.md).
-addopts = "--strict-markers -p no:homeassistant"
+testpaths = ["tests_ha"]
+addopts = "--strict-markers"
+asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.coverage.run]

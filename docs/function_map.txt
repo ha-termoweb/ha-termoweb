@@ -1822,8 +1822,6 @@ custom_components/termoweb/throttle.py :: default_samples_rate_limit_state
     Return the shared rate limiter for heater samples requests.
 custom_components/termoweb/throttle.py :: reset_samples_rate_limit_state
     Reset the shared samples rate limiter to its initial state.
-custom_components/termoweb/utils.py :: async_get_integration
-    Proxy ``homeassistant.loader.async_get_integration`` for monkeypatching.
 custom_components/termoweb/utils.py :: async_get_integration_version
     Return the installed integration version string.
 custom_components/termoweb/utils.py :: _entry_gateway_record

@@ -1963,3 +1963,49 @@ async def test_rest_client_rejects_cancel_boost_for_non_acm() -> None:
             ("pmo", "1"),
             cancel_boost=True,
         )
+
+
+def _json_response(body: Any) -> MockResponse:
+    """Return a 200 JSON response carrying ``body``."""
+    return MockResponse(200, body, headers={"Content-Type": "application/json"})
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ({"power_limit": "5000"}, 5000),
+        ({"power_limit": "0"}, 0),
+        ({"power_limit": "abc"}, None),
+        ({}, None),
+        (None, None),
+    ],
+)
+async def test_get_power_limit_reads_the_htr_system_endpoint(
+    body: Any, expected: int | None
+) -> None:
+    """The power limit is read as an int; junk and missing values are None."""
+    session = FakeSession()
+    session.queue_post(_json_response({"access_token": "tok", "expires_in": 3600}))
+    session.queue_request(_json_response(body))
+    client = RESTClient(session, "user", "pass")
+
+    assert await client.get_power_limit("dev123") == expected
+    method, url, _kwargs = session.request_calls[0]
+    assert method == "GET"
+    assert url.endswith("/api/v2/devs/dev123/htr_system/power_limit")
+
+
+@pytest.mark.parametrize("limit", [5000, 0])
+async def test_set_power_limit_posts_the_value_as_a_string(limit: int) -> None:
+    """The backend expects the power limit as a string."""
+    session = FakeSession()
+    session.queue_post(_json_response({"access_token": "tok", "expires_in": 3600}))
+    session.queue_request(_json_response({}))
+    client = RESTClient(session, "user", "pass")
+
+    await client.set_power_limit("dev123", power_limit=limit)
+
+    method, url, kwargs = session.request_calls[0]
+    assert method == "POST"
+    assert url.endswith("/api/v2/devs/dev123/htr_system/power_limit")
+    assert kwargs["json"] == {"power_limit": str(limit)}
