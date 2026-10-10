@@ -30,6 +30,13 @@ def rx(dialect, src, dst, payload=b"", *, tag=0, net=NET) -> ReceivedFrame:
     return ReceivedFrame(decode(dialect, air), -61.5, 9, 4321)
 
 
+def ack(src=6, dst=1) -> ReceivedFrame:
+    """Return a received dialect-B ack."""
+    return ReceivedFrame(
+        decode(DIALECT_B, build_ack(DIALECT_B, src, dst, NET)), -70.0, 3, 77
+    )
+
+
 def test_timestamp_is_utc_with_milliseconds() -> None:
     """Times are ISO 8601 in UTC with milliseconds, whatever the input zone."""
     assert capture.timestamp(AT) == "2026-01-02T03:04:05.678+00:00"
@@ -43,11 +50,10 @@ def test_data_frame_record() -> None:
     assert record == {
         "t": "2026-01-02T03:04:05.678+00:00",
         "kind": "data",
-        "dialect": "B",
         "rssi": -61.5,
         "lqi": 9,
         "micros": 4321,
-        "air": record["air"],
+        "dialect": "B",
         "net": "1234",
         "src": 1,
         "dst": 6,
@@ -57,18 +63,18 @@ def test_data_frame_record() -> None:
         "payload": "5E01",
         "op": "5E",
         "name": "flash display (identify)",
+        "air": record["air"],
     }
     assert bytes.fromhex(record["air"])[1:3] == NET
+    assert record["air"] == record["air"].upper() and " " not in record["air"]
 
 
-def test_ack_and_wrong_dialect_and_undecodable_records() -> None:
-    """Acks have no payload; a frame from the other dialect is re-decoded."""
-    ack_air = build_ack(DIALECT_B, 6, 1, NET)
-    ack = capture.frame_record(
-        ReceivedFrame(decode(DIALECT_B, ack_air), None, None, None), DIALECT_B, AT
-    )
-    assert ack["kind"] == "ack" and ack["src"] == 6 and ack["dst"] == 1
-    assert "payload" not in ack and "op" not in ack
+def test_ack_wrong_dialect_and_undecodable() -> None:
+    """Acks carry no payload; another dialect is re-decoded; junk is None."""
+    record = capture.frame_record(ack(), DIALECT_B, AT)
+    assert record["kind"] == "ack" and record["src"] == 6 and record["dst"] == 1
+    assert record["payload"] is None and record["name"] is None
+    assert record["path"] is None and record["tag"] is None and record["op"] is None
 
     # Heard while the link had already switched to dialect B.
     a_frame = build_frame(DIALECT_A, 1, 6, p.request_status())
@@ -78,12 +84,9 @@ def test_ack_and_wrong_dialect_and_undecodable_records() -> None:
     assert record["kind"] == "data" and record["dialect"] == "A"
     assert record["net"] == "1B30" and record["op"] == "B8"
 
-    junk = bytes.fromhex("0102030405")
-    bad = capture.frame_record(
-        ReceivedFrame(decode(DIALECT_A, junk), -90.0, 0, 7), DIALECT_A, AT
-    )
-    assert bad["kind"] == "undecodable" and bad["dialect"] is None
-    assert bad["air"] == "0102030405" and bad["len"] == 5
+    junk = ReceivedFrame(decode(DIALECT_A, bytes.fromhex("0102030405")), -90.0, 0, 7)
+    assert capture.frame_record(junk, DIALECT_A, AT) is None
+    assert capture.rx_line(junk) == "RX 7 -90.0 0 0 0102030405"
 
 
 def test_opcode_keys() -> None:
@@ -106,102 +109,88 @@ def test_opcode_keys() -> None:
     assert record["path"] is None and record["payload"] == ""
 
 
-def test_frame_capture_collects_frames_and_lines() -> None:
-    """The capture reads the link's dialect at each frame and masks MACs."""
-    dialects = [DIALECT_B]
-    times = iter([AT, AT + timedelta(seconds=1)])
-    cap = capture.FrameCapture(lambda: dialects[0], now=lambda: next(times))
+def test_frame_capture_collects_frames_and_raw_lines() -> None:
+    """Frames, undecodable frames and lines land in frames/raw; MACs are masked."""
+    times = iter([AT + timedelta(seconds=s) for s in range(5)])
+    cap = capture.FrameCapture(lambda: DIALECT_B, now=lambda: next(times))
+    cap.start()
     cap.on_frame(rx(DIALECT_B, 6, 1, p.request_status()))
+    cap.on_frame(ReceivedFrame(decode(DIALECT_B, b"\x01\x02"), -90.0, 0, 7))
     cap.on_line("# Q termoweb_rx 3.7-esp32 id=01 mac=AA:BB:CC:00:11:22 net=1234")
-    assert [r["kind"] for r in cap.records] == ["data", "line"]
-    assert cap.records[1] == {
-        "t": "2026-01-02T03:04:06.678+00:00",
-        "kind": "line",
-        "line": "# Q termoweb_rx 3.7-esp32 id=01 mac=XX net=1234",
-    }
-    assert capture.FrameCapture(lambda: DIALECT_A).on_line("x") is None
+    cap.stop()
+    assert cap.started == "2026-01-02T03:04:05.678+00:00"
+    assert cap.ended == "2026-01-02T03:04:09.678+00:00"
+    assert [r["op"] for r in cap.frames] == ["B8"]
+    assert cap.raw == [
+        {"t": "2026-01-02T03:04:07.678+00:00", "line": "RX 7 -90.0 0 0 0102"},
+        {
+            "t": "2026-01-02T03:04:08.678+00:00",
+            "line": "# Q termoweb_rx 3.7-esp32 id=01 mac=XX net=1234",
+        },
+    ]
+    fresh = capture.FrameCapture(lambda: DIALECT_A)
+    fresh.on_line("x")
+    assert fresh.started is None and fresh.raw[0]["line"] == "x"
 
 
 def test_redact_masks_networks_identity_and_hex_but_keeps_payload_bytes() -> None:
     """Network ids become NET1/NET2; serial bytes are masked; other bytes stay."""
-    other_net = bytes.fromhex("BEEF")
-    records = [
+    frames = [
         capture.frame_record(rx(DIALECT_B, 1, 6, p.flash_display()), DIALECT_B, AT),
         capture.frame_record(rx(DIALECT_B, 6, 1, IDENTITY), DIALECT_B, AT),
         capture.frame_record(
-            rx(DIALECT_B, 9, 1, p.request_status(), net=other_net), DIALECT_B, AT
+            rx(DIALECT_B, 9, 1, p.request_status(), net=bytes.fromhex("BEEF")),
+            DIALECT_B,
+            AT,
         ),
         capture.frame_record(
             rx(DIALECT_A, 0xFF, 1, ANNOUNCE_A, net=DIALECT_A.network_id),
             DIALECT_A,
             AT,
         ),
-        capture.frame_record(
-            ReceivedFrame(decode(DIALECT_B, build_ack(DIALECT_B, 6, 1, NET)), 0, 0, 0),
-            DIALECT_B,
-            AT,
-        ),
-        capture.frame_record(
-            ReceivedFrame(decode(DIALECT_A, b"\x01\x02"), None, None, None),
-            DIALECT_A,
-            AT,
-        ),
-        capture.line_record("TX 100 14 0A1234010600010600000000 net=1234", AT),
+        capture.frame_record(ack(), DIALECT_B, AT),
         capture.frame_record(rx(DIALECT_B, 6, 1), DIALECT_B, AT),
     ]
-    redacted = capture.redact(records)
-    assert records[0]["net"] == "1234"  # the input is not changed
-    assert [r.get("net") for r in redacted] == [
+    raw = [
+        capture.raw_record("TX 100 14 0A1234010600010600000000 net=1234", AT),
+        capture.raw_record("# Q x mac=AA:BB:CC:00:11:22", AT),
+    ]
+    red_frames, red_raw = capture.redact(frames, raw)
+    assert frames[0]["net"] == "1234" and "air" in frames[0]  # input unchanged
+    assert [r["net"] for r in red_frames] == [
         "NET1",
         "NET1",
         "NET2",
         "NET3",
         "NET1",
-        None,
-        None,
         "NET1",
     ]
-    assert all("air" not in r for r in redacted)
-    assert redacted[0]["payload"] == "5E01"
-    assert redacted[1]["payload"] == "5B55" + "XX" * 16
-    assert redacted[2]["payload"] == "B8"
-    assert redacted[3]["payload"] == "77" + "XX" * 12
-    assert redacted[5]["len"] == 2
-    assert redacted[6]["line"] == "TX 100 14 <hex> net=XXXX"
-    assert redacted[7]["payload"] == ""
-    text = repr(redacted)
-    assert "1234" not in text
-    assert "X123456".encode().hex().upper() not in text
-    assert "BEEF" not in text and "1B30" not in text
+    assert all("air" not in r for r in red_frames)
+    assert red_frames[0]["payload"] == "5E01"
+    assert red_frames[1]["payload"] == "5B55" + "XX" * 16
+    assert red_frames[2]["payload"] == "B8"
+    assert red_frames[3]["payload"] == "77" + "XX" * 12
+    assert red_frames[4]["payload"] is None
+    assert red_frames[5]["payload"] == ""
+    assert red_raw[0] == {"t": raw[0]["t"], "line": "TX 100 14 <hex> net=XXXX"}
+    assert red_raw[1]["line"] == "# Q x mac=XX"
+    text = repr((red_frames, red_raw))
+    for secret in ("1234", "BEEF", "1B30", b"X123456".hex().upper(), "AA:BB"):
+        assert secret not in text
 
 
 def test_summary_counts_networks_nodes_and_opcodes() -> None:
-    """The summary has a histogram with names and lists unknown opcodes."""
-    records = [
+    """The summary has frame and ack counts and a histogram with names."""
+    frames = [
         capture.frame_record(rx(DIALECT_A, 1, 6, p.flash_display()), DIALECT_A, AT),
         capture.frame_record(rx(DIALECT_A, 6, 1, bytes.fromhex("5F55")), DIALECT_A, AT),
         capture.frame_record(rx(DIALECT_A, 1, 6, p.flash_display()), DIALECT_A, AT),
         capture.frame_record(rx(DIALECT_B, 1, 7, bytes.fromhex("E701")), DIALECT_B, AT),
-        capture.frame_record(
-            ReceivedFrame(decode(DIALECT_B, build_ack(DIALECT_B, 7, 1, NET)), 0, 0, 0),
-            DIALECT_B,
-            AT + timedelta(seconds=2),
-        ),
-        capture.frame_record(
-            ReceivedFrame(decode(DIALECT_A, b"\x01"), None, None, None), DIALECT_A, AT
-        ),
-        capture.line_record("# survey off", AT + timedelta(seconds=3)),
+        capture.frame_record(ack(7, 1), DIALECT_B, AT),
     ]
-    summary = capture.summarise(records)
-    assert summary == {
+    assert capture.summarise(frames) == {
         "frames": 5,
-        "data_frames": 4,
         "acks": 1,
-        "undecodable": 1,
-        "lines": 1,
-        "first": "2026-01-02T03:04:05.678+00:00",
-        "last": "2026-01-02T03:04:08.678+00:00",
-        "dialects": {"A": 3, "B": 2},
         "networks": ["1234"],
         "nodes": [1, 6, 7],
         "opcodes": {
@@ -209,11 +198,12 @@ def test_summary_counts_networks_nodes_and_opcodes() -> None:
             "5F": {"count": 1, "name": "flash display reply"},
             "E7": {"count": 1, "name": None},
         },
-        "unknown_opcodes": ["E7"],
     }
-    redacted = capture.summarise(capture.redact(records))
-    assert redacted["networks"] == ["NET1"]
-
-    empty = capture.summarise([])
-    assert empty["frames"] == 0 and empty["first"] is None and empty["last"] is None
-    assert empty["opcodes"] == {} and empty["networks"] == []
+    assert capture.summarise(capture.redact(frames, [])[0])["networks"] == ["NET1"]
+    assert capture.summarise([]) == {
+        "frames": 0,
+        "acks": 0,
+        "networks": [],
+        "nodes": [],
+        "opcodes": {},
+    }

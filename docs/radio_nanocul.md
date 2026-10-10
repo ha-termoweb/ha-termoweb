@@ -72,8 +72,8 @@ recordings to learn unknown commands.
 
 1. In step 3, after you press **Submit**, choose **Listen only (record radio
    traffic, never transmit)**.
-2. The entry has no heaters. It shows **Gateway online** and **Radio frames
-   heard**.
+2. The entry is called **Radio monitor** and has no heaters. It shows
+   **Gateway online** and **Frames heard**.
 3. Record with the **TermoWeb: Radio capture** action. The guide
    [Help find the identify command](radio_identify_capture.md) explains every
    step.

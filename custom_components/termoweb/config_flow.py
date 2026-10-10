@@ -113,6 +113,7 @@ CONF_RESCAN = "rescan"
 MANUAL_DEVICE = "manual"  # nanoCUL port choice: type a path or URL instead
 SERIAL_BY_ID_DIR = "/dev/serial/by-id"
 NANOCUL_LABEL = "nanoCUL"
+MONITOR_LABEL = "Radio monitor"  # title of a listen-only entry
 _CAPABLE = "dialect_capable"  # flow state: firmware switches dialects at runtime
 _GATEWAY_ID = "gateway_id"  # flow state: the gateway's dev_id, seeds the network id
 _PAIRING = "pairing"  # flow state: the user chose to pair new heaters
@@ -651,11 +652,8 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(f"{BRAND_RADIO_MONITOR}:{dev_id}")
         self._abort_if_unique_id_configured()
         data = radio_monitor_entry_data(self._radio)
-        if self._nanocul_flow():
-            title = f"{NANOCUL_LABEL} listen only ({data[CONF_DEVICE]})"
-        else:
-            title = f"{RADIO_GATEWAY_LABEL} listen only ({data[CONF_HOST]})"
-        return self.async_create_entry(title=title, data=data)
+        where = data[CONF_DEVICE] if self._nanocul_flow() else data[CONF_HOST]
+        return self.async_create_entry(title=f"{MONITOR_LABEL} ({where})", data=data)
 
     async def async_step_radio_pair(
         self, user_input: dict[str, Any] | None = None

@@ -23,8 +23,8 @@ from fake_radio_link import (
 )
 
 from custom_components.termoweb.backend.radio import protocol as p
-from custom_components.termoweb.backend.radio.dialect import DIALECT_A
-from custom_components.termoweb.backend.radio.link import RadioLinkError
+from custom_components.termoweb.backend.radio.dialect import DIALECT_A, decode
+from custom_components.termoweb.backend.radio.link import RadioLinkError, ReceivedFrame
 from custom_components.termoweb.backend.radio_client import RadioClient
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.services import radio_capture as service
@@ -34,6 +34,9 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 NET = bytes.fromhex("1234")  # synthetic network id
 ENTRY_ID = "radio-entry"
 MAC = "AA:BB:CC:00:11:22"
+Q_LINE = f"# Q termoweb_rx 3.7-esp32 freq=869.525 id=FE mac={MAC} net=1234"
+STOCK = dataclasses.replace(gateway_info(version="3.6"), raw=Q_LINE)
+ESP32 = dataclasses.replace(STOCK, dialect="B")
 
 
 def _hass(tmp_path) -> HomeAssistant:
@@ -47,7 +50,7 @@ def _runtime(
     *,
     listen_only: bool,
     data: dict[str, Any],
-    info=None,
+    info=STOCK,
     traffic=True,
 ) -> tuple[Any, list[FakeRadioLink], list[float]]:
     """Return a runtime whose capture window plays identify traffic."""
@@ -56,8 +59,7 @@ def _runtime(
 
     def factory(host, port, dialect, **kwargs):
         link = FakeRadioLink(host, port, dialect, **kwargs)
-        if info is not None:
-            link.info = info
+        link.info = info
         links.append(link)
         return link
 
@@ -88,7 +90,8 @@ def _runtime(
             ):
                 link.deliver(received(src, payload, dst=dst, dialect=dialect))
             link.deliver(received_ack(HEATER))
-            link.deliver_line(f"# Q termoweb_rx 3.7-esp32 mac={MAC} net=1234")
+            link.deliver(ReceivedFrame(decode(DIALECT_A, b"\x01\x02"), -90.0, 0, 7))
+            link.deliver_line(f"# status mac={MAC} net=1234")
 
         return await original(seconds, sleep=window)
 
@@ -124,9 +127,8 @@ async def test_registers_once_with_schema_and_optional_response(tmp_path) -> Non
         "seconds": 120,
         "redact": False,
     }
-    assert (
-        schema({"entry_id": "x", "seconds": "1800", "redact": True})["seconds"] == 1800
-    )
+    full = schema({"entry_id": "x", "seconds": "1800", "redact": True, "note": "hi"})
+    assert full["seconds"] == 1800 and full["note"] == "hi"
     for bad in (
         {"entry_id": "x", "seconds": 9},
         {"entry_id": "x", "seconds": 1801},
@@ -144,85 +146,113 @@ async def test_capture_on_monitor_entry_saves_every_frame(tmp_path) -> None:
     runtime, links, windows = _runtime(hass, listen_only=True, data=data)
     handler = await _handler(hass)
 
-    result = await handler(ServiceCall({"entry_id": ENTRY_ID, "seconds": 60}))
+    result = await handler(
+        ServiceCall({"entry_id": ENTRY_ID, "seconds": 60, "note": "kitchen"})
+    )
 
     assert windows == [60]
     assert links[0].sent == []  # listening only
-    assert result["frames"] == 5 and result["data_frames"] == 4
-    assert result["acks"] == 1 and result["lines"] == 1
+    assert set(result) == {"file", "frames", "networks", "nodes", "opcodes"}
+    assert result["frames"] == 5
     assert result["networks"] == ["1234", "1B30"]  # the ack is synthetic dialect B
     assert result["nodes"] == [1, HEATER]
     assert result["opcodes"]["5E"] == {"count": 1, "name": "flash display (identify)"}
     assert result["opcodes"]["5F"] == {"count": 1, "name": "flash display reply"}
-    assert result["unknown_opcodes"] == ["E7"]
-    assert result["redacted"] is False
+    assert result["opcodes"]["E7"] == {"count": 1, "name": None}
     assert runtime.last_radio_capture == result
-    assert result["file"].startswith(
-        str(tmp_path / f"termoweb_radio_capture_{ENTRY_ID}_")
-    )
+    name = result["file"].removeprefix(str(tmp_path / "termoweb_radio_capture_"))
+    assert len(name) == len("20260102T030405Z.json") and name.endswith("Z.json")
 
     saved = json.loads((tmp_path / result["file"]).read_text())
-    assert saved["format"] == service.CAPTURE_FORMAT
-    assert saved["integration_version"] == "1.2.3"
-    assert saved["radio_type"] == "nanocul" and saved["listen_only"] is True
-    assert saved["gateway"] == {
-        "firmware": "3.6-esp32",
-        "freq": "869.525",
-        "dialects": "A",
+    assert list(saved) == [
+        "version",
+        "started",
+        "ended",
+        "gateway",
+        "dialects_listened",
+        "note",
+        "redacted",
+        "summary",
+        "frames",
+        "raw",
+    ]
+    assert saved["version"] == 1 and saved["note"] == "kitchen"
+    assert saved["started"] <= saved["ended"] and saved["started"].endswith("+00:00")
+    assert saved["gateway"] == Q_LINE.replace(MAC, "XX")
+    assert saved["dialects_listened"] == ["A"] and saved["redacted"] is False
+    assert saved["summary"] == {
+        "frames": 5,
+        "acks": 1,
+        "networks": result["networks"],
+        "nodes": result["nodes"],
+        "opcodes": result["opcodes"],
     }
-    assert saved["capture_seconds"] == 60 and saved["redacted"] is False
-    assert saved["summary"]["frames"] == 5
-    first = saved["records"][0]
+    first = saved["frames"][0]
     assert first["kind"] == "data" and first["dialect"] == "A"
     assert first["net"] == "1B30" and first["src"] == 1 and first["dst"] == HEATER
     assert first["payload"] == "5E01" and first["name"] == "flash display (identify)"
     assert first["t"].endswith("+00:00") and len(first["t"]) == 29  # milliseconds
-    assert first["rssi"] == -60.0 and "air" in first
-    assert saved["records"][-1]["line"].count("mac=XX") == 1
+    assert first["rssi"] == -60.0 and first["air"] == first["air"].upper()
+    assert saved["frames"][-1]["kind"] == "ack"
+    assert [r["line"] for r in saved["raw"]] == [
+        "RX 7 -90.0 0 0 0102",
+        "# status mac=XX net=1234",
+    ]
     assert MAC not in json.dumps(saved)  # the gateway MAC never leaves HA
 
 
 @pytest.mark.asyncio
 async def test_redacted_capture_masks_networks_and_serial(tmp_path) -> None:
     hass = _hass(tmp_path)
-    runtime, _links, _ = _runtime(
+    _runtime(
         hass,
         listen_only=True,
         data={"brand": "radio_monitor", "host": "10.0.0.5", "port": 2323},
-        info=dataclasses.replace(gateway_info(version="3.7-esp32"), dialect="B"),
+        info=ESP32,
     )
     handler = await _handler(hass)
 
     result = await handler(ServiceCall({"entry_id": ENTRY_ID, "redact": True}))
 
-    assert result["redacted"] is True
     assert result["networks"] == ["NET1", "NET2"]
     text = (tmp_path / result["file"]).read_text()
     saved = json.loads(text)
-    assert saved["radio_type"] == "esp32" and saved["redacted"] is True
-    assert saved["gateway"]["dialects"] == "A+B"
-    assert saved["capture_seconds"] == 120
+    assert saved["redacted"] is True and saved["note"] is None
+    assert saved["dialects_listened"] == ["A", "B"]
+    assert saved["gateway"].endswith("mac=XX net=XXXX")
     for secret in ("1234", "1B30", b"X123456".hex().upper(), MAC, "mac=AA"):
         assert secret not in text
-    payloads = [r.get("payload") for r in saved["records"]]
+    payloads = [r["payload"] for r in saved["frames"]]
     assert "5E01" in payloads and "5F55" in payloads and "E701" in payloads
     assert "5B55" + "XX" * 16 in payloads
+    assert all("air" not in r for r in saved["frames"])
 
 
 @pytest.mark.asyncio
 async def test_capture_works_passively_on_a_normal_radio_entry(tmp_path) -> None:
     hass = _hass(tmp_path)
-    runtime, links, windows = _runtime(
-        hass, listen_only=False, data={"brand": "radio", "dialect": "B"}
-    )
+    _runtime(hass, listen_only=False, data={"brand": "radio"}, info=ESP32)
     handler = await _handler(hass)
 
     result = await handler(ServiceCall({"entry_id": ENTRY_ID, "seconds": 10}))
 
-    assert windows == [10] and links[0].sent == []
-    assert result["dialects"] == {"B": 5} and result["networks"] == ["1234"]
+    assert result["networks"] == ["1234"]
     saved = json.loads((tmp_path / result["file"]).read_text())
-    assert saved["listen_only"] is False and saved["radio_type"] == "esp32"
+    assert saved["dialects_listened"] == ["B"]  # the entry's own dialect only
+    assert {r["dialect"] for r in saved["frames"]} == {"B"}
+
+
+@pytest.mark.asyncio
+async def test_capture_without_gateway_info(tmp_path, monkeypatch) -> None:
+    hass = _hass(tmp_path)
+    runtime, _links, _ = _runtime(
+        hass, listen_only=True, data={"brand": "radio_monitor"}, traffic=False
+    )
+    monkeypatch.setattr(type(runtime.client), "gateway_info", None)
+    handler = await _handler(hass)
+    result = await handler(ServiceCall({"entry_id": ENTRY_ID}))
+    saved = json.loads((tmp_path / result["file"]).read_text())
+    assert saved["gateway"] is None and saved["dialects_listened"] == ["A"]
 
 
 @pytest.mark.asyncio

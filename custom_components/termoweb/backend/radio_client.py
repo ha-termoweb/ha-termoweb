@@ -74,6 +74,7 @@ PROGRAM_REPLY_LENS = (
 VERDICT_LEN = 2  # ``<opcode+1> 55|56``
 CLOCK_REPLY_REQUEST = protocol.OP_CLOCK_STEADY  # both 51 and 52 are answered ``53``
 GATEWAY_NAME = "Radio gateway"
+MONITOR_NAME = "Radio monitor"  # device name of a listen-only entry
 GATEWAY_MODEL = "ESP32 + CC1101 radio gateway"
 NANOCUL_MODEL = "nanoCUL USB stick"
 # A listen-only station never transmits; an id no heater sends to keeps it that
@@ -296,7 +297,7 @@ class RadioClient:
 
     async def async_capture(
         self, seconds: float, *, sleep: Sleep = asyncio.sleep
-    ) -> list[dict[str, Any]]:
+    ) -> FrameCapture:
         """Record every frame and gateway line for ``seconds``; heater commands wait.
 
         Recording only listens; station replies of a normal entry still go out.
@@ -307,12 +308,14 @@ class RadioClient:
         async with self._exchange_lock:
             remove_frames = link.add_listener(capture.on_frame)
             remove_lines = link.add_line_listener(capture.on_line)
+            capture.start()
             try:
                 await sleep(seconds)
             finally:
+                capture.stop()
                 remove_frames()
                 remove_lines()
-        return capture.records
+        return capture
 
     async def async_pair(
         self,
@@ -647,7 +650,7 @@ class RadioClient:
         return [
             {
                 "dev_id": dev_id,
-                "name": GATEWAY_NAME,
+                "name": MONITOR_NAME if self._listen_only else GATEWAY_NAME,
                 "model": f"{self._model} ({detail})",
                 "serial_id": dev_id,
                 "fw_version": info.version,

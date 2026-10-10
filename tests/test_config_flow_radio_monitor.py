@@ -62,7 +62,7 @@ async def test_esp32_listen_only_entry(probes) -> None:
 
     assert flow._unique_id == f"radio_monitor:{DEV_ID}"  # a normal entry stays free
     assert result["type"] == "create_entry"
-    assert result["title"] == "Radio gateway listen only (10.0.0.5)"
+    assert result["title"] == "Radio monitor (10.0.0.5)"
     assert result["data"] == {
         "brand": "radio_monitor",
         "radio_type": "esp32",
@@ -84,7 +84,7 @@ async def test_nanocul_listen_only_entry_on_dialect_a_firmware(probes) -> None:
     result = await flow.async_step_radio_monitor()
 
     assert flow._unique_id == "radio_monitor:nanocul-x1"
-    assert result["title"] == f"nanoCUL listen only ({PORT.device})"
+    assert result["title"] == f"Radio monitor ({PORT.device})"
     assert result["data"] == {
         "brand": "radio_monitor",
         "radio_type": "nanocul",

@@ -170,7 +170,7 @@
       "power_monitor_energy": { "name": "Energy" },
       "power_monitor_power": { "name": "Power" },
       "installation_total_energy": { "name": "Total energy" },
-      "radio_frames": { "name": "Radio frames heard" },
+      "frames_heard": { "name": "Frames heard" },
       "installation_info": { "name": "Location" },
       "boost_minutes_remaining": { "name": "Boost minutes remaining" },
       "boost_end": { "name": "Boost end" },
@@ -307,6 +307,11 @@
         "redact": {
           "name": "Hide private data",
           "description": "Replace network ids and heater serial numbers in the file. Without it, the file contains your network id: share it only privately."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Optional text saved in the file, for example which heater you used.",
+          "example": "identify on the living room heater"
         }
       }
     },

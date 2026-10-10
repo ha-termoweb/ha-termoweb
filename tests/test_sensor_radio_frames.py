@@ -62,10 +62,10 @@ def test_frames_sensor_follows_the_monitor(monkeypatch: pytest.MonkeyPatch) -> N
     removers: list[Any] = []
     sensor.async_on_remove = removers.append
 
-    assert sensor._attr_unique_id == f"{DOMAIN}:{DEV_ID}:radio_frames"
+    assert sensor._attr_unique_id == f"{DOMAIN}:{DEV_ID}:frames_heard"
     assert sensor._attr_native_value == 0
-    assert sensor._attr_extra_state_attributes == {"last_frame_at": None}
-    assert sensor._attr_translation_key == "radio_frames"
+    assert sensor._attr_extra_state_attributes == {"last_frame": None}
+    assert sensor._attr_translation_key == "frames_heard"
     assert sensor.device_info["identifiers"] == {(DOMAIN, DEV_ID)}
 
     connected: list[tuple[str, Any]] = []
@@ -80,10 +80,10 @@ def test_frames_sensor_follows_the_monitor(monkeypatch: pytest.MonkeyPatch) -> N
     assert len(removers) == 1
     ((signal, handle),) = connected
     assert signal == signal_radio_frames(entry.entry_id)
-    handle({"frames": 7, "last_frame_at": "2026-01-02T03:04:05+00:00"})
+    handle({"frames": 7, "last_frame": "2026-01-02T03:04:05+00:00"})
     assert writes == [7]
     assert sensor._attr_extra_state_attributes == {
-        "last_frame_at": "2026-01-02T03:04:05+00:00"
+        "last_frame": "2026-01-02T03:04:05+00:00"
     }
     removers[0]()
     assert connected == []

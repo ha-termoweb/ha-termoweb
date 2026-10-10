@@ -131,6 +131,7 @@ async def test_listen_only_client_refuses_every_transmit() -> None:
 
     (device,) = await client.list_devices()
     assert device["model"].endswith("(listen only)")
+    assert device["name"] == "Radio monitor"
 
 
 @pytest.mark.asyncio
@@ -144,6 +145,7 @@ async def test_normal_client_link_is_not_listen_only() -> None:
     assert links[0].payloads() == [p.flash_display()]
     (device,) = await client.list_devices()
     assert device["model"].endswith("(dialect B)")
+    assert device["name"] == "Radio gateway"
 
 
 def test_factory_builds_listen_only_clients() -> None:
@@ -190,14 +192,16 @@ async def test_capture_records_frames_and_lines_while_commands_wait() -> None:
         link.deliver_line("# survey off")
         assert seconds == 30
 
-    records = await client.async_capture(30, sleep=window)
+    capture = await client.async_capture(30, sleep=window)
     assert locked == [True]
-    assert [r["kind"] for r in records] == ["data", "ack", "line"]
-    assert records[0]["op"] == "BE" and records[0]["dialect"] == "B"
+    assert [r["kind"] for r in capture.frames] == ["data", "ack"]
+    assert capture.frames[0]["op"] == "BE" and capture.frames[0]["dialect"] == "B"
+    assert [r["line"] for r in capture.raw] == ["# survey off"]
+    assert capture.started is not None and capture.ended >= capture.started
     assert link.line_listeners == []
     assert len(link.listeners) == 0
     link.deliver(received(HEATER, POWER_REQUEST))
-    assert len(records) == 3
+    assert len(capture.frames) == 2
     assert link.sent == []
 
 
@@ -264,7 +268,7 @@ ESP32_INFO = dataclasses.replace(gateway_info(version="3.7-esp32"), dialect="A")
 async def test_monitor_alternates_dialects_on_esp32_and_never_answers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Each window switches B, A, B...; heater frames are counted, not answered."""
+    """Each window switches A, B, A...; heater frames are counted, not answered."""
 
     monitor, _client, links, sleeper, hass = build_monitor(ESP32_INFO)
     published: list[dict[str, Any]] = []
@@ -277,13 +281,13 @@ async def test_monitor_alternates_dialects_on_esp32_and_never_answers(
     monitor.start()
     await settle()
     link = links[0]
-    assert link.dialects == ["B"]
+    assert link.dialects == ["A"]
     assert sleeper.calls == [_mod(".radio_monitor").MONITOR_WINDOW_S]
     sleeper.release()
     await settle()
     sleeper.release()
     await settle()
-    assert link.dialects == ["B", "A", "B"]
+    assert link.dialects == ["A", "B", "A"]
 
     for payload in (REGISTRATION, POWER_REQUEST, bytes([0x56]) + STATUS_SHORT):
         link.deliver(received(HEATER, payload, dst=1))
@@ -293,7 +297,7 @@ async def test_monitor_alternates_dialects_on_esp32_and_never_answers(
     assert isinstance(monitor.last_frame_at, datetime)
     assert published[-1] == {
         "frames": 4,
-        "last_frame_at": monitor.last_frame_at.isoformat(),
+        "last_frame": monitor.last_frame_at.isoformat(),
     }
     assert monitor._ws_health_tracker().status == "healthy"  # noqa: SLF001
     assert link.sent == []  # no clock sync, no BF 01, no 57 55
@@ -329,7 +333,7 @@ async def test_monitor_survives_a_failed_dialect_switch(caplog) -> None:
         sleeper.release()
         await settle()
     assert "could not switch dialect" in caplog.text
-    assert links[0].dialects == ["B"]
+    assert links[0].dialects == ["A"]
     assert monitor.is_running()
     await monitor.stop()
 

@@ -1258,7 +1258,7 @@ class RadioFramesSensor(SensorEntity):
     """Frames a listen-only radio gateway has heard since Home Assistant started."""
 
     _attr_has_entity_name = True
-    _attr_translation_key = "radio_frames"
+    _attr_translation_key = "frames_heard"
     _attr_should_poll = False
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = "frames"
@@ -1267,9 +1267,9 @@ class RadioFramesSensor(SensorEntity):
         """Start at zero frames; the radio monitor pushes every new count."""
         self._entry_id = entry_id
         self._dev_id = str(dev_id)
-        self._attr_unique_id = f"{DOMAIN}:{self._dev_id}:radio_frames"
+        self._attr_unique_id = f"{DOMAIN}:{self._dev_id}:frames_heard"
         self._attr_native_value = 0
-        self._attr_extra_state_attributes = {"last_frame_at": None}
+        self._attr_extra_state_attributes = {"last_frame": None}
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -1288,7 +1288,5 @@ class RadioFramesSensor(SensorEntity):
     def _handle_frames(self, payload: Mapping[str, Any]) -> None:
         """Show the new frame count and the time of the last frame."""
         self._attr_native_value = payload.get("frames", 0)
-        self._attr_extra_state_attributes = {
-            "last_frame_at": payload.get("last_frame_at")
-        }
+        self._attr_extra_state_attributes = {"last_frame": payload.get("last_frame")}
         self.async_write_ha_state()

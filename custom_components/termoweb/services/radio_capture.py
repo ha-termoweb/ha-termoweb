@@ -7,24 +7,31 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from custom_components.termoweb.backend.radio import RadioLinkError
-from custom_components.termoweb.backend.radio.capture import redact, summarise
+from custom_components.termoweb.backend.radio.capture import (
+    FrameCapture,
+    mask_mac,
+    redact,
+    redact_line,
+    summarise,
+)
 from custom_components.termoweb.backend.radio_client import RadioClient, RadioError
-from custom_components.termoweb.const import CONF_RADIO_TYPE, DOMAIN, RADIO_TYPE_ESP32
+from custom_components.termoweb.backend.radio_monitor import MONITOR_DIALECTS
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.radio_survey import async_save_report
 from custom_components.termoweb.runtime import require_runtime
 
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_RADIO_CAPTURE = "radio_capture"
-CAPTURE_FORMAT = 1
+CAPTURE_VERSION = 1
 CAPTURE_PREFIX = "termoweb_radio_capture"
 DEFAULT_CAPTURE_S = 120
 MIN_CAPTURE_S = 10
 MAX_CAPTURE_S = 1800
+RESPONSE_KEYS = ("frames", "networks", "nodes", "opcodes")
 RADIO_CAPTURE_SCHEMA = vol.Schema(
     {
         vol.Required("entry_id"): str,
@@ -32,38 +39,47 @@ RADIO_CAPTURE_SCHEMA = vol.Schema(
             vol.Coerce(int), vol.Range(min=MIN_CAPTURE_S, max=MAX_CAPTURE_S)
         ),
         vol.Optional("redact", default=False): bool,
+        vol.Optional("note"): str,
     }
 )
 
 
-def capture_payload(
-    records: list[dict[str, Any]],
-    summary: dict[str, Any],
-    *,
-    client: RadioClient,
-    radio_type: str,
-    seconds: int,
-    redacted: bool,
-    version: str | None,
-) -> dict[str, Any]:
-    """Return the capture file content; the gateway MAC is never included."""
+def dialects_listened(client: RadioClient) -> list[str]:
+    """Return the dialects the capture heard: both on a listen-only ESP32 entry."""
 
     info = client.gateway_info
+    if client.listen_only and info is not None and info.dialect is not None:
+        return [dialect.name for dialect in MONITOR_DIALECTS]
+    return [client.dialect.name]
+
+
+def capture_payload(
+    capture: FrameCapture,
+    client: RadioClient,
+    *,
+    redacted: bool,
+    note: str | None,
+) -> dict[str, Any]:
+    """Return the capture file content; the gateway MAC is always masked."""
+
+    frames, raw = capture.frames, capture.raw
+    if redacted:
+        frames, raw = redact(frames, raw)
+    info = client.gateway_info
+    gateway = None if info is None else mask_mac(info.raw)
+    if gateway is not None and redacted:
+        gateway = redact_line(gateway)
     return {
-        "format": CAPTURE_FORMAT,
-        "created": dt_util.utcnow().isoformat(timespec="seconds"),
-        "integration_version": version,
-        "radio_type": radio_type,
-        "listen_only": client.listen_only,
-        "gateway": {
-            "firmware": None if info is None else info.version,
-            "freq": None if info is None else info.freq,
-            "dialects": "A" if info is None or info.dialect is None else "A+B",
-        },
-        "capture_seconds": seconds,
+        "version": CAPTURE_VERSION,
+        "started": capture.started,
+        "ended": capture.ended,
+        "gateway": gateway,
+        "dialects_listened": dialects_listened(client),
+        "note": note,
         "redacted": redacted,
-        "summary": summary,
-        "records": records,
+        "summary": summarise(frames),
+        "frames": frames,
+        "raw": raw,
     }
 
 
@@ -92,29 +108,21 @@ async def async_register_radio_capture_service(hass: HomeAssistant) -> None:
             )
         _LOGGER.info("Radio capture for %s: recording %d s", entry_id, seconds)
         try:
-            records = await client.async_capture(seconds)
+            capture = await client.async_capture(seconds)
         except (RadioError, RadioLinkError) as err:
             raise HomeAssistantError(f"Radio capture failed: {err}") from err
-        if redacted:
-            records = redact(records)
-        summary = summarise(records)
         payload = capture_payload(
-            records,
-            summary,
-            client=client,
-            radio_type=runtime.config_entry.data.get(CONF_RADIO_TYPE, RADIO_TYPE_ESP32),
-            seconds=seconds,
-            redacted=redacted,
-            version=runtime.version or None,
+            capture, client, redacted=redacted, note=call.data.get("note")
         )
-        path = await async_save_report(hass, entry_id, payload, prefix=CAPTURE_PREFIX)
-        result = {**summary, "redacted": redacted, "file": path}
+        path = await async_save_report(hass, None, payload, prefix=CAPTURE_PREFIX)
+        summary = payload["summary"]
+        result = {"file": path, **{key: summary[key] for key in RESPONSE_KEYS}}
         runtime.last_radio_capture = result
         _LOGGER.info(
-            "Radio capture for %s: %d frames, %d undecodable",
+            "Radio capture for %s: %d frames, %d raw lines",
             entry_id,
             summary["frames"],
-            summary["undecodable"],
+            len(payload["raw"]),
         )
         return result
 
