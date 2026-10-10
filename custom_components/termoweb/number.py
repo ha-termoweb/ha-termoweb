@@ -150,8 +150,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for node_type, _node, addr_str, base_name in priority_nodes:
         canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
         canonical_addr = normalize_node_addr(addr_str, use_default_when_falsey=True)
-        if not canonical_type or not canonical_addr:
-            continue
         priority_unique_id = build_heater_unique_id(
             dev_id, canonical_type, canonical_addr, suffix=":priority"
         )
@@ -180,9 +178,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         )
 
-    if new_entities:
-        _LOGGER.debug("Adding %d TermoWeb number entities", len(new_entities))
-        async_add_entities(new_entities)
+    _LOGGER.debug("Adding %d TermoWeb number entities", len(new_entities))
+    async_add_entities(new_entities)
 
 
 class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity):
@@ -252,7 +249,7 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
         """Handle slider updates from the user interface."""
 
         minutes = self._hours_to_minutes(value)
-        if minutes is None or minutes not in ALLOWED_BOOST_MINUTES:
+        if minutes is None:
             raise ServiceValidationError(
                 f"Invalid boost duration for {self._addr}: {value}"
             )
@@ -288,33 +285,23 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
             return candidate
         return DEFAULT_BOOST_DURATION
 
-    def _apply_minutes(self, minutes: int | None) -> None:
+    def _apply_minutes(self, minutes: int) -> None:
         """Update the fallback minutes shown until the device reports boost_time."""
 
-        self._minutes = self._validate_minutes(minutes)
-
-    def _validate_minutes(self, minutes: int | None) -> int:
-        """Return a supported minute value, falling back to the default."""
-
-        candidate = coerce_boost_minutes(minutes)
-        if candidate in ALLOWED_BOOST_MINUTES:
-            return candidate
-        return DEFAULT_BOOST_DURATION
+        self._minutes = minutes
 
     @staticmethod
     def _hours_to_minutes(value: Any) -> int | None:
-        """Translate a slider value in hours into whole minutes."""
+        """Return the supported boost minutes for ``value`` hours, else None."""
 
-        if value is None:
-            return None
         try:
             hours = float(value)
-        except (TypeError, ValueError):
+        except ValueError:
             return None
         if not math.isfinite(hours):
             return None
-        minutes = int(round(hours * 60))
-        return minutes if minutes > 0 else None
+        minutes = round(hours * 60)
+        return minutes if minutes in ALLOWED_BOOST_MINUTES else None
 
 
 class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEntity):

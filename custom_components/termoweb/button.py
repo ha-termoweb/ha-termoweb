@@ -14,7 +14,6 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .backend.sanitize import mask_identifier, redact_text
-from .domain import DomainStateView
 from .domain.ids import HEATING_NODE_TYPES
 from .domain.state import DomainState
 from .entity import (
@@ -30,8 +29,6 @@ from .identifiers import build_gateway_entity_unique_id, build_heater_unique_id
 from .inventory import (
     AccumulatorNode,
     Inventory,
-    normalize_node_addr,
-    normalize_node_type,
 )
 from .runtime import require_runtime
 from .utils import build_gateway_device_info, build_node_device_info
@@ -68,17 +65,11 @@ def _iter_display_flash_contexts(
     """Yield flash-button contexts for flash-capable inventory nodes."""
 
     for metadata in inventory.iter_nodes_metadata(node_types=HEATING_NODE_TYPES):
-        node_type = normalize_node_type(
-            metadata.node_type, use_default_when_falsey=True
-        )
-        addr = normalize_node_addr(metadata.addr, use_default_when_falsey=True)
-        if not node_type or not addr:
-            continue
         yield DisplayFlashContext(
             entry_id=entry_id,
             dev_id=inventory.dev_id,
-            node_type=node_type,
-            addr=addr,
+            node_type=metadata.node_type,
+            addr=metadata.addr,
             name=metadata.name,
         )
 
@@ -137,10 +128,7 @@ def _iter_accumulator_contexts(
     """Yield boost contexts for accumulator nodes in ``inventory``."""
 
     for metadata in inventory.iter_nodes_metadata(node_types=("acm",)):
-        node = metadata.node
-        if not isinstance(node, AccumulatorNode):
-            continue
-        yield AccumulatorBoostContext.from_inventory(entry_id, inventory, node)
+        yield AccumulatorBoostContext.from_inventory(entry_id, inventory, metadata.node)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -154,12 +142,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ]
 
     inventory = runtime.inventory
-    if not isinstance(inventory, Inventory):
-        _LOGGER.error(
-            "TermoWeb button setup missing inventory for device %s",
-            mask_identifier(dev_id),
-        )
-        raise ValueError("TermoWeb inventory unavailable for button platform")
 
     log_skipped_nodes("button", inventory, logger=_LOGGER)
 
@@ -217,19 +199,15 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
         coordinator,
         context: AccumulatorBoostContext,
         *,
-        label: str | None,
         unique_suffix: str,
-        icon: str | None = None,
+        icon: str,
     ) -> None:
         """Initialise an accumulator boost helper button."""
 
         super().__init__(coordinator)
         self._boost_context = context
-        if label:
-            self._attr_name = label
         self._attr_unique_id = context.unique_id(unique_suffix)
-        if icon is not None:
-            self._attr_icon = icon
+        self._attr_icon = icon
 
     @property
     def boost_context(self) -> AccumulatorBoostContext:
@@ -251,12 +229,7 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
     def _coordinator_state(self) -> DomainState | None:
         """Return cached coordinator state for this accumulator."""
 
-        coordinator = getattr(self, "coordinator", None)
-        view = getattr(coordinator, "domain_view", None)
-        if not isinstance(view, DomainStateView):
-            return None
-
-        return view.get_heater_state(
+        return self.coordinator.domain_view.get_heater_state(
             self.boost_context.node_type,
             self.boost_context.addr,
         )
@@ -329,22 +302,17 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
     ) -> None:
         """Initialise the boost helper button that uses stored presets."""
 
-        icon = metadata.icon or None
         super().__init__(
             coordinator,
             context,
-            label=None,
             unique_suffix=metadata.unique_suffix,
-            icon=icon,
+            icon=metadata.icon,
         )
 
     async def async_press(self) -> None:
         """Start a boost for the stored duration at the device boost setpoint."""
 
         hass = self.hass
-        if hass is None:
-            return
-
         context = self.boost_context
         state = self._coordinator_state()
         minutes = resolve_boost_runtime_minutes(state)
@@ -371,13 +339,11 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
     ) -> None:
         """Initialise the boost cancellation helper button."""
 
-        icon = metadata.icon or None
         super().__init__(
             coordinator,
             context,
-            label=None,
             unique_suffix=metadata.unique_suffix,
-            icon=icon,
+            icon=metadata.icon,
         )
 
     @property
@@ -392,9 +358,6 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
         """Cancel the active accumulator boost session."""
 
         hass = self.hass
-        if hass is None:
-            return
-
         context = self.boost_context
         await self._async_boost_request(
             hass,
@@ -451,9 +414,6 @@ class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
         """Call the backend /select endpoint to flash the unit display."""
 
         hass = self.hass
-        if hass is None:
-            return
-
         runtime = require_runtime(hass, self._flash_context.entry_id)
         _LOGGER.info(
             "Requesting display flash for %s/%s node %s",
@@ -502,16 +462,5 @@ def _build_boost_button(
     """Instantiate a boost helper button for ``metadata``."""
 
     if metadata.action == "start":
-        return AccumulatorBoostButton(
-            coordinator,
-            context,
-            metadata,
-        )
-    if metadata.action == "cancel":
-        return AccumulatorBoostCancelButton(
-            coordinator,
-            context,
-            metadata,
-        )
-
-    raise ValueError(f"Unsupported boost button action: {metadata.action}")
+        return AccumulatorBoostButton(coordinator, context, metadata)
+    return AccumulatorBoostCancelButton(coordinator, context, metadata)
