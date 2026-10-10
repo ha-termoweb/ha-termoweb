@@ -792,11 +792,11 @@ class TermoWebWSClient(_WSCommon):
             ws = self._ws
             if ws is None or ws.closed:
                 break
-            # Silence since connecting counts as idle even when no payload
-            # has ever arrived.
+            # Only this session's payloads count: silence since connecting is
+            # idle time, whatever an earlier session last received.
             last_payload = self._ws_health_tracker().last_payload_at or connected_at
             now = time.time()
-            idle_for = now - last_payload
+            idle_for = now - max(last_payload, connected_at)
             self._refresh_ws_payload_state(now=now, reason="idle_monitor")
             if idle_for >= self._payload_idle_window:
                 _LOGGER.debug(
