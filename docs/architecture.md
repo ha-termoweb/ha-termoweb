@@ -175,3 +175,11 @@ Implementation note for heater writes:
   program slot boundary, then the backend resumes `auto` behavior.
 - HA **Heat** (manual mode selected explicitly by the user) maps to backend
   `manual`.
+- A backend `modified_auto` is reported as preset `temporary_override`. The
+  preset is display-only (not in `preset_modes`); selecting preset `none`
+  resumes `auto`.
+- An unknown or missing backend mode is reported as an unknown HVAC mode
+  (`None`), never as Heat. Accumulators list Heat only while the device reports
+  `manual`, which the integration cannot set on them.
+- `climate.turn_off` selects Off; `climate.turn_on` restores the mode used
+  before the last turn off (Heat or Auto; accumulators always Auto), else Auto.

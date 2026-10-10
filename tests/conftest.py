@@ -1811,7 +1811,9 @@ def _install_stubs() -> None:
 
     class ClimateEntityFeature(enum.IntFlag):
         TARGET_TEMPERATURE = 1
-        PRESET_MODE = 2
+        PRESET_MODE = 16
+        TURN_OFF = 128
+        TURN_ON = 256
 
     class HVACMode(str, enum.Enum):
         OFF = "off"
