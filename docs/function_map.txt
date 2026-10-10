@@ -1239,7 +1239,7 @@ custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._current_p
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._shared_inventory
     Return the shared immutable inventory for this coordinator.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._optimistic_update
-    Apply ``mutator`` to cached state and refresh state if changed.
+    Apply ``mutator`` to cached state and write the entity state.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._async_write_settings
     Submit a settings update to the TermoWeb API.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._async_client_call
@@ -1296,12 +1296,6 @@ custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._write_aft
     Flush pending writes after the debounce, repeating while new ones queue.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._async_flush_pending_write
     Send the currently pending mode/setpoint as one backend write.
-custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._schedule_refresh_fallback
-    Schedule a refresh if the websocket echo does not arrive.
-custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._schedule_refresh_fallback._fallback
-    Force a heater refresh after the fallback delay.
-custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._gateway_connection_state
-    Return the current gateway connection state.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.__init__
     Initialise the accumulator climate entity.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity._default_mode_for_setpoint
@@ -1358,6 +1352,16 @@ custom_components/termoweb/entities/heater.py :: set_boost_temperature
     Persist ``temperature`` as the preferred boost setpoint.
 custom_components/termoweb/entities/heater.py :: resolve_boost_runtime_minutes
     Return the preferred boost runtime or ``default`` when unset.
+custom_components/termoweb/entities/heater.py :: ws_echo_expected
+    Return True when a healthy WebSocket is expected to echo a write.
+custom_components/termoweb/entities/heater.py :: NodeRefreshFallback.__init__
+    Bind the fallback to ``entity`` and its node.
+custom_components/termoweb/entities/heater.py :: NodeRefreshFallback.schedule
+    Schedule a single-node refresh unless the WebSocket will echo the write.
+custom_components/termoweb/entities/heater.py :: NodeRefreshFallback.cancel
+    Cancel a pending fallback refresh.
+custom_components/termoweb/entities/heater.py :: NodeRefreshFallback._run
+    Refresh the node after the WebSocket echo delay.
 custom_components/termoweb/entities/heater.py :: async_backend_write
     Await a backend write, raising HomeAssistantError when it fails.
 custom_components/termoweb/entities/heater.py :: resolve_state_units
@@ -1875,6 +1879,8 @@ custom_components/termoweb/entities/lock.py :: async_setup_entry
     Set up child lock entities for heater and accumulator nodes.
 custom_components/termoweb/entities/lock.py :: ChildLockEntity.__init__
     Initialise the child lock entity.
+custom_components/termoweb/entities/lock.py :: ChildLockEntity.async_added_to_hass
+    Cancel a pending fallback refresh when the entity is removed.
 custom_components/termoweb/entities/lock.py :: ChildLockEntity.is_locked
     Return True when the child lock is engaged.
 custom_components/termoweb/entities/lock.py :: ChildLockEntity.icon
@@ -1887,6 +1893,8 @@ custom_components/termoweb/entities/lock.py :: ChildLockEntity.async_lock
     Enable the child lock.
 custom_components/termoweb/entities/lock.py :: ChildLockEntity.async_unlock
     Disable the child lock.
+custom_components/termoweb/entities/lock.py :: ChildLockEntity._apply_lock
+    Show the written lock state now; the WebSocket echo confirms it.
 custom_components/termoweb/entities/lock.py :: _iter_lockable_inventory_nodes
     Yield htr and acm node metadata from ``inventory``.
 custom_components/termoweb/entities/lock.py :: _build_settings_resolver
