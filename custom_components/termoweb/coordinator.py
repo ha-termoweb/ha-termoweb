@@ -297,7 +297,10 @@ class StateCoordinator(
             return
         changed = self._state_store.set_energy_snapshot(snapshot)
         if changed:
-            self._publish_device_record()
+            # An energy poll says nothing about the state poll: refresh
+            # listeners without marking a failed state update successful.
+            self.data = self._device_record()
+            self.async_update_listeners()
 
     def _device_record(self) -> dict[str, dict[str, Any]]:
         """Return a minimal coordinator payload for this device."""
