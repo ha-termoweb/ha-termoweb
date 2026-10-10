@@ -5,6 +5,16 @@
 Review the authoritative architecture overview before making structural
 changes: [`docs/architecture.md`](./architecture.md).
 
+## Removed in the 2026-10 release
+
+- The `ws_debug_probe` service and the `debug` option are gone. Contributors use the standard
+  `logger:` setting for `custom_components.termoweb` (see `DEBUG.md`).
+- The `python-socketio` dependency is gone. The WebSocket clients in `backend/` speak Socket.IO
+  themselves.
+- All REST traffic of a client goes through one rate limiter (`REST_MIN_INTERVAL_S`, 0.5 s, so at
+  most 2 requests per second). The energy history import relies on it. Do not add calls that
+  bypass it.
+
 ## Backend factory API change
 
 The `create_backend` helper in `custom_components.termoweb.backend.factory` no longer accepts a

@@ -80,7 +80,7 @@ If your dashboard shows a preset label, **temporary override** means: “Use thi
 
 - A working TermoWeb setup (gateway connected to the router, heaters paired).
 - The **TermoWeb account email & password** (the same used in the mobile app / web).
-- Home Assistant (Core, OS, or Container) with internet access.
+- Home Assistant **2026.10.0 or newer** (Core, OS, or Container) with internet access. HACS will not install the integration on an older version. Update Home Assistant first.
 
 ---
 
@@ -128,6 +128,50 @@ ha-termoweb/ha-termoweb
 7) Copy the custom card for a dashboard element that allows you to program presets and weekly schedule across heaters. 
 ---
 
+## After the upgrade (2026-10 release)
+
+What changed, and what you need to do:
+
+- **Home Assistant 2026.10.0 or newer is required.** Update Home Assistant first, then update the integration in HACS. Restart Home Assistant when asked.
+- **Your entities are kept.** On the first start, the integration moves all entities to one new ID scheme by itself. Entity IDs (for example `climate.living_room`), history, names, areas and dashboards stay the same. You do not need to do anything.
+- **One unavailable duplicate?** Some people have an old, unavailable entity left over from version 2.3.0 (for example a second **Installation info** sensor). Delete the one that shows **unavailable**:
+  1. Go to **Settings → Devices & Services → Entities**.
+  2. Search for the name, for example `installation info`.
+  3. Open the entity that says **unavailable** or **no longer provided by the integration**.
+  4. Click the **gear** icon, then **Delete**.
+  Keep the entity that has a value.
+- **Temperatures in °F** are now shown correctly for devices that use Fahrenheit.
+- **Turn on and turn off** now work from the climate card, automations and voice assistants.
+- **Unavailable when the cloud is down.** If the TermoWeb cloud cannot be reached, your entities show **unavailable** instead of old values. They come back by themselves when the cloud is back.
+- **Boost (accumulators).** Boost can last 60 to 600 minutes (in steps of 60). The boost buttons work again. The boost duration and boost temperature numbers now save to the device.
+- **Removed:** the `ws_debug_probe` action and the **debug** option. To collect logs, see [DEBUG.md](DEBUG.md).
+
+### Your password changed
+
+If you change your password in the TermoWeb, Ducaheat or Tevolve app, Home Assistant cannot sign in any more. Then:
+
+1. Open **Settings → Devices & Services**. The TermoWeb card asks you to sign in again. A message also appears in **Settings → Repairs**.
+2. Click it and enter the **new password**.
+3. The integration reloads by itself. You do not need to remove it.
+
+Changing the settings with **⋮ → Reconfigure** also reloads the integration for you.
+
+### One account, one entry
+
+You can add each account only once. The same email on **Ducaheat** and **Tevolve** counts as the same account, because both use the Ducaheat backend. Upper and lower case in the email do not matter. If you try to add it again, Home Assistant says it is already configured.
+
+### Why the integration is careful with the cloud
+
+The cloud is shared by many users. To protect it, the integration:
+
+- uses the **WebSocket** (live push) for updates once it has started. It asks the cloud over REST only when the WebSocket is not available.
+- sends at most **2 cloud requests per second**, also during the energy history import.
+- waits a short time before it tries to reconnect after an outage.
+
+Please do not add automations that call the cloud very often.
+
+---
+
 ## Tips
 - **Voice control:** Expose heater entities via Home Assistant’s Google or Alexa integrations.
 - **Automations idea:** Lower temperature when nobody’s home; switch to **Off** if a window sensor is open for 10+ minutes.
@@ -144,11 +188,13 @@ See instructions in custom_components/termoweb/assets, to install the card and c
 - Add these sensors in **Settings → Dashboards → Energy** to include them in Home Assistant’s Energy Dashboard.
 - Live energy samples now arrive via the websocket connection, with the hourly
   REST poll remaining as a fallback if the push feed is unavailable.
-- Use the `termoweb.import_energy_history` action (Developer Tools → Actions) to add past consumption after installing the integration:
-  1. Set **Max history days** to how far back you want (default 7 days).
-  2. Run the action. It asks the cloud for one day per request, at most 2 requests per second, so a year for 3 heaters takes about 10 minutes.
+- Use the `termoweb.import_energy_history` action (Developer Tools → Actions) to add past consumption after installing the integration. **Run it once.** Most people never need to run it again.
+  1. Set **Max history days** to how far back you want (1 to 3650, default 7).
+  2. Run the action. It imports every heater, accumulator and power monitor that has an energy sensor. It asks the cloud for one day per request, at most 2 requests per second, so a year for 3 heaters takes about 10 minutes. Do not start it twice. A second run while one is active stops with "already running".
   3. If it stops with an error, run it again later. It continues where it stopped.
   4. To get more days later, run it again with a bigger number. Only the missing older days are fetched.
+  5. To import the whole period again, turn on **Reset progress**. The old statistics are overwritten in place. Nothing is deleted.
+- What you will see: in **Settings → Dashboards → Energy**, the past days fill in with hourly values. The totals continue without a jump at the point where the import ends. The numbers can take a few minutes to show after the import ends.
 - No extra configuration is required beyond selecting the sensors in the Energy Dashboard.
 
 ---
@@ -159,7 +205,9 @@ See instructions in custom_components/termoweb/assets, to install the card and c
 - **No devices found:** Check the **gateway** is powered and online (LEDs), and that the manufacturer app shows heaters online.
 - **Slow reconnect after errors:** Websocket retries are rate limited to protect the backend. A brief pause between attempts is
   expected after any outage.
-- **Collect diagnostics:** In **Settings → Devices & Services → TermoWeb → ⋮**, choose **Download diagnostics** to save an anonymised report (integration/Home Assistant versions, backend brand, node inventory). Attach that JSON file when opening an issue so we can reproduce problems faster.
+- **Login fails after a password change:** See **Your password changed** above.
+- **Entities show unavailable:** The cloud may be down, or your gateway is offline. Check the manufacturer app. They return by themselves.
+- **Collect diagnostics:** In **Settings → Devices & Services → TermoWeb → ⋮**, choose **Download diagnostics** to save an anonymised report (integration/Home Assistant versions, backend brand, node inventory; account, gateway id and location are removed). Attach that JSON file when opening an issue so we can reproduce problems faster.
 - **Need help?** Open a GitHub issue with brand/model and a brief description. **Never share passwords or private info.**
 
 ---
