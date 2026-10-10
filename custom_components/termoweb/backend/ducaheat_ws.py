@@ -100,7 +100,7 @@ def _decode_polling_packets(body: bytes) -> list[str]:
         i = end
         try:
             pkt = payload.decode("utf-8", errors="ignore")
-        except (UnicodeDecodeError, ValueError):
+        except UnicodeDecodeError, ValueError:
             pkt = ""
         if pkt:
             out.append(pkt)
@@ -304,7 +304,7 @@ class DucaheatWSClient(_WSCommon):
 
     def _base_host(self) -> str:
         base = get_brand_api_base(self._brand).rstrip("/")
-        parsed = urlsplit(base if base else API_BASE)
+        parsed = urlsplit(base or API_BASE)
         return urlunsplit(
             (parsed.scheme or "https", parsed.netloc or parsed.path, "", "", "")
         )
@@ -540,7 +540,7 @@ class DucaheatWSClient(_WSCommon):
         try:
             hint_value = float(window_hint)  # type: ignore[arg-type]
             payload_ts = float(last_payload) if last_payload is not None else None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
 
         ws = self._ws
@@ -575,7 +575,7 @@ class DucaheatWSClient(_WSCommon):
         try:
             await self._emit_sio("dev_data")
             await self._replay_subscription_paths()
-        except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
+        except Exception:  # pragma: no cover - defensive logging
             _LOGGER.debug(
                 "WS: soft lease refresh failed for %s",
                 self.dev_id,
@@ -659,21 +659,21 @@ class DucaheatWSClient(_WSCommon):
             )
             try:
                 await self._emit_sio("dev_data")
-            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+            except Exception:  # pragma: no cover - defensive
                 _LOGGER.debug(
                     "WS: idle recovery dev_data probe failed",
                     exc_info=True,
                 )
             try:
                 await self._replay_subscription_paths()
-            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+            except Exception:  # pragma: no cover - defensive
                 _LOGGER.debug(
                     "WS: idle recovery replay failed",
                     exc_info=True,
                 )
             try:
                 await self._maybe_subscribe(now)
-            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+            except Exception:  # pragma: no cover - defensive
                 _LOGGER.debug(
                     "WS: idle recovery subscribe failed",
                     exc_info=True,
@@ -715,7 +715,7 @@ class DucaheatWSClient(_WSCommon):
                     break
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+        except Exception:  # pragma: no cover - defensive
             _LOGGER.debug("WS: idle monitor error", exc_info=True)
         finally:
             if self._idle_monitor_task is task:
@@ -814,7 +814,7 @@ class DucaheatWSClient(_WSCommon):
                                         self._pending_subscribe = False
                                     await self._maybe_subscribe(now)
                                     self._start_idle_monitor()
-                                except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+                                except Exception:  # pragma: no cover - defensive
                                     _LOGGER.debug(
                                         "WS: failed to emit dev_data or replay subscriptions",
                                         exc_info=True,
@@ -977,12 +977,12 @@ class DucaheatWSClient(_WSCommon):
                     continue
                 try:
                     await self._send_str("2", context="keepalive-ping", ws=ws)
-                except Exception:  # noqa: BLE001 - defensive logging
+                except Exception:
                     _LOGGER.debug("WS: keepalive ping failed", exc_info=True)
                     break
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+        except Exception:  # pragma: no cover - defensive
             _LOGGER.debug("WS: keepalive loop error", exc_info=True)
         finally:
             if self._keepalive_task is task:
@@ -1078,7 +1078,7 @@ class DucaheatWSClient(_WSCommon):
             return None
         try:
             candidate = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         if not math.isfinite(candidate) or candidate <= 0:
             return None
@@ -1273,7 +1273,7 @@ class DucaheatWSClient(_WSCommon):
             state = self._ws_state_bucket()
             state["last_subscribe_success_at"] = attempt_ts
             return len(paths)
-        except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+        except Exception:  # pragma: no cover - defensive
             _LOGGER.debug("WS: subscribe failed", exc_info=True)
             self._pending_subscribe = True
             self._increment_state_counter("subscribe_fail_total")
@@ -1323,7 +1323,7 @@ class DucaheatWSClient(_WSCommon):
         for path in sorted(self._subscription_paths):
             try:
                 await self._emit_sio("subscribe", path)
-            except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
+            except Exception:  # pragma: no cover - defensive logging
                 _LOGGER.debug(
                     "WS: replay subscribe failed for path %s",
                     path,
@@ -1358,7 +1358,7 @@ class DucaheatWSClient(_WSCommon):
                     code=aiohttp.WSCloseCode.GOING_AWAY,
                     message=reason.encode(),
                 )
-            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+            except Exception:  # pragma: no cover - defensive
                 _LOGGER.debug("WS: close failed", exc_info=True)
             self._ws = None
         self._pending_dev_data = False

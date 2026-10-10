@@ -55,9 +55,9 @@ def test_node_type_sets_are_canonical_strings() -> None:
     for group in (ENERGY_NODE_TYPES, HEATER_NODE_TYPES, HEATING_NODE_TYPES):
         assert group <= values
         assert all(type(item) is str for item in group)
-    assert ENERGY_NODE_TYPES == {"htr", "acm", "pmo"}
-    assert HEATER_NODE_TYPES == {"htr", "acm", "thm"}
-    assert HEATING_NODE_TYPES == {"htr", "acm"}
+    assert {"htr", "acm", "pmo"} == ENERGY_NODE_TYPES
+    assert {"htr", "acm", "thm"} == HEATER_NODE_TYPES
+    assert {"htr", "acm"} == HEATING_NODE_TYPES
 
 
 def _view_with_metric() -> tuple[DomainStateView, EnergyNodeMetrics]:

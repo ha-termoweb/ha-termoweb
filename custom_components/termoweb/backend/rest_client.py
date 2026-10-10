@@ -217,7 +217,7 @@ class RESTClient:
                     body_text: str | None
                     try:
                         body_text = await resp.text()
-                    except Exception:
+                    except Exception:  # noqa: BLE001 - defensive
                         body_text = "<no body>"
 
                     _LOGGER.debug("HTTP %s -> %s, ctype=%s", url, resp.status, ctype)
@@ -259,11 +259,11 @@ class RESTClient:
                     ):
                         try:
                             return await resp.json(content_type=None)
-                        except Exception:
+                        except Exception:  # noqa: BLE001 - defensive
                             return body_text
                     return body_text
 
-            except (BackendAuthError, BackendRateLimitError):
+            except BackendAuthError, BackendRateLimitError:
                 raise
             except aiohttp.ClientResponseError as e:
                 # Single log line per failure. 5xx is transient (the caller
@@ -587,7 +587,7 @@ class RESTClient:
         if isinstance(response, Mapping) and "power_limit" in response:
             try:
                 return int(response["power_limit"])
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 return None
         return None
 
@@ -773,7 +773,7 @@ class RESTClient:
 
         try:
             preview = redact_text(repr(payload))
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # pragma: no cover - defensive  # noqa: BLE001 - defensive
             preview = "<unreprable>"
         if len(preview) > 500:
             preview = f"{preview[:497]}..."

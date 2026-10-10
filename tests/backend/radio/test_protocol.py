@@ -183,7 +183,7 @@ def test_write_program_hourly_wire_echoes_dialect_b_read() -> None:
     assert p.write_program(week, wire_slots=p.SLOTS_HOURLY) == b"\xb2" + B_PROGRAM[1:]
     half = [[slot for slot in day for _ in range(2)] for day in week]
     assert p.write_program(half, wire_slots=p.SLOTS_HOURLY) == b"\xb2" + B_PROGRAM[1:]
-    half[0] = [2] + half[0][1:]
+    half[0] = [2, *half[0][1:]]
     with pytest.raises(ValueError, match="half-hour"):
         p.write_program(half, wire_slots=p.SLOTS_HOURLY)
     with pytest.raises(ValueError, match="wire_slots"):

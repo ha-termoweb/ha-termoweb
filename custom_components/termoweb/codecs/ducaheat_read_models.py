@@ -50,7 +50,7 @@ def _normalise_prog(data: Any) -> list[int] | None:
     if isinstance(data, list):
         try:
             values = [int(v) for v in data]
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         if len(values) == 168 and all(v in (0, 1, 2) for v in values):
             return values
@@ -97,7 +97,7 @@ def _normalise_prog(data: Any) -> list[int] | None:
 
         try:
             values = [int(v) for v in candidate]
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
         if len(values) == 48:
@@ -537,7 +537,7 @@ class DucaheatThermostatSettings(DucaheatReadModel):
 
         try:
             battery = int(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return max(0, min(5, battery))
 

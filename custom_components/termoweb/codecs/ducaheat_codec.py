@@ -130,7 +130,7 @@ def extract_prog_days(section: Any) -> dict[str, list[int]]:
             continue
         try:
             values = [int(value) for value in slots]
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if len(values) in (24, 48) and all(value in (0, 1, 2) for value in values):
             days[str(idx)] = values

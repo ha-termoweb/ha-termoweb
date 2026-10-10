@@ -236,6 +236,13 @@ warning fails the run:
 timeout 120s uv run pytest --cov
 ```
 
+Code style is checked in CI with a pinned Ruff. Run both commands before you commit:
+
+```bash
+uv run ruff format custom_components tests
+uv run ruff check custom_components tests
+```
+
 See [`docs/developer-notes.md`](docs/developer-notes.md) for backend write semantics and other
 implementation details for contributors.
 

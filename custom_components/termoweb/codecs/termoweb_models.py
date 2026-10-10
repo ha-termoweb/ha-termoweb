@@ -62,7 +62,7 @@ def normalise_prog(value: Any) -> Any:
     for item in value:
         try:
             normalised.append(int(item))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             normalised.append(item)
     return normalised
 

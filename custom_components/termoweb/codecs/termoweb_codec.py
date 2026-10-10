@@ -118,7 +118,9 @@ def build_extra_options_payload(command: SetExtraOptions) -> dict[str, Any]:
 def build_boost_payload(command: AccumulatorCommand) -> dict[str, Any]:
     """Encode accumulator boost commands for TermoWeb."""
 
-    if not isinstance(command, (StartBoost, StopBoost)):  # pragma: no cover - defensive guard
+    if not isinstance(
+        command, (StartBoost, StopBoost)
+    ):  # pragma: no cover - defensive guard
         raise TypeError(f"Unsupported boost command: {type(command).__name__}")
 
     boost_flag = isinstance(command, StartBoost)

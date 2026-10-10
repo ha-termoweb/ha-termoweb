@@ -70,7 +70,7 @@ def fake_radio_links() -> Generator[list[FakeRadioLink]]:
             links.append(FakeRadioLink(*a, **kw))
             return links[-1]
 
-        client._link_factory = _link  # noqa: SLF001 - the transport boundary
+        client._link_factory = _link
         client.reply_timeout = 0.01  # unanswered polls must not cost real seconds
         return client
 

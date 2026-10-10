@@ -30,7 +30,7 @@ End users are non-technical Home Assistant operators. Documentation must be task
 * Apply the **minimal viable change** for each task; avoid touching unrelated code.
 * Adhere to DRY principles and practice defensive programming—anticipate invalid input, communication failures, and other error conditions, and handle them gracefully.
 * Log major function entry/exit points at `INFO`, protocol interactions at `DEBUG`, and errors at `ERROR`.
-* Format and lint all changes with `ruff` before committing.
+* Ruff is pinned (`ruff==0.17.0` in the `test` extra) and enforced in CI. Before committing run `uv run ruff format custom_components tests` and `uv run ruff check custom_components tests`; both must be clean tree-wide. Run `git config blame.ignoreRevsFile .git-blame-ignore-revs` to hide the mass-format commit from blame.
 
 ## Testing Requirements
 * Install with `uv sync --locked --extra test`, then run the suite on real Home Assistant (pytest-homeassistant-custom-component): `timeout 120s uv run pytest --cov`. The 95% coverage gate applies.

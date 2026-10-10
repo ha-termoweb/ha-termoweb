@@ -211,7 +211,7 @@ async def test_no_raw_dev_id_at_info_or_above(
     client = _ws_client(config_entry, hass)
     unknown: dict[str, Any] = {"nodes": {"htr": {"settings": {"9": {"mode": "auto"}}}}}
     for _ in range(3):
-        client._apply_nodes_payload(unknown, merge=True, event="update")  # noqa: SLF001
+        client._apply_nodes_payload(unknown, merge=True, event="update")
 
     assert await hass.config_entries.async_unload(config_entry.entry_id)
     await hass.async_block_till_done()
@@ -239,7 +239,7 @@ async def test_unknown_node_logged_once_at_debug(
     client = _ws_client(config_entry, hass)
     unknown: dict[str, Any] = {"nodes": {"htr": {"settings": {"9": {"mode": "auto"}}}}}
     for _ in range(3):
-        client._apply_nodes_payload(unknown, merge=True, event="update")  # noqa: SLF001
+        client._apply_nodes_payload(unknown, merge=True, event="update")
 
     lines = [r for r in caplog.records if "unknown node" in r.getMessage()]
     assert [r.levelno for r in lines] == [logging.DEBUG]

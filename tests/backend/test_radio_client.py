@@ -94,7 +94,7 @@ def test_constructor_validates_dialect_and_defaults_port() -> None:
 
     client = RadioClient("h", 0, " b ", [], network_id=NET)
     assert client.dialect is DIALECT_B
-    assert client._port == 2323  # noqa: SLF001
+    assert client._port == 2323
     assert client.link is None and not client.connected
     assert client.gateway_info is None
     with pytest.raises(ValueError, match="unknown radio dialect"):
@@ -300,7 +300,7 @@ async def test_split_half_hour_program_is_cached_as_unknown() -> None:
     slots[1] = 0
     client, links, _ = make_client()
     await client.async_connect()
-    links[0].reply(0xB0, b"\xb1" + p._pack_slots(slots))  # noqa: SLF001
+    links[0].reply(0xB0, b"\xb1" + p._pack_slots(slots))
 
     assert "prog" not in await client.get_node_settings("dev", ("htr", "6"))
     assert "prog" not in await client.get_node_settings("dev", ("htr", "6"))
@@ -718,7 +718,7 @@ def test_local_now_is_timezone_aware(monkeypatch: pytest.MonkeyPatch) -> None:
     """The real station clock is Home Assistant's local time."""
 
     monkeypatch.undo()
-    assert rc._local_now().tzinfo is not None  # noqa: SLF001
+    assert rc._local_now().tzinfo is not None
 
 
 # --- station helpers -----------------------------------------------------------
@@ -803,12 +803,12 @@ async def test_pair_runs_under_the_exchange_lock_and_skips_stored_ids(
     """Pairing holds heater commands back and never hands out a stored id."""
 
     client, links, _ = make_client()
-    client._programs[8] = (0.0, None)  # noqa: SLF001
-    client._locks[8] = True  # noqa: SLF001
+    client._programs[8] = (0.0, None)
+    client._locks[8] = True
     seen: dict = {}
 
     async def fake_pair(link, **kwargs):
-        seen.update(kwargs, link=link, locked=client._exchange_lock.locked())  # noqa: SLF001
+        seen.update(kwargs, link=link, locked=client._exchange_lock.locked())
         return [SimpleNamespace(node_id=8)]
 
     monkeypatch.setattr(rc, "pair_heaters", fake_pair)
@@ -819,7 +819,7 @@ async def test_pair_runs_under_the_exchange_lock_and_skips_stored_ids(
     assert seen["existing_ids"] == {6, 7}  # "bogus" is skipped
     assert (seen["window_s"], seen["wanted_id"], seen["max_heaters"]) == (120, 8, 1)
     assert seen["idle_stop_s"] == 5
-    assert 8 not in client._programs and 8 not in client._locks  # noqa: SLF001
+    assert 8 not in client._programs and 8 not in client._locks
 
 
 @pytest.mark.asyncio
@@ -829,10 +829,10 @@ async def test_factory_reset_sends_c8_and_needs_c9_55() -> None:
     client, links, _ = make_client()
     await client.async_connect()
     links[0].reply(0xC8, bytes.fromhex("C955"), bytes.fromhex("C956"))
-    client._locks[HEATER] = True  # noqa: SLF001
+    client._locks[HEATER] = True
     await client.async_factory_reset(HEATER)
     assert links[0].sent == [(HEATER, bytes.fromhex("C801D0"))]
-    assert HEATER not in client._locks  # noqa: SLF001
+    assert HEATER not in client._locks
     with pytest.raises(RadioCommandError, match="rejected"):
         await client.async_factory_reset(HEATER)
 
@@ -913,7 +913,7 @@ async def test_network_id_switch_and_identity_read() -> None:
     client, links, _ = make_client()
     await client.async_set_network_id(bytes.fromhex("ABCD"))
     assert links[0].network_ids == [bytes.fromhex("ABCD")]
-    assert client._network_id == bytes.fromhex("ABCD")  # noqa: SLF001
+    assert client._network_id == bytes.fromhex("ABCD")
     links[0].reply(0x5A, IDENTITY_SHORT, bytes.fromhex("5B56") + bytes(16))
     assert await client.async_read_identity(HEATER) == IDENTITY_SHORT[2:]
     with pytest.raises(RadioCommandError, match="unknown identity reply"):
@@ -980,7 +980,7 @@ async def test_concurrent_dialect_b_writes_do_not_revert_each_other() -> None:
     link.send_frame = slow_send
     await asyncio.gather(
         client.set_node_settings("dev", ("htr", "6"), ptemp=[7.0, 16.5, 22.0]),
-        client._write_settings(HEATER, mode="off"),  # noqa: SLF001 - power limit
+        client._write_settings(HEATER, mode="off"),
     )
 
     assert status[1:5] == bytes([14, 33, 44, 4])  # new comfort 22 C and mode off

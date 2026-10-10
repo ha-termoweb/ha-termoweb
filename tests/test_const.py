@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import custom_components.termoweb as termoweb
+from custom_components import termoweb
 from custom_components.termoweb import const
 from custom_components.termoweb.utils import _DEFAULT_DEVICE_NAMES
 

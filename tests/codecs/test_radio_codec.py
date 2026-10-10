@@ -79,7 +79,7 @@ def test_program_is_monday_first_168_ints() -> None:
     assert prog == DAY * 7
     # Wire day 0 is Sunday; make Sunday distinct and check where it lands.
     sunday = [0] * 24
-    wire = p._pack_slots(sunday + DAY * 6)  # noqa: SLF001 - build a test vector
+    wire = p._pack_slots(sunday + DAY * 6)
     prog = codec.prog_from_program(p.decode_program(b"\xb1" + wire))
     assert prog[:24] == DAY  # Monday
     assert prog[-24:] == sunday  # Sunday is the last day
@@ -90,7 +90,7 @@ def test_program_with_split_half_hours_is_omitted() -> None:
 
     slots = [2] * (48 * 7)
     slots[1] = 0
-    record = p.decode_program(b"\xb1" + p._pack_slots(slots))  # noqa: SLF001
+    record = p.decode_program(b"\xb1" + p._pack_slots(slots))
 
     assert codec.prog_from_program(record) is None
 

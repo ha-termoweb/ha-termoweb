@@ -287,7 +287,7 @@ async def test_no_announcement_returns_nothing_and_sends_nothing() -> None:
     assert await air.pair(link, window_s=3) == []
     assert air.ft.now >= 3
     assert air.assignments() == []
-    assert link._listeners == []  # noqa: SLF001 - the listener is removed
+    assert link._listeners == []
 
 
 @pytest.mark.asyncio
@@ -311,7 +311,7 @@ async def test_heater_that_never_answers_is_not_reported() -> None:
 @pytest.mark.asyncio
 async def test_dialect_a_direct_announcement_keeps_the_identity() -> None:
     lines = [(0.5, announce_a()), (0.55, announce_a()), (0.6, announce_a(src=4))]
-    air = Air(lines + [(9.0, announce_a())])  # announces again after pairing
+    air = Air([*lines, (9.0, announce_a())])  # announces again after pairing
     heater = PairingHeater(DIALECT_A, replies={0xB8: STATUS, 0x5A: IDENTITY_A_REPLY})
     link = await air.link(DIALECT_A, heater)
     paired = await air.pair(link, window_s=15)
@@ -353,7 +353,7 @@ async def test_id_exhaustion_raises_with_the_heaters_paired_so_far() -> None:
     with pytest.raises(pr.NoFreeAddressError) as err:
         await air.pair(link, window_s=30, existing_ids=range(2, 0x41))
     assert [h.node_id for h in err.value.paired] == [0x41]
-    assert link._listeners == []  # noqa: SLF001
+    assert link._listeners == []
 
 
 @pytest.mark.asyncio

@@ -282,7 +282,7 @@ async def test_boost_buttons_listen_to_coordinator_once(
     for button in buttons:
         listeners = [
             callback
-            for callback, _context in coordinator._listeners.values()  # noqa: SLF001
+            for callback, _context in coordinator._listeners.values()
             if getattr(callback, "__self__", None) is button
         ]
         assert len(listeners) == 1, button.entity_id
@@ -429,7 +429,7 @@ async def test_ws_update_event_power_limit_updates_number(
         inventory=runtime.inventory,
     )
 
-    client._apply_nodes_payload(  # noqa: SLF001
+    client._apply_nodes_payload(
         {"path": POWER_LIMIT_PATH, "body": {"power_limit": "9000"}},
         merge=True,
         event="update",

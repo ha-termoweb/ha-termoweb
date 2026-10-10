@@ -36,11 +36,11 @@ from custom_components.termoweb.domain import state_to_dict
 from tests.fakes.cloud import DEV_ID, PASSWORD, USERNAME, FakeCloud
 from tests.fakes.ws_harness import (
     FakeResponse,
-    WSFakeSession,
     VirtualClock,
-    polling_body,
+    WSFakeSession,
     install_clock,
     leaked_tasks,
+    polling_body,
     settle,
     sio_event,
     until,
@@ -179,7 +179,7 @@ async def _stop(client: DucaheatWSClient) -> None:
     """Stop the client and prove nothing it started is left running."""
     await client.stop()
     await settle()
-    assert client._task is None  # noqa: SLF001
+    assert client._task is None
     assert leaked_tasks("DucaheatWSClient") == []
 
 

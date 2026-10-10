@@ -4,13 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import (
-    Awaitable,
-    Callable,
-    Collection,
-    Iterable,
-    Mapping,
-)
+from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 import logging
 import time
@@ -222,7 +216,7 @@ def forward_ws_sample_updates(
         if lease_candidate is not None:
             try:
                 lease_value = float(lease_candidate)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 lease_value = None
             else:
                 if lease_value > 0:

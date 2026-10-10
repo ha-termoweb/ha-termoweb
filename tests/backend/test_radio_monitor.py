@@ -172,9 +172,9 @@ def test_factory_builds_listen_only_clients() -> None:
     normal = create_radio_client("10.0.0.5", 2323, "A", [], None)
     for client in (tcp, stick):
         assert client.listen_only
-        assert client._station_id == LISTEN_ONLY_STATION_ID  # noqa: SLF001
+        assert client._station_id == LISTEN_ONLY_STATION_ID
     assert not normal.listen_only
-    assert normal._station_id == 1  # noqa: SLF001
+    assert normal._station_id == 1
 
 
 # --- capture ------------------------------------------------------------------
@@ -188,7 +188,7 @@ async def test_capture_records_frames_and_lines_while_commands_wait() -> None:
     locked: list[bool] = []
 
     async def window(seconds: float) -> None:
-        locked.append(client._exchange_lock.locked())  # noqa: SLF001
+        locked.append(client._exchange_lock.locked())
         link.deliver(received(HEATER, POWER_REQUEST))
         link.deliver(received_ack(HEATER))
         link.deliver_line("# survey off")

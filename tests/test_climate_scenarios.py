@@ -20,7 +20,6 @@ from custom_components.termoweb import (
 )
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.const import DOMAIN
-
 from tests.fakes.cloud import FakeCloud
 
 HTR = "climate.living_room"

@@ -775,7 +775,7 @@ async def test_listen_only_link_never_writes_a_transmit(caplog) -> None:
             await link.request(6, p.request_status(), lambda frame: True)
         for command in ("A1", "T00", "X", "D", "F869525", "N12", "I1", "Y", ""):
             with pytest.raises(TransmitBlockedError):
-                await link._send_command(command)  # noqa: SLF001
+                await link._send_command(command)
     assert "refused command T" in caplog.text
     assert gw.transmitted() == []
     assert not any(c.startswith(("T", "A1")) for c in gw.commands)
@@ -969,14 +969,14 @@ def test_factory_builds_a_serial_client() -> None:
         serial_url="/dev/ttyUSB0",
         device_id="nanocul-x",
     )
-    assert client._device_id == "nanocul-x"  # noqa: SLF001
-    assert client._model == NANOCUL_MODEL  # noqa: SLF001
-    link_factory = client._link_factory  # noqa: SLF001
+    assert client._device_id == "nanocul-x"
+    assert client._model == NANOCUL_MODEL
+    link_factory = client._link_factory
     assert link_factory.func.__name__ == "RadioLink"
     assert "open_connection" in link_factory.keywords
     assert client.dialect.name == "B"
     tcp = factory.create_radio_client("gw", 2323, "A", [], None)
-    assert tcp._link_factory.__name__ == "RadioLink"  # noqa: SLF001
+    assert tcp._link_factory.__name__ == "RadioLink"
 
 
 STATUS = bytes.fromhex("B921252A02")

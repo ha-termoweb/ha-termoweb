@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 import inspect
 import logging
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from aiohttp import ClientResponseError
@@ -574,7 +574,7 @@ def test_sanitize_helpers_mask_sensitive_tokens() -> None:
     ],
 )
 def test_validate_boost_minutes_accepts_valid_inputs(
-    value: int | str | float | None, expected: int | None
+    value: str | float | None, expected: int | None
 ) -> None:
     assert validate_boost_minutes(value) == expected
 
@@ -681,7 +681,7 @@ async def test_get_node_settings_excludes_raw_payloads(
 class DucaheatClientHarness:
     """Container for a fake Ducaheat REST client and its call history."""
 
-    client: "DucaheatRESTClient"
+    client: DucaheatRESTClient
     requests: list[tuple[str, str, dict[str, Any]]]
     segmented_calls: list[dict[str, Any]]
     rtc_calls: list[str]
@@ -1381,10 +1381,9 @@ def test_ducaheat_decode_thermostat_aliases_and_limits() -> None:
         "units": "f",
         "ptemp": {"cold": "5", "night": "10.0", "day": "21"},
         "prog": {
-            "days": {
-                day: valid_day
-                for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-            }
+            "days": dict.fromkeys(
+                ("mon", "tue", "wed", "thu", "fri", "sat", "sun"), valid_day
+            )
         },
         "batt_level": "6",
     }
@@ -1685,7 +1684,7 @@ async def test_set_node_settings_mode_segment_plan(
                 status_payload.pop("mode", None)
             if "status_includes_mode" in parent.f_locals:
                 parent.f_locals["status_includes_mode"] = False
-        return "C" if units is not None else "C"
+        return "C"
 
     monkeypatch.setattr(client, "authed_headers", fake_headers)
     monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)

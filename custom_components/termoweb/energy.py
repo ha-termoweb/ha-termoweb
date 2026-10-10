@@ -152,7 +152,7 @@ def _hour_rows(
         try:
             ts = int(sample["t"])
             kwh = float(sample["counter"]) / 1000.0
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             _LOGGER.debug("%s: ignoring invalid sample %s", summary.entity_id, sample)
             continue
         if chunk_start <= ts <= chunk_end:
