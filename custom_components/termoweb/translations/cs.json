@@ -29,6 +29,20 @@
       }
     }
   },
+  "device": {
+    "heater": {
+      "name": "Topidlo {addr}"
+    },
+    "thermostat": {
+      "name": "Termostat {addr}"
+    },
+    "node": {
+      "name": "Uzel {addr}"
+    },
+    "power_monitor": {
+      "name": "Monitor energie {addr}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

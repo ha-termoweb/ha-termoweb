@@ -29,6 +29,20 @@
       }
     }
   },
+  "device": {
+    "heater": {
+      "name": "Grzejnik {addr}"
+    },
+    "thermostat": {
+      "name": "Termostat {addr}"
+    },
+    "node": {
+      "name": "Węzeł {addr}"
+    },
+    "power_monitor": {
+      "name": "Monitor mocy {addr}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

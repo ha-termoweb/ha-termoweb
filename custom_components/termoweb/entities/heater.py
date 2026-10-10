@@ -28,7 +28,6 @@ from custom_components.termoweb.domain.state import (
     PowerMonitorState,
     ThermostatState,
 )
-from custom_components.termoweb.i18n import COORDINATOR_FALLBACK_ATTR, format_fallback
 from custom_components.termoweb.inventory import (
     Inventory,
     Node,
@@ -36,7 +35,10 @@ from custom_components.termoweb.inventory import (
     normalize_node_type,
 )
 from custom_components.termoweb.runtime import EntryRuntime, require_runtime
-from custom_components.termoweb.utils import float_or_none
+from custom_components.termoweb.utils import (
+    float_or_none,
+    translate_default_device_name,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -523,10 +525,6 @@ def _derive_boost_state(
             return source.get(field)
         return getattr(source, field, None)
 
-    fallback_source = getattr(coordinator, COORDINATOR_FALLBACK_ATTR, None)
-    fallbacks: Mapping[str, str] | None
-    fallbacks = fallback_source if isinstance(fallback_source, Mapping) else None
-
     def _parse_iso_timestamp(value: str) -> datetime | None:
         """Parse an ISO timestamp string defensively."""
 
@@ -616,11 +614,7 @@ def _derive_boost_state(
 
     end_label: str | None = None
     if boost_active is False and boost_end_dt is None and boost_end_iso is None:
-        end_label = format_fallback(
-            fallbacks,
-            "fallbacks.never",
-            "Never",
-        )
+        end_label = "Never"
 
     return BoostState(
         active=boost_active,
@@ -973,7 +967,7 @@ class HeaterNodeBase(CoordinatorEntity):
     def device_info(self) -> DeviceInfo:
         """Expose Home Assistant device metadata for the heater."""
         model = "Accumulator" if self._node_type == "acm" else "Heater"
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers=cast(
                 set[tuple[str, str]], {(DOMAIN, self._dev_id, self._addr)}
             ),
@@ -982,3 +976,4 @@ class HeaterNodeBase(CoordinatorEntity):
             model=model,
             via_device=(DOMAIN, self._dev_id),
         )
+        return translate_default_device_name(info, self._addr)

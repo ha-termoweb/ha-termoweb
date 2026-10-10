@@ -29,6 +29,20 @@
       }
     }
   },
+  "device": {
+    "heater": {
+      "name": "Ohrievač {addr}"
+    },
+    "thermostat": {
+      "name": "Termostat {addr}"
+    },
+    "node": {
+      "name": "Uzol {addr}"
+    },
+    "power_monitor": {
+      "name": "Monitor energie {addr}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

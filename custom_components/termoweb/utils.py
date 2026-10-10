@@ -18,7 +18,6 @@ from .const import (
     get_brand_configuration_url,
     get_brand_label,
 )
-from .i18n import format_fallback
 from .inventory import normalize_node_addr
 from .runtime import EntryRuntime, require_runtime
 
@@ -194,20 +193,8 @@ def build_power_monitor_device_info(
         addr
     )
     identifier = (DOMAIN, str(dev_id), "pmo", normalized_addr)
-    display_name = (name or "").strip()
+    display_name = (name or "").strip() or f"Power Monitor {normalized_addr}"
     entry_data = _entry_gateway_record(hass, entry_id)
-    if not display_name:
-        fallbacks: Mapping[str, str] | None = None
-        if entry_data is not None:
-            entry_fallbacks = entry_data.fallback_translations
-            if isinstance(entry_fallbacks, Mapping):
-                fallbacks = entry_fallbacks
-        display_name = format_fallback(
-            fallbacks,
-            "fallbacks.power_monitor_name",
-            "Power Monitor {addr}",
-            addr=normalized_addr,
-        )
 
     info: DeviceInfo = DeviceInfo(
         identifiers={identifier},
@@ -216,8 +203,31 @@ def build_power_monitor_device_info(
         model="Power Monitor",
         via_device=(DOMAIN, str(dev_id)),
     )
+    translate_default_device_name(info, normalized_addr)
 
     return apply_entry_device_overrides(info, entry_data)
+
+
+# English default node names; keys match the ``device`` section of strings.json.
+_DEFAULT_DEVICE_NAMES: dict[str, str] = {
+    "heater": "Heater {addr}",
+    "accumulator": "Accumulator {addr}",
+    "thermostat": "Thermostat {addr}",
+    "power_monitor": "Power Monitor {addr}",
+    "node": "Node {addr}",
+}
+
+
+def translate_default_device_name(info: DeviceInfo, addr: str) -> DeviceInfo:
+    """Attach a device translation key when ``info`` carries a default node name."""
+
+    name = info.get("name")
+    for key, template in _DEFAULT_DEVICE_NAMES.items():
+        if name == template.format(addr=addr):
+            info["translation_key"] = key
+            info["translation_placeholders"] = {"addr": addr}
+            break
+    return info
 
 
 def float_or_none(value: Any) -> float | None:

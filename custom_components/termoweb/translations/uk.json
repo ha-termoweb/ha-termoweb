@@ -29,6 +29,20 @@
       }
     }
   },
+  "device": {
+    "heater": {
+      "name": "Обігрівач {addr}"
+    },
+    "thermostat": {
+      "name": "Термостат {addr}"
+    },
+    "node": {
+      "name": "Вузол {addr}"
+    },
+    "power_monitor": {
+      "name": "Лічильник енергії {addr}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

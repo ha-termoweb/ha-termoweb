@@ -25,6 +25,7 @@ from custom_components.termoweb.utils import (
     build_installation_device_info,
     build_power_monitor_device_info,
     float_or_none,
+    translate_default_device_name,
 )
 
 
@@ -233,23 +234,58 @@ def test_build_gateway_device_info_ignores_empty_gateway_model() -> None:
     assert info["model"] == "Gateway/Controller"
 
 
-def test_build_power_monitor_device_info_uses_fallback_translation() -> None:
-    """Fallback translation strings should provide a display name."""
+def test_build_power_monitor_device_info_translates_default_name() -> None:
+    """Unnamed power monitors get a translatable default device name."""
 
     hass = types.SimpleNamespace(data={DOMAIN: {}})
-    runtime = build_entry_runtime(
-        hass=hass,
-        entry_id="entry",
-        dev_id="dev",
-    )
-    runtime.fallback_translations = {
-        "fallbacks.power_monitor_name": "Meter {addr}",
-    }
+    build_entry_runtime(hass=hass, entry_id="entry", dev_id="dev")
 
     info = build_power_monitor_device_info(hass, "entry", "dev", " 01 ")
 
-    assert info["name"] == "Meter 01"
+    assert info["name"] == "Power Monitor 01"
+    assert info["translation_key"] == "power_monitor"
+    assert info["translation_placeholders"] == {"addr": "01"}
     assert info["identifiers"] == {(DOMAIN, "dev", "pmo", "01")}
+
+
+def test_build_power_monitor_device_info_keeps_backend_name() -> None:
+    """A backend-provided name is used as-is, without a translation key."""
+
+    info = build_power_monitor_device_info(None, None, "dev", "01", name=" Meter ")
+
+    assert info["name"] == "Meter"
+    assert "translation_key" not in info
+
+
+@pytest.mark.parametrize(
+    ("name", "key"),
+    [
+        ("Heater 7", "heater"),
+        ("Accumulator 7", "accumulator"),
+        ("Thermostat 7", "thermostat"),
+        ("Power Monitor 7", "power_monitor"),
+        ("Node 7", "node"),
+    ],
+)
+def test_translate_default_device_name_matches_defaults(name: str, key: str) -> None:
+    """Every English default name maps to its ``device`` translation key."""
+
+    info = translate_default_device_name({"name": name}, "7")
+
+    assert info == {
+        "name": name,
+        "translation_key": key,
+        "translation_placeholders": {"addr": "7"},
+    }
+
+
+@pytest.mark.parametrize("name", ["Living Room", "Heater 8", "", None])
+def test_translate_default_device_name_ignores_other_names(name: str | None) -> None:
+    """Custom names and defaults for another address stay untranslated."""
+
+    info = translate_default_device_name({"name": name}, "7")
+
+    assert info == {"name": name}
 
 
 def test_normalize_heater_addresses_with_none() -> None:

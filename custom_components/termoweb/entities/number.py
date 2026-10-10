@@ -17,7 +17,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from ..boost import ALLOWED_BOOST_MINUTES, coerce_boost_minutes
 from ..backend.factory import backend_capabilities
 from ..const import DOMAIN
-from ..i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
 from ..identifiers import build_gateway_entity_unique_id, build_heater_entity_unique_id
 from ..inventory import (
     Inventory,
@@ -74,18 +73,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = runtime.coordinator
     dev_id = runtime.dev_id
 
-    fallbacks = await async_get_fallback_translations(hass, runtime)
-    attach_fallbacks(coordinator, fallbacks)
-
     def default_name(addr: str) -> str:
         """Return the fallback name for an accumulator node."""
 
-        return format_fallback(
-            fallbacks,
-            "fallbacks.heater_name",
-            "Heater {addr}",
-            addr=addr,
-        )
+        return f"Heater {addr}"
 
     heater_details, accumulator_nodes = boostable_accumulator_details_for_entry(
         runtime,

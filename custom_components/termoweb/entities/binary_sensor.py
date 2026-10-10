@@ -24,10 +24,6 @@ from custom_components.termoweb.entities.heater import (
     derive_boost_state_from_domain,
     log_skipped_nodes,
 )
-from custom_components.termoweb.i18n import (
-    async_get_fallback_translations,
-    attach_fallbacks,
-)
 from custom_components.termoweb.identifiers import build_heater_entity_unique_id
 from custom_components.termoweb.inventory import (
     HEATER_NODE_TYPES,
@@ -36,7 +32,10 @@ from custom_components.termoweb.inventory import (
     normalize_node_type,
 )
 from custom_components.termoweb.runtime import require_runtime
-from custom_components.termoweb.utils import build_gateway_device_info
+from custom_components.termoweb.utils import (
+    build_gateway_device_info,
+    translate_default_device_name,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,8 +46,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coord: StateCoordinator = runtime.coordinator
     dev_id = runtime.dev_id
 
-    fallbacks = await async_get_fallback_translations(hass, runtime)
-    attach_fallbacks(coord, fallbacks)
     gateway = GatewayOnlineBinarySensor(coord, entry.entry_id, dev_id)
 
     inventory = runtime.inventory
@@ -227,13 +224,14 @@ class HeaterBoostActiveBinarySensor(
         """Expose Home Assistant device metadata for the heater."""
 
         model = "Accumulator" if self._node_type == "acm" else "Heater"
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={(DOMAIN, self._dev_id, self._addr)},
             name=self._device_name,
             manufacturer="TermoWeb",
             model=model,
             via_device=(DOMAIN, self._dev_id),
         )
+        return translate_default_device_name(info, self._addr)
 
     def boost_state(self) -> BoostState:
         """Return derived boost metadata for this heater."""

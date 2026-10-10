@@ -16,7 +16,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from ..const import DOMAIN
 from ..domain import DomainStateView
 from ..domain.state import DomainState
-from ..i18n import async_get_fallback_translations, attach_fallbacks
 from ..identifiers import build_heater_entity_unique_id
 from ..inventory import (
     AccumulatorNode,
@@ -25,7 +24,7 @@ from ..inventory import (
     normalize_node_type,
 )
 from ..runtime import require_runtime
-from ..utils import build_gateway_device_info
+from ..utils import build_gateway_device_info, translate_default_device_name
 from .heater import (
     BOOST_BUTTON_METADATA,
     BoostButtonMetadata,
@@ -157,8 +156,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = runtime.coordinator
     dev_id = runtime.dev_id
 
-    fallbacks = await async_get_fallback_translations(hass, runtime)
-    attach_fallbacks(coordinator, fallbacks)
     entities: list[ButtonEntity] = [
         StateRefreshButton(coordinator, entry.entry_id, dev_id)
     ]
@@ -294,13 +291,14 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
     def device_info(self) -> DeviceInfo:
         """Return Home Assistant device metadata for the accumulator."""
 
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={(DOMAIN, self.boost_context.dev_id, self.boost_context.addr)},
             name=self.boost_context.base_name,
             manufacturer="TermoWeb",
             model="Accumulator",
             via_device=(DOMAIN, self.boost_context.dev_id),
         )
+        return translate_default_device_name(info, self.boost_context.addr)
 
     async def _async_boost_request(
         self,
@@ -466,7 +464,7 @@ class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
         if self._flash_context.node_type == "acm":
             model = "Accumulator"
 
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={
                 (
                     DOMAIN,
@@ -479,6 +477,7 @@ class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
             model=model,
             via_device=(DOMAIN, self._flash_context.dev_id),
         )
+        return translate_default_device_name(info, self._flash_context.addr)
 
     async def async_press(self) -> None:
         """Call the backend /select endpoint to flash the unit display."""

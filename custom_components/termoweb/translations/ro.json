@@ -29,6 +29,20 @@
       }
     }
   },
+  "device": {
+    "heater": {
+      "name": "Încălzitor {addr}"
+    },
+    "thermostat": {
+      "name": "Termostat {addr}"
+    },
+    "node": {
+      "name": "Nod {addr}"
+    },
+    "power_monitor": {
+      "name": "Monitor de energie {addr}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {
