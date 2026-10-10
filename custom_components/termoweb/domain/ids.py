@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Any
 
 
-class NodeType(str, Enum):
+class NodeType(str, Enum):  # noqa: UP042 - StrEnum would change str() output
     """Supported node types."""
 
     HEATER = "htr"

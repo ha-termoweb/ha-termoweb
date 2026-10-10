@@ -357,7 +357,7 @@ async def test_manual_target_is_saved_and_restored_outside_manual_mode(
         monkeypatch,
         state=HeaterState(mode="auto", stemp="18.5", ptemp=["7", "17", "20"]),
     )
-    rig.client._manual_setpoints[6] = 20.0  # noqa: SLF001 - radio-only memory
+    rig.client._manual_setpoints[6] = 20.0
     await rig.call(service.SERVICE_RADIO_FACTORY_RESET, entry_id=ENTRY_ID, heater=6)
     saved = {"mode": "auto", "ptemp": [7.0, 17.0, 20.0], "manual_stemp": 20.0}
     assert rp.saved_snapshot(rig.entry, 6) == saved

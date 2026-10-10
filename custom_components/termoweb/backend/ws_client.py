@@ -4,13 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import (
-    Awaitable,
-    Callable,
-    Collection,
-    Iterable,
-    Mapping,
-)
+from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 import logging
 import time

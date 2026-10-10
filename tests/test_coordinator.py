@@ -802,7 +802,7 @@ async def test_ws_power_limit_push_updates_number(
     assert hass.states.get(number).state == "1000"
 
     client = _ws_client(hass, config_entry)
-    client._handle_legacy_data_batch(  # noqa: SLF001
+    client._handle_legacy_data_batch(
         [{"path": POWER_LIMIT_PATH, "body": {"power_limit": "2500"}}]
     )
     await _settle(hass)
@@ -822,7 +822,7 @@ async def test_ws_power_limit_invalid_value_is_ignored(
     number = _power_limit_entity(hass, config_entry)
 
     client = _ws_client(hass, config_entry)
-    client._handle_legacy_data_batch(  # noqa: SLF001
+    client._handle_legacy_data_batch(
         [{"path": POWER_LIMIT_PATH, "body": {"power_limit": "lots"}}]
     )
     await _settle(hass)

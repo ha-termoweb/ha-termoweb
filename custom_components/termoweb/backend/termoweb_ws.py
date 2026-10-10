@@ -253,8 +253,7 @@ class TermoWebWSClient(_WSCommon):
             """Yield subscription targets sourced from the inventory cache."""
 
             try:
-                for target in inventory.heater_sample_targets:
-                    yield target
+                yield from inventory.heater_sample_targets
             except Exception:  # pragma: no cover - defensive cache guard
                 _LOGGER.debug(
                     "WS: failed to resolve heater sample targets", exc_info=True
@@ -649,7 +648,7 @@ class TermoWebWSClient(_WSCommon):
             while not self._closing:
                 try:
                     await self._client.get_rtc_time(self.dev_id)
-                except Exception as err:
+                except Exception as err:  # noqa: BLE001 - defensive
                     if _LOGGER.isEnabledFor(logging.DEBUG):
                         _LOGGER.debug(
                             "WS: RTC keep-alive failed (%s: %s)",
@@ -678,7 +677,7 @@ class TermoWebWSClient(_WSCommon):
             if data.startswith(f"5::{self._namespace}:"):
                 try:
                     payload = json.loads(data.split(f"5::{self._namespace}:", 1)[1])
-                except Exception:
+                except Exception:  # noqa: BLE001 - defensive
                     continue
                 self._handle_event(payload)
                 continue
@@ -742,7 +741,7 @@ class TermoWebWSClient(_WSCommon):
             elif msg.type == aiohttp.WSMsgType.BINARY:
                 try:
                     decoded = codecs.decode(msg.data, "utf-8")
-                except Exception:
+                except Exception:  # noqa: BLE001 - defensive
                     continue
                 self._stats.frames_total += 1
                 yield decoded
@@ -803,14 +802,14 @@ class TermoWebWSClient(_WSCommon):
             await asyncio.sleep(interval)
             try:
                 await send()
-            except Exception:
+            except Exception:  # noqa: BLE001 - defensive
                 return
 
     def _socket_base(self) -> str:
         """Return the base URL for websocket connections."""
 
         base = self._api_base().rstrip("/")
-        parsed = urlsplit(base if base else API_BASE)
+        parsed = urlsplit(base or API_BASE)
         scheme = parsed.scheme or "https"
         if parsed.netloc:
             netloc = parsed.netloc

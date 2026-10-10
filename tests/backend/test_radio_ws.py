@@ -263,7 +263,7 @@ async def test_registration_power_request_and_reports(radio: Radio) -> None:
     link.deliver(received(HEATER, POWER_REQUEST))  # dialect B: granted, no power
     link.deliver(received(HEATER, bytes([p.OP_POWER_REQUEST, 0x1D, 0x66])))  # A form
     link.deliver(received(HEATER, bytes([p.OP_REPORT]) + STATUS_E6))
-    wire = p._pack_slots([0] * 24 + DAY * 6)  # noqa: SLF001 - Sunday cold
+    wire = p._pack_slots([0] * 24 + DAY * 6)
     link.deliver(received(HEATER, bytes([p.OP_REPORT, 0xB1]) + wire))
     await settle()
 
@@ -363,9 +363,7 @@ async def test_frames_without_usable_content(radio: Radio) -> None:
     link.deliver(received(HEATER, bytes([p.OP_REPORT, 0xB9, 1, 2])))  # short report
     split = [2] * (48 * 7)
     split[1] = 0
-    link.deliver(
-        received(HEATER, bytes([p.OP_REPORT, 0xB1]) + p._pack_slots(split))  # noqa: SLF001
-    )
+    link.deliver(received(HEATER, bytes([p.OP_REPORT, 0xB1]) + p._pack_slots(split)))
     link.deliver(received(HEATER, bytes([p.OP_POWER_REQUEST, 1, 2, 3, 4])))  # odd BE
     link.deliver(received(HEATER, b"", tag=p.ROUTE_PROBE_TAG))  # route probe
     link.deliver(received(HEATER, b"\xc2\xf0\x39"))  # unknown unsolicited

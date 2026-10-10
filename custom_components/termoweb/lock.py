@@ -112,7 +112,7 @@ class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
         self._attr_unique_id = unique_id
         self._inventory = inventory
         self._settings_resolver = settings_resolver
-        self._device_name = device_name if device_name else ""
+        self._device_name = device_name or ""
         self._refresh_fallback = NodeRefreshFallback(
             self, canonical_type, canonical_addr
         )

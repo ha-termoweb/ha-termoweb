@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 import inspect
 import re
 from types import ModuleType, SimpleNamespace
@@ -15,7 +15,7 @@ import pytest
 from custom_components import termoweb
 from custom_components.termoweb import config_flow, const, diagnostics, utils
 from custom_components.termoweb.backend import (
-    Backend,  # noqa: E402
+    Backend,
     create_backend,
     termoweb as termoweb_backend,
 )
@@ -25,7 +25,7 @@ from custom_components.termoweb.backend.ducaheat import (
 )
 from custom_components.termoweb.backend.factory import create_rest_client
 from custom_components.termoweb.backend.rest_client import RESTClient
-from custom_components.termoweb.backend.termoweb import TermoWebBackend  # noqa: E402
+from custom_components.termoweb.backend.termoweb import TermoWebBackend
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TEVOLVE,
@@ -190,7 +190,7 @@ async def test_create_rest_client_selects_the_brand_backend(
 
     assert type(client) is client_cls
     assert client.api_base == get_brand_api_base(brand)
-    assert client._basic_auth_b64 == get_brand_basic_auth(brand)  # noqa: SLF001
+    assert client._basic_auth_b64 == get_brand_basic_auth(brand)
 
 
 def test_backend_requires_create_override() -> None:
@@ -227,17 +227,15 @@ async def test_termoweb_backend_fetch_hourly_samples_normalises() -> None:
     call = client.get_node_samples.await_args
     assert call.args[0] == "dev"
     assert call.args[1] == ("htr", "A")
-    assert call.args[2] == pytest.approx(
-        start_local.astimezone(timezone.utc).timestamp()
-    )
-    assert call.args[3] == pytest.approx(end_local.astimezone(timezone.utc).timestamp())
+    assert call.args[2] == pytest.approx(start_local.astimezone(UTC).timestamp())
+    assert call.args[3] == pytest.approx(end_local.astimezone(UTC).timestamp())
 
     bucket = result[("htr", "A")]
     assert len(bucket) == 1
     sample = bucket[0]
     assert sample["energy_wh"] == pytest.approx(1_800.0)
     assert sample["power_w"] == pytest.approx(600.0)
-    assert sample["ts"].tzinfo is timezone.utc
+    assert sample["ts"].tzinfo is UTC
 
 
 @pytest.mark.asyncio
@@ -264,7 +262,7 @@ async def test_ducaheat_backend_fetch_hourly_samples_normalises() -> None:
     assert call.args[1] == ("pmo", "M")
     bucket = result[("pmo", "M")]
     assert bucket[0]["energy_wh"] == pytest.approx(2_000.0)
-    assert bucket[0]["ts"].tzinfo is timezone.utc
+    assert bucket[0]["ts"].tzinfo is UTC
 
 
 # Brand names or vendor client types that only backend/ may branch on.
@@ -281,7 +279,7 @@ _VENDOR_BRANCH = re.compile(
         diagnostics,
         config_flow.TermoWebConfigFlow.async_supports_options_flow,
         config_flow.TermoWebConfigFlow.async_step_reconfigure,
-        config_flow._radio_in_use,  # noqa: SLF001
+        config_flow._radio_in_use,
         const.get_brand_label,
         build_cloud_unique_id,
     ],

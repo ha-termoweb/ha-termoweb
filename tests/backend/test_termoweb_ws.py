@@ -199,7 +199,7 @@ async def test_session_end_to_end(
     assert ws1.url.startswith(f"{API_BASE}/socket.io/1/websocket/sid1?")
     _, connect_kwargs = tw.session.connect_calls[0]
     assert isinstance(connect_kwargs["timeout"], aiohttp.ClientWSTimeout)
-    assert connect_kwargs["timeout"].ws_close == ws_client._WS_CLOSE_TIMEOUT  # noqa: SLF001
+    assert connect_kwargs["timeout"].ws_close == ws_client._WS_CLOSE_TIMEOUT
     assert connect_kwargs["autoclose"] is False
     assert connect_kwargs["heartbeat"] is None
     # Join, snapshot, session metadata, then samples for heaters only (no pmo).

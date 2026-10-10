@@ -215,9 +215,9 @@ def test_decoders_skip_false_sync_hits_and_short_streams() -> None:
     sync = to_bits(DIALECT_B.sync)
     frame = to_bits(b_frame())
     junk = to_bits(bytes([0x40, 1, 2, 3, 4, 5, 6]))  # length byte beyond the data
-    found = s._decode_known("1010" + sync + junk + sync + frame)  # noqa: SLF001
+    found = s._decode_known("1010" + sync + junk + sync + frame)
     assert found is not None and found[0] is DIALECT_B and found[3] == 0
-    assert s._search("11" + "0" * 30, 1) == []  # noqa: SLF001
+    assert s._search("11" + "0" * 30, 1) == []
 
 
 def test_suggestion_lists_codec_needs() -> None:
@@ -410,10 +410,10 @@ def test_sync_errors_are_tolerated_and_reported() -> None:
         + ("1" if sync[5] == "0" else "0")
         + sync[6:]
     )
-    found = s._decode_known("10101010" + two + air)  # noqa: SLF001
+    found = s._decode_known("10101010" + two + air)
     assert found is not None and found[3] == 2
     three = two[:9] + ("1" if two[9] == "0" else "0") + two[10:]
-    assert s._decode_known("10101010" + three + air) is None  # noqa: SLF001
+    assert s._decode_known("10101010" + three + air) is None
 
 
 def test_common_rates_are_tried_without_a_clean_preamble() -> None:

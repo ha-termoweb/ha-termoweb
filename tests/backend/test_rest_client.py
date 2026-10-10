@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime
+import itertools
 import logging
-from typing import Any, Callable
+from typing import Any, Self
 from unittest.mock import AsyncMock
 
 import aiohttp
@@ -461,7 +463,7 @@ def test_request_timeout_propagates() -> None:
                 headers={"Content-Type": "application/json"},
             )
         )
-        session.queue_request(asyncio.TimeoutError())
+        session.queue_request(TimeoutError())
 
         client = RESTClient(session, "user", "pass")
         headers = await client.authed_headers()
@@ -618,12 +620,12 @@ def test_ensure_token_returns_cached_after_lock_entry() -> None:
             def __init__(self, owner: RESTClient) -> None:
                 self._owner = owner
 
-            async def __aenter__(self) -> "FakeLock":
+            async def __aenter__(self) -> Self:
                 self._owner._access_token = "cached"
                 _set_token_expiry_seconds(self._owner, 100.0)
                 return self
 
-            async def __aexit__(self, *_exc: Any) -> bool:
+            async def __aexit__(self, *_exc: object) -> bool:
                 return False
 
         client._lock = FakeLock(client)  # type: ignore[assignment]
@@ -775,8 +777,8 @@ def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
 
         assert calls == [
             ("GET", api.NODES_PATH_FMT.format(dev_id="dev123")),
-            ("GET", f"/api/v2/devs/dev123/htr/5/settings"),
-            ("GET", f"/api/v2/devs/dev123/htr/5/samples"),
+            ("GET", "/api/v2/devs/dev123/htr/5/settings"),
+            ("GET", "/api/v2/devs/dev123/htr/5/samples"),
         ]
 
     asyncio.run(_run())
@@ -1006,7 +1008,7 @@ def test_request_cancelled_error_propagates() -> None:
         session = FakeSession()
 
         def raise_cancelled() -> None:
-            raise asyncio.CancelledError()
+            raise asyncio.CancelledError
 
         session.queue_request(raise_cancelled)
 
@@ -2111,7 +2113,7 @@ def _client(
 
 def _gaps(starts: list[tuple[str, float]]) -> list[float]:
     times = [t for _, t in starts]
-    return [b - a for a, b in zip(times, times[1:], strict=False)]
+    return [b - a for a, b in itertools.pairwise(times)]
 
 
 def test_concurrent_requests_are_spaced(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2226,7 +2228,7 @@ def test_segmented_write_after_401_fetches_one_token(
 
     assert len(session.post_calls) == 2  # initial token + exactly one refresh
     assert len(session.request_calls) == 8
-    retried = [c for c in session.request_calls[1::2]]
+    retried = list(session.request_calls[1::2])
     assert all(c[2]["headers"]["Authorization"] == "Bearer T2" for c in retried)
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert all(gap >= 0.5 for gap in _gaps(session.starts))

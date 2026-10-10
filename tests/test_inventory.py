@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import FrozenInstanceError
 import logging
 from types import SimpleNamespace
-from typing import Any, Iterable, List, Mapping
+from typing import Any
 
 import pytest
 
@@ -39,14 +40,14 @@ class DummyNode:
 
 
 @pytest.fixture
-def sample_nodes() -> List[DummyNode]:
+def sample_nodes() -> list[DummyNode]:
     """Return a list of dummy node instances."""
 
     return [DummyNode("alpha"), DummyNode("beta")]
 
 
 @pytest.fixture
-def inventory(sample_nodes: List[DummyNode]) -> Inventory:
+def inventory(sample_nodes: list[DummyNode]) -> Inventory:
     """Build an inventory instance for tests."""
 
     return Inventory("abc123", sample_nodes)
@@ -70,7 +71,7 @@ def heater_inventory() -> Inventory:
 
 
 def test_inventory_properties(
-    inventory: Inventory, sample_nodes: List[DummyNode]
+    inventory: Inventory, sample_nodes: list[DummyNode]
 ) -> None:
     """Validate accessor properties and tuple conversion."""
 
@@ -89,7 +90,7 @@ def test_inventory_rejects_mutation(inventory: Inventory) -> None:
         inventory.nodes[0] = DummyNode("gamma")
 
 
-def test_inventory_nodes_are_independent(sample_nodes: List[DummyNode]) -> None:
+def test_inventory_nodes_are_independent(sample_nodes: list[DummyNode]) -> None:
     """Confirm node collections are copied into the tuple."""
 
     inventory = Inventory("abc123", sample_nodes)

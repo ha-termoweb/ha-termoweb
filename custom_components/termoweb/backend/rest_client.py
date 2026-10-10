@@ -217,7 +217,7 @@ class RESTClient:
                     body_text: str | None
                     try:
                         body_text = await resp.text()
-                    except Exception:
+                    except Exception:  # noqa: BLE001 - defensive
                         body_text = "<no body>"
 
                     _LOGGER.debug("HTTP %s -> %s, ctype=%s", url, resp.status, ctype)
@@ -259,7 +259,7 @@ class RESTClient:
                     ):
                         try:
                             return await resp.json(content_type=None)
-                        except Exception:
+                        except Exception:  # noqa: BLE001 - defensive
                             return body_text
                     return body_text
 
@@ -773,7 +773,7 @@ class RESTClient:
 
         try:
             preview = redact_text(repr(payload))
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # pragma: no cover - defensive  # noqa: BLE001 - defensive
             preview = "<unreprable>"
         if len(preview) > 500:
             preview = f"{preview[:497]}..."

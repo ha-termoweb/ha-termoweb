@@ -33,9 +33,9 @@ from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from tests.fakes.cloud import DEV_ID, FakeCloud
 from tests.fakes.ws_harness import (
     FakeResponse,
-    WSFakeSession,
     FakeWS,
     VirtualClock,
+    WSFakeSession,
     install_clock,
     leaked_tasks,
     settle,
@@ -162,7 +162,7 @@ async def _stop(client: TermoWebWSClient) -> None:
     """Stop the client and prove nothing it started is left running."""
     await client.stop()
     await settle()
-    assert client._task is None  # noqa: SLF001
+    assert client._task is None
     assert leaked_tasks("TermoWebWSClient") == []
 
 

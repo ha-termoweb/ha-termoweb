@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Iterator, Mapping
 import datetime as dt
-from typing import Any, Callable, Iterable, Iterator, Mapping
+from typing import Any
 
 import pytest
 
@@ -514,7 +515,7 @@ def test_domain_state_store_applies_snapshots_and_patches() -> None:
             "mode": "auto",
             "charge_level": 75,
             "boost_active": False,
-            "boost_end_datetime": dt.datetime(2024, 1, 1, tzinfo=dt.timezone.utc),
+            "boost_end_datetime": dt.datetime(2024, 1, 1, tzinfo=dt.UTC),
             "charging": True,
             "current_charge_per": "45.5",
             "target_charge_per": 95,
@@ -659,7 +660,7 @@ def test_store_iter_states_includes_inventory_nodes(
 
     nodes = {"nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]}
     node_inventory = build_node_inventory(nodes)
-    inventory = inventory_builder("dev", nodes, node_inventory)
+    inventory_builder("dev", nodes, node_inventory)
     store = DomainStateStore(
         [NodeId(NodeType.HEATER, "1"), NodeId(NodeType.ACCUMULATOR, "2")]
     )

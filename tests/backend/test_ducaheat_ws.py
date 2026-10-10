@@ -1280,7 +1280,7 @@ async def test_counters_survive_reconnect_and_are_cleared_on_stop(
     """Diagnostics counters and the tracker persist across sessions until stop."""
     ws = await healthy(dh)
     tracker = dh.runtime.ws_trackers[LIFECYCLE_DEV_ID]
-    assert tracker.payload_stale_after == ducaheat_ws._PAYLOAD_WINDOW_DEFAULT  # noqa: SLF001
+    assert tracker.payload_stale_after == ducaheat_ws._PAYLOAD_WINDOW_DEFAULT
     ws.feed("42{bad")
     await until(
         lambda: dh.runtime.ws_state[LIFECYCLE_DEV_ID]["parse_errors_total"] == 1

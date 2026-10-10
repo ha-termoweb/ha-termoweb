@@ -68,10 +68,9 @@ class TestNormaliseProg:
     def test_mapping_with_nested_slots(self) -> None:
         day_data = {"slots": [0] * 24}
         data = {
-            "days": {
-                day: day_data
-                for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-            }
+            "days": dict.fromkeys(
+                ("mon", "tue", "wed", "thu", "fri", "sat", "sun"), day_data
+            )
         }
         result = _normalise_prog(data)
         assert result is not None
@@ -80,10 +79,9 @@ class TestNormaliseProg:
     def test_mapping_with_values_key(self) -> None:
         day_data = {"values": [0] * 24}
         data = {
-            "days": {
-                day: day_data
-                for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-            }
+            "days": dict.fromkeys(
+                ("mon", "tue", "wed", "thu", "fri", "sat", "sun"), day_data
+            )
         }
         result = _normalise_prog(data)
         assert result is not None
@@ -92,10 +90,9 @@ class TestNormaliseProg:
         # 48-slot day should be downsampled to 24
         day_data = [0, 1] * 24  # 48 slots
         data = {
-            "days": {
-                day: day_data
-                for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-            }
+            "days": dict.fromkeys(
+                ("mon", "tue", "wed", "thu", "fri", "sat", "sun"), day_data
+            )
         }
         result = _normalise_prog(data)
         assert result is not None
@@ -106,20 +103,18 @@ class TestNormaliseProg:
         # Short days are not padded with "cold"; odd lengths are not truncated.
         day_data = [1] * length
         data = {
-            "days": {
-                day: day_data
-                for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-            }
+            "days": dict.fromkeys(
+                ("mon", "tue", "wed", "thu", "fri", "sat", "sun"), day_data
+            )
         }
         assert _normalise_prog(data) is None
 
     def test_mapping_none_slot_entry(self) -> None:
         day_data = {"slots": None, "values": None}
         data = {
-            "days": {
-                day: day_data
-                for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-            }
+            "days": dict.fromkeys(
+                ("mon", "tue", "wed", "thu", "fri", "sat", "sun"), day_data
+            )
         }
         result = _normalise_prog(data)
         assert result is None

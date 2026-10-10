@@ -181,7 +181,7 @@ class HeaterBoostActiveBinarySensor(
         self._inventory = inventory
         self._settings_resolver = settings_resolver
         resolved_device_name = device_name or name
-        self._device_name = resolved_device_name if resolved_device_name else ""
+        self._device_name = resolved_device_name or ""
 
     @property
     def is_on(self) -> bool | None:

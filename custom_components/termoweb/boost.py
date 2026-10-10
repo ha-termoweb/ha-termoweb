@@ -37,7 +37,7 @@ def supports_boost(node: Any) -> bool:
     if callable(candidate):
         try:
             candidate = candidate()
-        except Exception:  # noqa: BLE001 - defensive
+        except Exception:
             node_ref = getattr(node, "addr", node)
             _LOGGER.debug(
                 "Ignoring boost support probe failure for node %r",

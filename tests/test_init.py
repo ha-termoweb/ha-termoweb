@@ -275,7 +275,7 @@ async def test_failed_first_refresh_cleans_up(
     cloud.get_node_samples.assert_not_awaited()
     with pytest.raises(LookupError):
         require_runtime(hass, config_entry.entry_id)
-    assert config_entry.runtime_data._shutdown_complete  # noqa: SLF001
+    assert config_entry.runtime_data._shutdown_complete
 
 
 async def test_setup_registers_no_dangling_via_device(
@@ -760,7 +760,7 @@ def radio_clients() -> Generator[list[tuple[RadioClient, list[FakeLink]]]]:
             links.append(FakeLink(*a, **kw))
             return links[-1]
 
-        client._link_factory = _factory  # noqa: SLF001 - the transport boundary
+        client._link_factory = _factory
         made.append((client, links))
         return client
 

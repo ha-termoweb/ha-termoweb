@@ -180,6 +180,7 @@ ignore = [
   "PLR0912",
   "PLR0913",
   "PLR0915",
+  "PLR0917",
   "PLR2004",
   "PLW1641",
   "PLW2901",
@@ -198,6 +199,7 @@ ignore = [
   "TC003",
   "TC006",
   "TRY003",
+  "TRY301",
   "TRY400",
   "UP046",
   "UP047",
@@ -217,14 +219,18 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [
   "ARG",     # fixtures and mocks have unused arguments by design
+  "ASYNC240", # sync pathlib access to tmp files is fine in tests
   "BLE001",  # tests catch broad exceptions to assert on failure modes
   "D",       # test names and bodies document themselves; no docstring policy
+  "E402",    # tests import helpers after fixtures/constants on purpose
+  "ICN001",  # datetime alias convention not enforced in tests
   "INP001",  # tests/ subfolders are not packages
   "PLC0415", # imports inside tests are used to patch/reload modules
   "PLR2004", # magic values are the point of assertions
   "PT",      # pytest-style opinions (parametrize names, raises match) not enforced
   "S",       # asserts, hard-coded tokens and temp paths are fine in tests
   "SLF001",  # tests exercise private members
+  "TID251",  # tests share helpers via tests.fakes / tests.conftest by design
   "TRY",     # exception-style rules are irrelevant for test doubles
 ]
 
