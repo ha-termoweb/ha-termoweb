@@ -25,8 +25,8 @@
  *   payload crc(2), and an ack is net, acker, acked sender, flags 0x80, CRC.
  *
  * Line protocol (lines end "\r\n", as termoweb_rx's uart_putc_stream sends):
- *   connect / 'V' -> "# termoweb_rx 3.6-esp32 freq=869.525 rate=9.6k sync=2DE5 mode=dynamic tx=paC0 mac=<mac>"
- *   'Q'        -> "# Q termoweb_rx 3.6-esp32 freq=... pa=... sync=... mode=dynamic autoack=<on/off> id=<hex>
+ *   connect / 'V' -> "# termoweb_rx 3.7-esp32 freq=869.525 rate=9.6k sync=2DE5 mode=dynamic tx=paC0 mac=<mac>"
+ *   'Q'        -> "# Q termoweb_rx 3.7-esp32 freq=... pa=... sync=... mode=dynamic autoack=<on/off> id=<hex>
  *                  dialect=<A|B> net=<hex4> mac=<AA:BB:CC:DD:EE:FF>" (one line)
  *   'X'        -> toggle raw mode (appends the 2 raw status bytes as hex)
  *   'A0'/'A1'  -> auto-ack off/on (default off) -> "# autoack=on|off"
@@ -44,6 +44,12 @@
  *                 or "# N? expected 4 hex digits"
  *   'F<kHz>'   -> retune the carrier, e.g. "F869525" -> "# freq=869.525 word=21717A",
  *                 or "# F? expected kHz" (accepted range 779000-928000)
+ *   'R<secs>'  -> raw survey for unknown dialects (1-600 s; 'R0' ends it early):
+ *                 "# survey on secs=<n> floor=<dBm> thr=<dBm>", then per RF burst
+ *                 "RAWB <n> <rssi_dbm>", "RAW <n> +<us> -<us> ..." (run lengths of the
+ *                 raw demodulator output: sign = level, value = microseconds) and
+ *                 "RAWE <n> <runs>"; finally "# survey off bursts=<n>". Packet RX,
+ *                 auto-ack and TX ("TXERR survey active") are off meanwhile.
  * Dialect, network id, frequency, auto-ack, station id and raw mode all go
  * back to their defaults on every new connection (see "Connection
  * semantics"), so a host sends Y/N/I/A1 after each connect.
@@ -103,7 +109,9 @@
  */
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <iterator>
 #include <cerrno>
 #include <cstdarg>
 #include <cstdint>
@@ -113,6 +121,9 @@
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "esp_heap_caps.h"
+#include "soc/gpio_reg.h"
+#include "soc/soc.h"
 #include "esp_mac.h"
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
@@ -131,7 +142,7 @@ static const char *const TAG = "termoweb_radio";
  * appears in either line; the "-esp32" suffix tells a human (and a host
  * that cares) that the Y/N/F extensions and mac= are available. */
 #ifndef TERMOWEB_RADIO_VERSION
-#define TERMOWEB_RADIO_VERSION "3.6-esp32"
+#define TERMOWEB_RADIO_VERSION "3.7-esp32"
 #endif
 
 /* PATABLE value: 0xC0 = +10 dBm on 868 MHz (CC1101 datasheet). The nanoCUL
@@ -219,6 +230,7 @@ static constexpr uint8_t CC1101_TEST0 = 0x2E;
  * for why they cannot be batched). PARTNUM/VERSION are only read once, at
  * start, to log the chip identity (expected 0x00/0x14). */
 static constexpr uint8_t CC1101_PARTNUM = 0x30;
+static constexpr uint8_t CC1101_RSSI = 0x34; /* status register; read with the burst bit */
 static constexpr uint8_t CC1101_VERSION = 0x31;
 static constexpr uint8_t CC1101_MARCSTATE = 0x35;
 static constexpr uint8_t CC1101_PKTSTATUS = 0x38;
@@ -377,6 +389,12 @@ template<size_t N> class ByteRing {
     xSemaphoreGive(this->mtx_);
     return n;
   }
+  size_t free_space() {
+    xSemaphoreTake(this->mtx_, portMAX_DELAY);
+    size_t room = N - (this->head_ - this->tail_);
+    xSemaphoreGive(this->mtx_);
+    return room;
+  }
   bool empty() {
     xSemaphoreTake(this->mtx_, portMAX_DELAY);
     bool e = this->head_ == this->tail_;
@@ -489,7 +507,7 @@ class TermowebRadio {
    * letter: A = uart_getc_blocking, HEX_I/HEX_T = read_hex_line. The
    * ESP32-only commands reuse the same two shapes: Y like A (one digit),
    * HEX_N like I (a hex line, here exactly 2 bytes); DEC_F reads decimal. */
-  enum ParseState : uint8_t { P_IDLE = 0, P_A, P_Y, P_HEX_I, P_HEX_N, P_HEX_T, P_DEC_F };
+  enum ParseState : uint8_t { P_IDLE = 0, P_A, P_Y, P_HEX_I, P_HEX_N, P_HEX_T, P_DEC_F, P_DEC_R };
 
   /* ---------------------------------------------------------------- clock */
 
@@ -712,6 +730,18 @@ class TermowebRadio {
    * stick_delay_ms). */
   static void IRAM_ATTR gdo0_isr_(void *arg) {
     auto *self = static_cast<TermowebRadio *>(arg);
+    if (self->survey_active_) {
+      /* Survey: GDO0 is the raw demodulator output; stamp every edge with
+       * its new level in bit 0. The radio task copies a window out. */
+      uint32_t t = (uint32_t) esp_timer_get_time();
+      uint32_t h = self->edge_head_;
+      /* gpio_get_level() lives in flash, which an IRAM ISR must not call;
+       * read the input register through a pointer set up by start_survey_(). */
+      uint32_t level = (*self->gdo0_in_reg_ >> self->gdo0_in_bit_) & 1u;
+      self->edge_buf_[h & (self->edge_mask_)] = (t & ~1u) | level;
+      self->edge_head_ = h + 1;
+      return;
+    }
     if (self->gdo_masked_) return;
     self->sync_count_++;
     self->gdo0_edge_us_ = (uint32_t) esp_timer_get_time();
@@ -1095,6 +1125,10 @@ class TermowebRadio {
       this->emit_("TXERR empty or bad hex");
       return;
     }
+    if (this->survey_active_) {
+      this->emit_("TXERR survey active");
+      return;
+    }
     this->gdo_mask_();
     uint8_t err = this->transmit_(this->tx_buf_, n);
     this->enter_rx_();
@@ -1189,6 +1223,158 @@ class TermowebRadio {
     this->emit_(line);
   }
 
+  /* 'R<seconds>': raw survey for up to SURVEY_MAX_SECS; 'R0' ends one early. */
+  void finish_r_(bool ok) {
+    if (!ok || this->f_digits_ == 0) {
+      this->emit_("# R? expected seconds");
+      return;
+    }
+    if (this->f_value_ == 0) {
+      if (this->survey_active_) this->stop_survey_();
+      return;
+    }
+    this->start_survey_(this->f_value_ > SURVEY_MAX_SECS ? SURVEY_MAX_SECS : this->f_value_);
+  }
+
+  /* ------------------------------------------------------------ survey */
+
+  /* Survey mode finds dialects the packet engine cannot hear: the CC1101
+   * runs in asynchronous serial mode (GDO0 = raw 2-FSK demodulator bits, no
+   * sync word, no framing), every GDO0 edge is time-stamped by the ISR, and
+   * each burst whose RSSI rises SURVEY_MARGIN_DB above the measured noise
+   * floor is dumped as run lengths for the host to analyse:
+   *   RAWB <n> <rssi_dbm>    burst start (peak RSSI while capturing)
+   *   RAW <n> +<us> -<us> .. runs: sign = level after the edge, value = us
+   *   RAWE <n> <runs>        burst end
+   * Packet RX, auto-ack and TX are off until the survey ends; then the
+   * packet-mode registers are restored exactly as cc1101_init_() sets them. */
+  float rssi_dbm_() {
+    int8_t raw = (int8_t) this->read_status_(CC1101_RSSI);
+    return raw / 2.0f - 74.0f;
+  }
+
+  void start_survey_(uint32_t secs) {
+    if (this->edge_buf_ == nullptr)
+      this->edge_buf_ = (uint32_t *) heap_caps_malloc(SURVEY_EDGES * sizeof(uint32_t), MALLOC_CAP_INTERNAL);
+    if (this->snap_buf_ == nullptr)
+      this->snap_buf_ = (uint32_t *) heap_caps_malloc(SURVEY_SNAP * sizeof(uint32_t), MALLOC_CAP_INTERNAL);
+    if (this->edge_buf_ == nullptr || this->snap_buf_ == nullptr) {
+      this->emit_("# survey? out of memory");
+      return;
+    }
+    this->gdo_mask_();
+    this->strobe_(CC1101_SIDLE);
+    this->write_reg_(CC1101_IOCFG0, 0x0D);   /* async serial data out */
+    this->write_reg_(CC1101_IOCFG2, 0x0E);   /* carrier sense (diagnostic) */
+    this->write_reg_(CC1101_PKTCTRL0, 0x32); /* async serial, infinite */
+    this->strobe_(CC1101_SRX);
+    this->edge_head_ = 0;
+    this->trig_us_ = 0;
+    this->dump_pos_ = 0;
+    this->dump_end_ = 0;
+    this->burst_count_ = 0;
+    uint32_t pin = (uint32_t) this->pin_gdo0_;
+    this->gdo0_in_reg_ = (volatile uint32_t *) (pin < 32 ? GPIO_IN_REG : GPIO_IN1_REG);
+    this->gdo0_in_bit_ = pin < 32 ? pin : pin - 32;
+    gpio_set_intr_type(this->pin_gdo0_, GPIO_INTR_ANYEDGE);
+    this->survey_active_ = true;
+    /* Noise floor: median of 40 RSSI readings over ~200 ms. */
+    float samples[40];
+    for (auto &v : samples) {
+      vTaskDelay(SURVEY_TICK);
+      v = this->rssi_dbm_();
+    }
+    std::sort(std::begin(samples), std::end(samples));
+    this->floor_dbm_ = samples[20];
+    this->thr_dbm_ = this->floor_dbm_ + SURVEY_MARGIN_DB;
+    this->survey_end_us_ = micros32() + secs * 1000000u;
+    char line[96];
+    snprintf(line, sizeof(line), "# survey on secs=%u floor=%.1f thr=%.1f", (unsigned) secs, this->floor_dbm_,
+             this->thr_dbm_);
+    this->emit_(line);
+  }
+
+  void stop_survey_() {
+    this->survey_active_ = false;
+    gpio_set_intr_type(this->pin_gdo0_, GPIO_INTR_NEGEDGE);
+    this->cc1101_init_(); /* packet-mode registers, the dialect's sync, the frequency */
+    this->rx_have_ = 0;
+    this->rx_state_ = RX_IDLE;
+    this->packet_ready_ = false;
+    this->enter_rx_();
+    this->gdo_unmask_();
+    char line[48];
+    snprintf(line, sizeof(line), "# survey off bursts=%u", (unsigned) this->burst_count_);
+    this->emit_(line);
+  }
+
+  /* One step per radio-loop pass (every SURVEY_TICK while surveying):
+   * dump a pending burst a line at a time, else watch RSSI for the next. */
+  void survey_tick_() {
+    uint32_t now = micros32();
+    if (this->dump_end_ > 0) {
+      this->survey_dump_line_();
+      return;
+    }
+    bool over = (int32_t) (now - this->survey_end_us_) >= 0;
+    if (this->trig_us_ == 0) {
+      if (over) {
+        this->stop_survey_();
+        return;
+      }
+      float dbm = this->rssi_dbm_();
+      if (dbm > this->thr_dbm_) {
+        this->trig_us_ = now;
+        this->trig_peak_ = dbm;
+      }
+      return;
+    }
+    float dbm = this->rssi_dbm_();
+    if (dbm > this->trig_peak_) this->trig_peak_ = dbm;
+    if (now - this->trig_us_ < SURVEY_POST_US) return;
+    /* Copy [trig - PRE, trig + POST] out of the edge ring. */
+    uint32_t head = this->edge_head_;
+    uint32_t lo = head;
+    while (head - lo < SURVEY_EDGES - 1 && lo > 0) {
+      uint32_t t = this->edge_buf_[(lo - 1) & (SURVEY_EDGES - 1)] & ~1u;
+      if ((int32_t) (t - (this->trig_us_ - SURVEY_PRE_US)) < 0) break;
+      lo--;
+    }
+    uint32_t n = 0;
+    for (uint32_t i = lo; i < head && n < SURVEY_SNAP; i++) this->snap_buf_[n++] = this->edge_buf_[i & (SURVEY_EDGES - 1)];
+    this->burst_count_++;
+    char line[64];
+    snprintf(line, sizeof(line), "RAWB %u %.1f", (unsigned) this->burst_count_, this->trig_peak_);
+    this->emit_(line);
+    this->dump_pos_ = 0;
+    this->dump_end_ = n < 2 ? 1 : n; /* 1: nothing to dump, end at once */
+  }
+
+  void survey_dump_line_() {
+    if (this->out_ring_.free_space() < LINE_MAX_ + 2) return; /* let the client catch up */
+    char line[LINE_MAX_ + 1];
+    size_t pos = 0;
+    append_(line, pos, "RAW %u", (unsigned) this->burst_count_);
+    uint32_t p = this->dump_pos_;
+    uint32_t end = this->dump_end_;
+    size_t runs = 0;
+    while (p + 1 < end && runs < SURVEY_RUNS_PER_LINE) {
+      uint32_t a = this->snap_buf_[p], b = this->snap_buf_[p + 1];
+      int32_t dur = (int32_t) ((b & ~1u) - (a & ~1u));
+      append_(line, pos, " %c%ld", (a & 1) ? '+' : '-', (long) dur);
+      p++;
+      runs++;
+    }
+    if (runs > 0) this->emit_(line);
+    this->dump_pos_ = p;
+    if (p + 1 >= end) {
+      snprintf(line, sizeof(line), "RAWE %u %u", (unsigned) this->burst_count_, (unsigned) (end > 1 ? end - 1 : 0));
+      this->emit_(line);
+      this->dump_end_ = 0;
+      this->trig_us_ = 0;
+    }
+  }
+
   /* End a pending multi-byte command with read_hex_line's/
    * uart_getc_blocking's failure value (timeout, bad byte, overflow). */
   void parse_fail_() {
@@ -1212,6 +1398,9 @@ class TermowebRadio {
         break;
       case P_DEC_F:
         this->finish_f_(false);
+        break;
+      case P_DEC_R:
+        this->finish_r_(false);
         break;
       default:
         break;
@@ -1296,6 +1485,19 @@ class TermowebRadio {
         }
         this->parse_fail_();
         return false;
+      case P_DEC_R:
+        if (c == '\n' || c == '\r') {
+          this->pstate_ = P_IDLE;
+          this->finish_r_(true);
+          return true;
+        }
+        if (c >= '0' && c <= '9' && this->f_digits_ < 4) {
+          this->f_value_ = this->f_value_ * 10 + (uint32_t) (c - '0');
+          this->f_digits_++;
+          return false;
+        }
+        this->parse_fail_();
+        return false;
     }
 
     /* P_IDLE: main.c's command dispatch. Unknown bytes (including the '\n'
@@ -1330,6 +1532,11 @@ class TermowebRadio {
         this->f_value_ = 0;
         this->f_digits_ = 0;
         break;
+      case 'R':
+        this->pstate_ = P_DEC_R;
+        this->f_value_ = 0;
+        this->f_digits_ = 0;
+        break;
       case 'D': {
         /* On-demand chip state dump. */
         uint8_t marcstate = this->read_status_(CC1101_MARCSTATE);
@@ -1355,6 +1562,12 @@ class TermowebRadio {
    * main.c keeps interrupts off until cc1101_init()/enter_rx() are done
    * (the 3.2.1 fix: GDO2 toggles CHIP_RDYn during SRES). */
   void reset_session_() {
+    if (this->survey_active_) {
+      this->survey_active_ = false;
+      gpio_set_intr_type(this->pin_gdo0_, GPIO_INTR_NEGEDGE);
+      this->dump_end_ = 0;
+      this->trig_us_ = 0;
+    }
     this->gdo_mask_();
     this->cmd_ring_.clear();
     this->pstate_ = P_IDLE;
@@ -1469,7 +1682,7 @@ class TermowebRadio {
        * bytes are already waiting (an earlier iteration stopped parsing
        * after a 'T' to service the radio first). */
       uint32_t bits = 0;
-      TickType_t wait = this->cmd_ring_.empty() ? pdMS_TO_TICKS(50) : 0;
+      TickType_t wait = !this->cmd_ring_.empty() ? 0 : (this->survey_active_ ? SURVEY_TICK : pdMS_TO_TICKS(50));
       xTaskNotifyWait(0, UINT32_MAX, &bits, wait);
 
       if (bits & EV_CONNECT) {
@@ -1487,6 +1700,7 @@ class TermowebRadio {
       if (bits & EV_GDO0) this->on_gdo0_(this->gdo0_edge_us_);
 
       if (this->packet_ready_) this->handle_packet_();
+      if (this->survey_active_) this->survey_tick_();
 
       if (this->cmd_overrun_.exchange(false)) this->emit_("# uart overrun");
 
@@ -1728,6 +1942,30 @@ class TermowebRadio {
 
   /* Written by the GPIO ISRs, read by the radio task. */
   volatile bool gdo_masked_{true};
+  /* Survey (see start_survey_()): the edge ring is written by the GDO0 ISR. */
+  static constexpr uint32_t SURVEY_EDGES = 8192; /* power of two */
+  static constexpr uint32_t SURVEY_SNAP = 3000;  /* most runs dumped per burst */
+  static constexpr uint32_t SURVEY_PRE_US = 10000;
+  static constexpr uint32_t SURVEY_POST_US = 100000;
+  static constexpr uint32_t SURVEY_MAX_SECS = 600;
+  static constexpr float SURVEY_MARGIN_DB = 8.0f;
+  static constexpr size_t SURVEY_RUNS_PER_LINE = 60;
+  static constexpr TickType_t SURVEY_TICK = pdMS_TO_TICKS(5) > 0 ? pdMS_TO_TICKS(5) : 1;
+  volatile bool survey_active_{false};
+  volatile uint32_t edge_head_{0};
+  uint32_t *edge_buf_{nullptr};
+  uint32_t edge_mask_{SURVEY_EDGES - 1};
+  volatile uint32_t *gdo0_in_reg_{nullptr};
+  uint32_t gdo0_in_bit_{0};
+  uint32_t *snap_buf_{nullptr};
+  uint32_t survey_end_us_{0};
+  uint32_t trig_us_{0};
+  uint32_t dump_pos_{0};
+  uint32_t dump_end_{0};
+  uint32_t burst_count_{0};
+  float floor_dbm_{0};
+  float thr_dbm_{0};
+  float trig_peak_{0};
   volatile uint16_t sync_count_{0}; /* 'D' syncs=: GDO0 ISR firings incl. noise, uint16 like main.c */
   volatile uint32_t gdo0_edge_us_{0};
 
