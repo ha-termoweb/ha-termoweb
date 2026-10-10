@@ -222,7 +222,7 @@ def forward_ws_sample_updates(
         if lease_candidate is not None:
             try:
                 lease_value = float(lease_candidate)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 lease_value = None
             else:
                 if lease_value > 0:

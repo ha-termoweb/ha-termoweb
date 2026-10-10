@@ -54,7 +54,6 @@ def test_encode_program_command_splits_weekly_prog() -> None:
     assert len(payload["prog"]["6"]) == 24
 
 
-
 def test_encode_boost_command_validates_minutes_and_formats() -> None:
     """Validate boost minutes and formatting for accumulator boost payloads."""
 

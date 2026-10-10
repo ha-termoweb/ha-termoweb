@@ -58,7 +58,7 @@ class WsHealthTracker:
             return False
         try:
             candidate = float(stale_after)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
         if candidate <= 0:
             return False

@@ -638,7 +638,7 @@ class TermoWebWSClient(_WSCommon):
             )
         except asyncio.CancelledError:
             return
-        except (aiohttp.ClientError, RuntimeError):  # pragma: no cover - best effort
+        except aiohttp.ClientError, RuntimeError:  # pragma: no cover - best effort
             return
 
     async def _rtc_keepalive_loop(self) -> None:

@@ -417,7 +417,7 @@ class StateCoordinator(
 
         try:
             ttl_value = float(ttl)
-        except (TypeError, ValueError):  # pragma: no cover - defensive
+        except TypeError, ValueError:  # pragma: no cover - defensive
             ttl_value = _PENDING_SETTINGS_TTL
         expires_at = time_mod() + max(ttl_value, 0.0)
         normalized_mode = self._normalize_mode_value(mode)

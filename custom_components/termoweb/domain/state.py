@@ -615,5 +615,3 @@ def clone_gateway_connection_state(
         payload_stale_after=state.payload_stale_after,
         idle_restart_pending=state.idle_restart_pending,
     )
-
-

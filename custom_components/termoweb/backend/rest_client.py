@@ -263,7 +263,7 @@ class RESTClient:
                             return body_text
                     return body_text
 
-            except (BackendAuthError, BackendRateLimitError):
+            except BackendAuthError, BackendRateLimitError:
                 raise
             except aiohttp.ClientResponseError as e:
                 # Single log line per failure. 5xx is transient (the caller
@@ -587,7 +587,7 @@ class RESTClient:
         if isinstance(response, Mapping) and "power_limit" in response:
             try:
                 return int(response["power_limit"])
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 return None
         return None
 

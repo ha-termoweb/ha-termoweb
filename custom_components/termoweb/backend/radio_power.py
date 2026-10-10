@@ -65,7 +65,7 @@ class PowerManager:
 
         try:
             return int(self._settings().get(KEY_POWER_LIMIT) or 0) or None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def set_power_limit(self, watts: int) -> None:
@@ -220,7 +220,7 @@ def _int_map(raw: Any) -> dict[int, int]:
     for key, value in raw.items():
         try:
             result[int(key)] = int(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             _LOGGER.debug("Ignoring bad power setting %r=%r", key, value)
     return result
 

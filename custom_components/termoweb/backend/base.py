@@ -362,7 +362,7 @@ def normalise_sample_records(
         energy_wh = counter / divider if divider else counter
         try:
             ts = datetime.fromtimestamp(timestamp, tz=UTC)
-        except (OverflowError, OSError, ValueError):
+        except OverflowError, OSError, ValueError:
             _LOGGER.debug(
                 "Skipping %s sample with out-of-range timestamp %r",
                 node_type,

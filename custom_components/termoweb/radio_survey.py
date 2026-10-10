@@ -31,7 +31,9 @@ ISSUE_URL = (
 )
 
 
-async def async_analyse(hass: HomeAssistant, bursts: Sequence[RawBurst]) -> SurveyReport:
+async def async_analyse(
+    hass: HomeAssistant, bursts: Sequence[RawBurst]
+) -> SurveyReport:
     """Analyse survey bursts in the executor: the framing search is CPU work."""
 
     return await hass.async_add_executor_job(analyse, list(bursts))

@@ -100,7 +100,7 @@ def _decode_polling_packets(body: bytes) -> list[str]:
         i = end
         try:
             pkt = payload.decode("utf-8", errors="ignore")
-        except (UnicodeDecodeError, ValueError):
+        except UnicodeDecodeError, ValueError:
             pkt = ""
         if pkt:
             out.append(pkt)
@@ -540,7 +540,7 @@ class DucaheatWSClient(_WSCommon):
         try:
             hint_value = float(window_hint)  # type: ignore[arg-type]
             payload_ts = float(last_payload) if last_payload is not None else None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
 
         ws = self._ws
@@ -1078,7 +1078,7 @@ class DucaheatWSClient(_WSCommon):
             return None
         try:
             candidate = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         if not math.isfinite(candidate) or candidate <= 0:
             return None
