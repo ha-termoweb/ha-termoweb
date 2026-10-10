@@ -1,12 +1,6 @@
 """Real Home Assistant test harness (pytest-homeassistant-custom-component).
 
-These tests run against the real ``homeassistant`` and ``aiohttp`` packages, so
-they cannot share a pytest session with ``tests/`` (whose conftest replaces
-``homeassistant`` in ``sys.modules`` with stubs). Run them in their own
-invocation::
-
-    pytest tests_ha -p homeassistant -o asyncio_mode=auto
-
+Every test runs against the real ``homeassistant`` and ``aiohttp`` packages.
 The fakes live at the backend boundary only (``tests_ha/fakes``): the public
 ``RESTClient`` methods, an ``aiohttp`` session double and the websocket client
 factory. Home Assistant itself is never patched. Pure-module tests (codecs,

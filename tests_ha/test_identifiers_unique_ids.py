@@ -7,10 +7,13 @@ import pytest
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.identifiers import (
+    build_gateway_entity_unique_id,
+    build_heater_energy_unique_id,
     build_heater_unique_id,
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
     build_power_monitor_unique_id,
+    build_installation_entity_unique_id,
 )
 
 
@@ -64,3 +67,41 @@ def test_build_heater_unique_id_requires_all_components(
 
     with pytest.raises(ValueError):
         build_heater_unique_id(dev_id, node_type, addr)
+
+
+def test_build_gateway_entity_unique_id_rejects_missing_dev_id() -> None:
+    """A missing dev_id must not become the literal string "None"."""
+
+    with pytest.raises(ValueError):
+        build_gateway_entity_unique_id(None, "power_limit")
+
+
+def test_heater_energy_unique_id_is_normalised() -> None:
+    """Energy unique IDs trim and lower-case their parts."""
+    assert (
+        build_heater_energy_unique_id(" dev ", " ACM ", " 01 ")
+        == f"{DOMAIN}:dev:acm:01:energy"
+    )
+
+
+@pytest.mark.parametrize(
+    ("dev_id", "node_type", "addr"),
+    [("", "htr", "01"), ("dev", " ", "01"), ("dev", "htr", "  ")],
+)
+def test_heater_energy_unique_id_requires_all_components(
+    dev_id: str, node_type: str, addr: str
+) -> None:
+    """Blank components are rejected."""
+    with pytest.raises(ValueError):
+        build_heater_energy_unique_id(dev_id, node_type, addr)
+
+
+def test_installation_entity_unique_id_is_site_scoped() -> None:
+    """Site entity IDs carry the trimmed gateway id and a ``site`` segment."""
+    assert (
+        build_installation_entity_unique_id(" dev ", "power_limit")
+        == f"{DOMAIN}:dev:site:power_limit"
+    )
+    for dev_id in ("", "   "):
+        with pytest.raises(ValueError):
+            build_installation_entity_unique_id(dev_id, "info")

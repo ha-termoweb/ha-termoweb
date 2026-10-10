@@ -11,3 +11,8 @@ def test_uses_ducaheat_backend_aliases() -> None:
     assert const.uses_ducaheat_backend(const.BRAND_DUCAHEAT) is True
     assert const.uses_ducaheat_backend(const.BRAND_TEVOLVE) is True
     assert const.uses_ducaheat_backend(const.BRAND_TERMOWEB) is False
+
+
+def test_unknown_brand_uses_the_termoweb_api() -> None:
+    """An unknown brand falls back to the TermoWeb API base."""
+    assert const.get_brand_api_base("unknown-brand") == const.API_BASE

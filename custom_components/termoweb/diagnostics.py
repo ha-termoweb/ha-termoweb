@@ -10,6 +10,7 @@ from typing import Any, Final
 
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 
 from .backend.sanitize import mask_identifier
@@ -108,9 +109,6 @@ async def async_get_config_entry_diagnostics(
             brand_value = entry_brand.strip()
     brand_label = get_brand_label(brand_value or DEFAULT_BRAND)
 
-    ha_version = getattr(hass, "version", None)
-    ha_version_str = str(ha_version) if ha_version is not None else "unknown"
-
     hass_config = getattr(hass, "config", None)
     time_zone = getattr(hass_config, "time_zone", None)
     time_zone_str = str(time_zone) if time_zone not in (None, "") else None
@@ -149,7 +147,7 @@ async def async_get_config_entry_diagnostics(
             "brand": brand_label,
         },
         "home_assistant": {
-            "version": ha_version_str,
+            "version": HA_VERSION,
             "python_version": platform.python_version(),
         },
         "site": installation_section,

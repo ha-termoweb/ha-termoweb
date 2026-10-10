@@ -31,16 +31,10 @@ jobs:
       - name: Install locked project dependencies
         run: uv sync --locked --extra test
 
-      - name: Run stubbed tests
-        run: timeout 120s uv run pytest --cov --cov-fail-under=0 --cov-report=
-
-      # Real Home Assistant tests need their own session: tests/conftest.py
-      # replaces homeassistant in sys.modules. Coverage is appended, so the
-      # fail_under gate (pyproject) applies to the combined figure.
-      - name: Run real Home Assistant tests
+      - name: Run tests on real Home Assistant
         run: |
           set -o pipefail
-          timeout 120s uv run pytest tests_ha -p homeassistant -o asyncio_mode=auto --cov --cov-append | tee coverage-report.txt
+          timeout 120s uv run pytest --cov | tee coverage-report.txt
 
       - name: Generate coverage XML
         run: uv run coverage xml

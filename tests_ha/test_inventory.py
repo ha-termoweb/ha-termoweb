@@ -14,6 +14,11 @@ from custom_components.termoweb.inventory import (
     Inventory,
     Node,
     PowerMonitorNode,
+    addresses_by_node_type,
+    build_heater_address_map,
+    normalize_heater_addresses,
+    normalize_node_addr,
+    normalize_node_type,
     normalize_power_monitor_addresses,
 )
 
@@ -445,3 +450,83 @@ def test_inventory_heater_sample_targets_deduplicate_and_strip(
     object.__setattr__(heater_inventory, "_heater_sample_targets_cache", None)
 
     assert heater_inventory.heater_sample_targets == [("htr", "1"), ("acm", "2")]
+
+
+def test_addresses_by_node_type_skips_blank_and_duplicate_entries() -> None:
+    """Blank types and addresses are dropped; unknown types are reported."""
+    nodes = [
+        SimpleNamespace(type=" ", addr="skip"),
+        SimpleNamespace(type="acm", addr=""),
+        SimpleNamespace(type="acm", addr="B"),
+        SimpleNamespace(type="acm", addr="B"),
+    ]
+
+    mapping, unknown = addresses_by_node_type(nodes, known_types=["htr"])
+
+    assert mapping == {"acm": ["B"]}
+    assert unknown == {"acm"}
+
+
+def test_build_heater_address_map_keeps_only_heater_nodes() -> None:
+    """Only heater-like nodes with an address make it into the map."""
+    nodes = [
+        SimpleNamespace(type="htr", addr="A"),
+        SimpleNamespace(type="acm", addr=" "),
+        SimpleNamespace(type="unknown", addr="B"),
+        SimpleNamespace(type="pmo", addr=""),
+    ]
+
+    assert build_heater_address_map(nodes) == ({"htr": ["A"]}, {"A": {"htr"}})
+
+
+@pytest.mark.parametrize(
+    ("value", "default", "use_default_when_falsey", "expected"),
+    [
+        (" HTR ", "htr", False, "htr"),
+        ("AcM", "htr", False, "acm"),
+        (None, "htr", True, "htr"),
+        ("  ", "htr", False, "htr"),
+        (None, "", False, "none"),
+    ],
+)
+def test_normalize_node_type_cases(
+    value: object, default: str, use_default_when_falsey: bool, expected: str
+) -> None:
+    """Node types are trimmed and lower-cased, with an optional default."""
+    assert (
+        normalize_node_type(
+            value, default=default, use_default_when_falsey=use_default_when_falsey
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "default", "use_default_when_falsey", "expected"),
+    [
+        (" 01 ", "", False, "01"),
+        ("  ", "fallback", False, "fallback"),
+        (None, "", True, ""),
+        ("none", "", False, "none"),
+    ],
+)
+def test_normalize_node_addr_cases(
+    value: object, default: str, use_default_when_falsey: bool, expected: str
+) -> None:
+    """Addresses are trimmed strings, with an optional default."""
+    assert (
+        normalize_node_addr(
+            value, default=default, use_default_when_falsey=use_default_when_falsey
+        )
+        == expected
+    )
+
+
+def test_normalize_heater_addresses_accepts_strings_and_drops_aliases() -> None:
+    """Strings become one-item lists; duplicates, blanks and aliases are dropped."""
+    assert normalize_heater_addresses(None) == ({"htr": []}, {"htr": "htr"})
+    mapping, aliases = normalize_heater_addresses(
+        {"htr": " 1 ", "acm": ["2", "2", " "], "heater": "3"}
+    )
+    assert mapping == {"htr": ["1"], "acm": ["2"]}
+    assert aliases == {"htr": "htr"}

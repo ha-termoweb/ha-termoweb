@@ -1101,6 +1101,7 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
         self._paired: list[int] = []
         self._rehome_task: asyncio.Task[Any] | None = None
         self._rehome_summary = ""
+        self._rehome_summary_shown = False
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Let the user choose settings, pairing or rehoming."""
@@ -1243,7 +1244,10 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_rehome_done(self, user_input: dict[str, Any] | None = None):
         """Show what the move did; close the options when the user confirms."""
-        if user_input is None:
+        # A move refused before its first await finishes eagerly, and the flow
+        # manager then re-sends the rehome form's input here: show the summary.
+        if user_input is None or not self._rehome_summary_shown:
+            self._rehome_summary_shown = True
             return self.async_show_form(
                 step_id="rehome_done",
                 data_schema=vol.Schema({}),

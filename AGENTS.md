@@ -33,10 +33,8 @@ End users are non-technical Home Assistant operators. Documentation must be task
 * Format and lint all changes with `ruff` before committing.
 
 ## Testing Requirements
-* Install with `uv sync --locked --extra test`, then run both suites in order. They need separate pytest sessions, because the stubs in `tests/conftest.py` replace `homeassistant` in `sys.modules`:
-  1. Stubbed suite: `timeout 60s uv run pytest --cov --cov-fail-under=0 --cov-report=`
-  2. Real Home Assistant suite (pytest-homeassistant-custom-component): `timeout 60s uv run pytest tests_ha -p homeassistant -o asyncio_mode=auto --cov --cov-append`. The 90% gate applies to this combined figure.
-* Write new tests in `tests_ha/` against the real `hass` fixture and `MockConfigEntry`. Fake only the backend boundary (the `cloud` fixture in `tests_ha/conftest.py`); never patch Home Assistant internals there.
+* Install with `uv sync --locked --extra test`, then run the suite on real Home Assistant (pytest-homeassistant-custom-component): `timeout 120s uv run pytest --cov`. The 90% coverage gate applies.
+* Write tests in `tests_ha/` against the real `hass` fixture and `MockConfigEntry`. Fake only the backend boundary (the `cloud` fixture in `tests_ha/conftest.py` and the doubles in `tests_ha/fakes/`); never patch Home Assistant internals.
 * Capture partial logs whenever the timed run aborts; treat timeouts as failures requiring investigation. 
 * During debugging, run targeted, no-coverage subsets.
 * If tests approach the 60-second limit, suspect an asynchronous wait issue and stop the run rather than letting it hang.
