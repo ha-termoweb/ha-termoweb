@@ -164,12 +164,18 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.create_ws_clie
     Instantiate the unified websocket client for Ducaheat.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.fetch_hourly_samples
     Return hourly samples for ``nodes`` using the segmented API.
-custom_components/termoweb/backend/ducaheat_ws.py :: _rand_t
+custom_components/termoweb/backend/ducaheat_engineio.py :: SocketIOParseError.__init__
+    Store the short failure ``reason`` (namespace, json or shape).
+custom_components/termoweb/backend/ducaheat_engineio.py :: rand_t
     Return a pseudo-random token string for polling requests.
-custom_components/termoweb/backend/ducaheat_ws.py :: _encode_polling_packet
+custom_components/termoweb/backend/ducaheat_engineio.py :: encode_polling_packet
     Encode Engine.IO polling payloads.
-custom_components/termoweb/backend/ducaheat_ws.py :: _decode_polling_packets
+custom_components/termoweb/backend/ducaheat_engineio.py :: decode_polling_packets
     Decode Engine.IO v3 binary polling frames.
+custom_components/termoweb/backend/ducaheat_engineio.py :: decode_socketio_event
+    Decode a Socket.IO ``42`` payload into ``(event, args)``.
+custom_components/termoweb/backend/ducaheat_engineio.py :: encode_socketio_event
+    Return a namespaced Socket.IO ``42`` event frame.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.__init__
     Initialise the Ducaheat websocket client.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._ws_health
@@ -187,7 +193,7 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._record_up
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._record_parse_error
     Track JSON parse failures and return True when reconnection is advised.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._decode_socketio_event
-    Decode a Socket.IO ``42`` payload safely.
+    Decode a Socket.IO ``42`` payload, recording parse errors.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._update_status_from_heartbeat
     Report healthy only while payloads are fresh, otherwise connected.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.stop

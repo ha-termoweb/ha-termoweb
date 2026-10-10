@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-import gzip
 import json
 import logging
 import time
@@ -250,43 +249,6 @@ async def test_polling_headers_extend_brand_headers(client: DucaheatWSClient) ->
     assert headers.items() >= client._brand_headers(origin="https://localhost").items()
     assert headers["Referer"] == "https://localhost/"
     assert headers["Connection"] == "keep-alive"
-
-
-# ---------------------------------------------------------------------------
-# Engine.IO polling framing
-# ---------------------------------------------------------------------------
-
-
-def test_rand_t_token_format() -> None:
-    """Polling cache-busters are ``P`` plus seven alphanumerics."""
-    token = ducaheat_ws._rand_t()
-    assert token.startswith("P")
-    assert len(token) == 8
-    assert token[1:].isalnum()
-
-
-def test_polling_packets_round_trip_plain_and_gzip() -> None:
-    """Encoded packets carry an ASCII length; binary framing decodes, gzip too."""
-    assert ducaheat_ws._encode_polling_packet("40/message") == b"10:40/message"
-
-    body = bytes([0, 1, 0, 0xFF]) + b"40/message"
-    assert ducaheat_ws._decode_polling_packets(body) == ["40/message"]
-    assert ducaheat_ws._decode_polling_packets(gzip.compress(body)) == ["40/message"]
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        b"\x00\x00\x00",  # truncated
-        b"\x00\x0a",  # invalid length digit
-        b"\x00\xff\x00\x00",  # no length digits
-        b"\x00\x02\xff\x00",  # length overruns the body
-        b"\x1f\x8bbad",  # corrupt gzip
-    ],
-)
-def test_decode_polling_packets_rejects_malformed_bodies(body: bytes) -> None:
-    """Malformed polling bodies decode to nothing instead of raising."""
-    assert ducaheat_ws._decode_polling_packets(body) == []
 
 
 # ---------------------------------------------------------------------------
