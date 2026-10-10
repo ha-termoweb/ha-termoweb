@@ -268,6 +268,36 @@ async def test_repeated_parse_errors_force_reconnect(
     await _stop(client)
 
 
+async def test_empty_namespace_events_are_parse_errors(
+    env: Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Event frames without a usable body count as parse errors, not pings."""
+    session = _session(lambda _index: ["3probe"])
+    client = env.client(session)
+    client.start()
+    ws = await _join(env, session, 0)
+    ws.feed(_event("dev_data", SNAPSHOT))
+    await until(lambda: env.stemp() == "20.0", "snapshot applied")
+    sent_before = len(ws.sent)
+
+    ws.feed(f"42{NS},[]", f"42{NS}", _update("21.0"))
+    await until(lambda: env.stemp() == "21.0", "update after junk")
+
+    assert f"3{NS}" not in ws.sent[sent_before:]  # not answered as pings
+    assert env.ws_state["parse_errors_total"] == 2
+    assert "parse error (shape) count=1" in caplog.text
+    assert "parse error (namespace) count=2" in caplog.text
+    assert len(session.sockets) == 1
+
+    # A third one inside the 30 s window recycles the socket.
+    ws.feed(f"42{NS}")
+    await env.advance_until(lambda: len(session.sockets) == 2)
+    assert "WS: repeated parse errors (3 in 30s); reconnecting" in caplog.text
+
+    await _join(env, session, 1)
+    await _stop(client)
+
+
 async def test_stale_payloads_trigger_recovery_then_reconnect(env: Env) -> None:
     """Silence marks the feed stale, recovery re-requests data, then reconnects."""
     session = _session(lambda _index: ["3probe"])

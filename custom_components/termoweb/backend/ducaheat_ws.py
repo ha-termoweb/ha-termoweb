@@ -842,8 +842,10 @@ class DucaheatWSClient(_WSCommon):
                             frame_recorded = True
                         if payload.startswith("2/"):
                             ns_payload = payload[1:]
-                            ns, sep, body = ns_payload.partition(",")
-                            if not sep or body in {"", "[]", '["ping"]'}:
+                            ns, _, body = ns_payload.partition(",")
+                            # Only an explicit "ping" event is a namespace
+                            # ping; empty or bodyless events are malformed.
+                            if body == '["ping"]':
                                 await self._send_str(
                                     "3" + ns,
                                     context="engineio-namespace-pong",
