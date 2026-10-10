@@ -36,6 +36,8 @@ NODES = [
     {"type": "acm", "addr": "7", "name": "Hall"},
     {"type": "htr", "addr": "bogus"},
 ]
+FOREIGN_NET = bytes.fromhex("5678")  # synthetic neighbouring network id
+STATUS_E6 = bytes.fromhex("B921252A0300CC2C2CF0100300FF")
 DAY = [1] * 5 + [2] * 16 + [1] * 3
 WHEN = datetime(2026, 10, 9, 16, 52, 9)  # a Friday
 
@@ -339,6 +341,8 @@ async def test_reply_from_another_node_is_ignored() -> None:
         if payload == b"\xb8":
             link.deliver(received(7, STATUS_SHORT))  # wrong heater
             link.deliver(received(HEATER, STATUS_SHORT, dst=2))  # other station
+            # Same ids on a neighbouring network: not our heater.
+            link.deliver(received(HEATER, STATUS_E6, network_id=FOREIGN_NET))
             link.deliver(received(HEATER, STATUS_SHORT))
             link.deliver(received(HEATER, STATUS_SHORT))  # duplicate is ignored
 

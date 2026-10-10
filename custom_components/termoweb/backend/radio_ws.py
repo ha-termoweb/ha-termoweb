@@ -225,6 +225,8 @@ class RadioListener(_WSStatusMixin):
             link is None
             or not frame.ok
             or frame.is_ack
+            # Neighbouring installations hand out the same short ids.
+            or frame.network_id != link.network_id
             or frame.dst != link.station_id
             or frame.src is None
         ):

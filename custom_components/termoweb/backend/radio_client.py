@@ -451,6 +451,7 @@ class RadioClient:
                     not future.done()
                     and frame.ok
                     and not frame.is_ack
+                    and frame.network_id == link.network_id
                     and frame.src == addr
                     and frame.dst == link.station_id
                     and matches(frame)

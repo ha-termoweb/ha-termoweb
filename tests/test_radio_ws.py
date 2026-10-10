@@ -340,6 +340,11 @@ async def test_frames_without_usable_content() -> None:
     link.deliver(received_ack(HEATER))  # link ack
     link.deliver(received(HEATER, REGISTRATION, dst=2))  # for another station
     link.deliver(received(9, REGISTRATION))  # unknown node
+    # Same ids on a neighbouring network: no clock sync, grant or confirmation.
+    foreign = bytes.fromhex("5678")
+    link.deliver(received(HEATER, REGISTRATION, network_id=foreign))
+    link.deliver(received(HEATER, POWER_REQUEST, network_id=foreign))
+    link.deliver(received(HEATER, bytes([p.OP_REPORT]) + STATUS_E6, network_id=foreign))
     await settle()
 
     assert link.sent == [(6, b"\x57\x55"), (6, b"\x57\x55")]

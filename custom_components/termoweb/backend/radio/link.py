@@ -415,6 +415,7 @@ class RadioLink:
                 ack = self._add_frame_waiter(
                     lambda rx: (
                         rx.frame.is_ack
+                        and rx.frame.network_id == self._network_id
                         and rx.frame.src == dst
                         and rx.frame.dst == self._station_id
                     )
@@ -450,6 +451,7 @@ class RadioLink:
             lambda rx: (
                 rx.frame.ok
                 and not rx.frame.is_ack
+                and rx.frame.network_id == self._network_id
                 and rx.frame.src == dst
                 and rx.frame.dst == self._station_id
                 and predicate(rx.frame)

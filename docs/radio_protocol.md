@@ -391,6 +391,8 @@ derived one.
 - The firmware does not filter received frames by network id; `N<net>` only
   sets the id in its auto-acks. Announcements on net `00 00` therefore reach
   the client.
+  The integration ignores acks, replies and unsolicited frames from any other
+  network id, because neighbouring installations reuse the same short ids.
 - Right after pairing, a dialect-B heater took an `EB 51` clock sync but did
   not answer `53`; the restore below sends the clock with an ack only.
 
