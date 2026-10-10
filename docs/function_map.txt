@@ -920,20 +920,6 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._device_record
     Return a minimal coordinator payload for this device.
 custom_components/termoweb/coordinator.py :: StateCoordinator._publish_device_record
     Push the latest device snapshot to coordinator listeners.
-custom_components/termoweb/coordinator.py :: StateCoordinator._instant_power_snapshot
-    Return the current instant power cache grouped by node type.
-custom_components/termoweb/coordinator.py :: StateCoordinator._sync_instant_power_data
-    Publish the latest instant power snapshot to listeners.
-custom_components/termoweb/coordinator.py :: StateCoordinator._record_instant_power
-    Store an instant power reading and return ``True`` when changed.
-custom_components/termoweb/coordinator.py :: StateCoordinator.handle_instant_power_update
-    Process a websocket instant power update.
-custom_components/termoweb/coordinator.py :: StateCoordinator.instant_power_entry
-    Return the cached instant power entry for ``(node_type, addr)``.
-custom_components/termoweb/coordinator.py :: StateCoordinator.instant_power_overview
-    Return a diagnostics-friendly snapshot of instant power values.
-custom_components/termoweb/coordinator.py :: StateCoordinator._should_skip_rest_power
-    Return ``True`` when websocket data is fresh enough to skip REST power.
 custom_components/termoweb/coordinator.py :: StateCoordinator._async_fetch_settings_to_store
     Fetch settings for every address and store them in the domain cache.
 custom_components/termoweb/coordinator.py :: StateCoordinator._normalize_mode_value
