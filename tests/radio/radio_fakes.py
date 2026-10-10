@@ -69,6 +69,7 @@ class FakeWriter:
 
     def close(self) -> None:
         self.closed = True
+        self.gateway.reader.feed_eof()  # like a socket: the reader sees EOF
 
     async def wait_closed(self) -> None:
         if self.wait_closed_error is not None:
@@ -90,6 +91,7 @@ class FakeGateway:
         self.opened: list[tuple[str, int]] = []
         self.open_error: Exception | None = None
         self.micros = 1000
+        self.silent = False  # True: T lines get no TX confirmation (powered off)
 
     async def open_connection(self, host: str, port: int):
         self.opened.append((host, port))
@@ -113,6 +115,8 @@ class FakeGateway:
             elif line[:1] in ("Y", "N"):
                 self.feed(f"# {line} ok")
             elif line.startswith("T"):
+                if self.silent:
+                    continue
                 if self.tx_overrides:
                     self.feed(self.tx_overrides.popleft())
                     continue

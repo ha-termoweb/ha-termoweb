@@ -1987,6 +1987,8 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink.request
     Send ``payload`` to ``dst`` and return its first reply matching ``predicate``.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._transmit
     Write ``T<hex>`` and await ``TX``; resend once on a bad-hex TXERR.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._note_missed_confirm
+    Count a missed TX confirmation; drop a gateway that stopped answering.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._send_command
     Write one command line, keeping at least MIN_COMMAND_GAP_S between commands.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._read_loop
