@@ -10,6 +10,7 @@ from homeassistant.components.lock import LockEntity
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from custom_components.termoweb.backend.sanitize import mask_identifier
 from custom_components.termoweb.coordinator import StateCoordinator
 from custom_components.termoweb.domain.ids import HEATING_NODE_TYPES
 from custom_components.termoweb.domain.state import DomainState
@@ -41,7 +42,10 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
 
     inventory = runtime.inventory
     if not isinstance(inventory, Inventory):
-        _LOGGER.error("TermoWeb lock setup missing inventory for device %s", dev_id)
+        _LOGGER.error(
+            "TermoWeb lock setup missing inventory for device %s",
+            mask_identifier(dev_id),
+        )
         raise TypeError("TermoWeb inventory unavailable for lock platform")
 
     entities: list[LockEntity] = []
@@ -175,7 +179,7 @@ class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
 
         _LOGGER.info(
             "Setting child lock ON for %s/%s node %s",
-            self._dev_id,
+            mask_identifier(self._dev_id),
             self._node_type,
             self._addr,
         )
@@ -195,7 +199,7 @@ class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
 
         _LOGGER.info(
             "Setting child lock OFF for %s/%s node %s",
-            self._dev_id,
+            mask_identifier(self._dev_id),
             self._node_type,
             self._addr,
         )

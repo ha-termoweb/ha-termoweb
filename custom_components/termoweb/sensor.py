@@ -21,6 +21,7 @@ from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.backend.factory import backend_capabilities
+from custom_components.termoweb.backend.sanitize import mask_identifier
 from custom_components.termoweb.coerce import as_float, as_int, as_percentage
 from custom_components.termoweb.const import signal_radio_frames
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
@@ -156,7 +157,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if not isinstance(energy_coordinator, EnergyStateCoordinator):
         listener = getattr(energy_coordinator, "async_add_listener", None)
         if not callable(listener):
-            _LOGGER.error("Energy coordinator unavailable for %s", dev_id)
+            _LOGGER.error(
+                "Energy coordinator unavailable for %s", mask_identifier(dev_id)
+            )
             return
 
     power_monitor_entities: list[SensorEntity] = []

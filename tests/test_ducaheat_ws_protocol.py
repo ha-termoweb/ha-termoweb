@@ -1467,7 +1467,7 @@ def test_log_nodes_summary_branches(
     client._log_nodes_summary(nodes)
 
     monkeypatch.setattr(ducaheat_ws._LOGGER, "isEnabledFor", lambda level: True)
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         client._log_nodes_summary(nodes)
 
     assert "htr=2" in caplog.text

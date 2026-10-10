@@ -230,7 +230,9 @@ class RESTClient:
                             token = await self._ensure_token()
                             headers["Authorization"] = f"Bearer {token}"
                             continue
-                        _LOGGER.error("HTTP %s %s -> 401 after re-auth", method, url)
+                        _LOGGER.error(
+                            "HTTP %s %s -> 401 after re-auth", method, redact_text(url)
+                        )
                         raise BackendAuthError("Unauthorized")
                     if resp.status == 429:
                         raise self._rate_limited(resp, f"{method} {url}")
@@ -271,7 +273,7 @@ class RESTClient:
                 log_fn(
                     "HTTP error %s %s -> %s; body=%s",
                     method,
-                    url,
+                    redact_text(url),
                     e.status,
                     redact_text(str(getattr(e, "message", e))),
                 )
@@ -283,7 +285,7 @@ class RESTClient:
                 _LOGGER.warning(
                     "Request %s %s failed (sanitized): %s",
                     method,
-                    url,
+                    redact_text(url),
                     redact_text(str(e)),
                 )
                 raise
@@ -309,7 +311,7 @@ class RESTClient:
         self._limiter.pause(pause)
         _LOGGER.warning(
             "Rate limited by server on %s; pausing REST requests for %.0f s",
-            what,
+            redact_text(what),
             pause,
         )
         return BackendRateLimitError("Rate limited", retry_after=pause)

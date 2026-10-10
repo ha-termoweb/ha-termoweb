@@ -22,6 +22,7 @@ from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .backend.base import BoostContext
+from .backend.sanitize import mask_identifier, redact_text
 from .boost import (
     ALLOWED_BOOST_MINUTES,
     ALLOWED_BOOST_MINUTES_MESSAGE,
@@ -77,7 +78,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     inventory = runtime.inventory
     if not isinstance(inventory, Inventory):
-        _LOGGER.error("TermoWeb climate setup missing inventory for device %s", dev_id)
+        _LOGGER.error(
+            "TermoWeb climate setup missing inventory for device %s",
+            mask_identifier(dev_id),
+        )
         raise TypeError("TermoWeb inventory unavailable for climate platform")
 
     def default_name_simple(addr: str) -> str:
@@ -713,7 +717,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         default_mode = self._default_mode_for_setpoint()
         if default_mode is not None:
             self._pending_mode = default_mode
-        _LOGGER.info(
+        _LOGGER.debug(
             "Queue write: addr=%s stemp=%.1f mode=%s (batching %.1fs)",
             self._addr,
             t,
@@ -763,7 +767,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             if self.hvac_mode in self._resume_modes:
                 self._resume_mode = self.hvac_mode
             self._pending_mode = HVACMode.OFF
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Queue write: addr=%s mode=%s (batching %.1fs)",
                 self._addr,
                 HVACMode.OFF,
@@ -774,7 +778,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
         if hvac_mode_norm == HVACMode.AUTO:
             self._pending_mode = HVACMode.AUTO
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Queue write: addr=%s mode=%s (batching %.1fs)",
                 self._addr,
                 HVACMode.AUTO,
@@ -789,7 +793,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 cur = self.target_temperature
                 if cur is not None:
                     self._pending_stemp = float(cur)
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Queue write: addr=%s mode=%s stemp=%s (batching %.1fs)",
                 self._addr,
                 HVACMode.HEAT,
@@ -851,7 +855,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         mode_api = None
         if mode is not None:
             mode_api = self._hvac_mode_to_backend(mode)
-        _LOGGER.info(
+        _LOGGER.debug(
             "POST %s settings addr=%s mode=%s stemp=%s",
             self._node_type,
             self._addr,
@@ -868,7 +872,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 stemp=stemp,
             )
         except HomeAssistantError as err:
-            _LOGGER.error("%s", err)
+            _LOGGER.error("%s", redact_text(str(err)))
             return
 
         register_pending = getattr(self.coordinator, "register_pending_setting", None)

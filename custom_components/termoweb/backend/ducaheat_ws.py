@@ -21,6 +21,7 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb.backend.rest_client import RESTClient
+from custom_components.termoweb.backend.sanitize import mask_identifier
 from custom_components.termoweb.backend.ws_client import (
     HandshakeError,
     WSStats,
@@ -613,7 +614,7 @@ class DucaheatWSClient(_WSCommon):
             )
             return False
 
-        _LOGGER.info(
+        _LOGGER.debug(
             "WS: refreshing websocket lease early (age=%.0fs window=%.0fs)",
             elapsed,
             hint_value,
@@ -682,7 +683,7 @@ class DucaheatWSClient(_WSCommon):
             summary = (
                 f"idle_for={idle_for:.0f}s" if idle_for is not None else "idle_for=?"
             )
-            _LOGGER.info(
+            _LOGGER.debug(
                 "WS: idle recovery (%s, stale=%s, subs=%d, pending=%s, attempts=%d)",
                 summary,
                 payload_stale,
@@ -731,7 +732,7 @@ class DucaheatWSClient(_WSCommon):
                 )
             )
             if should_disconnect:
-                _LOGGER.warning(
+                _LOGGER.info(
                     "WS: idle recovery escalation after %d attempts; reconnecting",
                     self._idle_recovery_attempts,
                 )
@@ -946,7 +947,7 @@ class DucaheatWSClient(_WSCommon):
                                 self._record_update_event(timestamp=now)
                                 subs = await self._maybe_subscribe(now)
                                 if subs:
-                                    _LOGGER.info("WS: subscribed %d feeds", subs)
+                                    _LOGGER.debug("WS: subscribed %d feeds", subs)
                                 self._update_status("healthy")
                             break
 
@@ -1090,7 +1091,7 @@ class DucaheatWSClient(_WSCommon):
         return None
 
     def _log_nodes_summary(self, nodes: Mapping[str, typing.Any]) -> None:
-        if not _LOGGER.isEnabledFor(logging.INFO):
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
             return
         kinds = []
         for key, value in nodes.items():
@@ -1101,7 +1102,7 @@ class DucaheatWSClient(_WSCommon):
                     if isinstance(sec, Mapping):
                         addrs.update(addr for addr in sec if isinstance(addr, str))
                 kinds.append(f"{key}={len(addrs) if addrs else 0}")
-        _LOGGER.info(
+        _LOGGER.debug(
             "WS: dev_data nodes: %s",
             " ".join(kinds) if kinds else "(no nodes)",
         )
@@ -1341,7 +1342,7 @@ class DucaheatWSClient(_WSCommon):
             self._increment_state_counter("subscribe_fail_total")
             _LOGGER.error(
                 "WS: missing inventory for subscription on %s",
-                self.dev_id,
+                mask_identifier(self.dev_id),
             )
             raise TypeError("TermoWeb inventory unavailable for subscription")
         try:

@@ -13,6 +13,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .backend.sanitize import mask_identifier, redact_text
 from .domain import DomainStateView
 from .domain.ids import HEATING_NODE_TYPES
 from .domain.state import DomainState
@@ -154,7 +155,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     inventory = runtime.inventory
     if not isinstance(inventory, Inventory):
-        _LOGGER.error("TermoWeb button setup missing inventory for device %s", dev_id)
+        _LOGGER.error(
+            "TermoWeb button setup missing inventory for device %s",
+            mask_identifier(dev_id),
+        )
         raise ValueError("TermoWeb inventory unavailable for button platform")
 
     log_skipped_nodes("button", inventory, logger=_LOGGER)
@@ -291,7 +295,7 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
         _LOGGER.info(
             "Requesting boost %s for %s/%s node %s",
             action,
-            context.dev_id,
+            mask_identifier(context.dev_id),
             context.node_type,
             context.addr,
         )
@@ -301,10 +305,10 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
             _LOGGER.error(
                 "Boost %s failed for %s/%s node %s: %s",
                 action,
-                context.dev_id,
+                mask_identifier(context.dev_id),
                 context.node_type,
                 context.addr,
-                err,
+                redact_text(str(err)),
             )
             raise HomeAssistantError(
                 f"Unable to {action} the accumulator boost"
@@ -457,7 +461,7 @@ class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
         runtime = require_runtime(hass, self._flash_context.entry_id)
         _LOGGER.info(
             "Requesting display flash for %s/%s node %s",
-            self._flash_context.dev_id,
+            mask_identifier(self._flash_context.dev_id),
             self._flash_context.node_type,
             self._flash_context.addr,
         )
@@ -470,10 +474,10 @@ class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
         except Exception as err:
             _LOGGER.error(
                 "Display flash failed for %s/%s node %s: %s",
-                self._flash_context.dev_id,
+                mask_identifier(self._flash_context.dev_id),
                 self._flash_context.node_type,
                 self._flash_context.addr,
-                err,
+                redact_text(str(err)),
             )
             raise HomeAssistantError("Unable to flash the unit display") from err
 

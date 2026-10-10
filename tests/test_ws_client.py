@@ -716,7 +716,7 @@ def test_ducaheat_log_nodes_summary_includes_counts(
     """Logging nodes should record the node types and address counts."""
 
     client = _make_ducaheat_client(monkeypatch)
-    caplog.set_level("INFO")
+    caplog.set_level("DEBUG")
     client._log_nodes_summary({"htr": {"settings": {"1": {}, "2": {}}}})
     assert "htr" in caplog.text
     assert "2" in caplog.text
