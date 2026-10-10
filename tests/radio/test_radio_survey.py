@@ -9,7 +9,7 @@ import random
 import pytest
 from radio_fakes import NET, FakeGateway, FakeTime
 
-from custom_components.termoweb.backend.radio import survey as s
+from custom_components.termoweb.backend.radio import link as link_mod, survey as s
 from custom_components.termoweb.backend.radio.dialect import (
     DIALECT_A,
     DIALECT_B,
@@ -460,3 +460,42 @@ def test_timing_preamble_without_bit_preamble(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(s, "bit_preamble", lambda _bits: None)
     result = s.analyse_burst(burst)
     assert result.bit_us is not None and result.sync is None and result.bits is None
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_transmitted_while_a_survey_runs() -> None:
+    """The gateway is in raw capture during R<secs>: transmits wait for its end."""
+    gw = FakeGateway(DIALECT_B)
+    ft = FakeTime()
+    parked: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+    async def sleep(seconds: float) -> None:
+        if seconds >= link_mod.SURVEY_GRACE_S:
+            await parked  # the survey window: only "survey off" ends it
+        else:
+            await ft.sleep(seconds)
+
+    link = RadioLink(
+        "radio.local",
+        dialect=DIALECT_B,
+        network_id=NET,
+        clock=ft.clock,
+        sleep=sleep,
+        open_connection=gw.open_connection,
+    )
+    await link.connect()
+    survey = asyncio.ensure_future(link.survey(60))
+    for _ in range(20):
+        await asyncio.sleep(0)
+    air = build_frame(DIALECT_B, 1, 6, b"\xbf\x01", network_id=NET)
+    send = asyncio.ensure_future(link.send_frame(6, air, wait_ack=False))
+    for _ in range(100):
+        await asyncio.sleep(0)
+    assert gw.commands[-1] == "R60"  # no T while the radio is in raw capture
+
+    gw.feed("# survey off")
+    await survey
+    assert (await send).ok
+    assert gw.commands[-1] == "T" + air.hex().upper()
+    parked.cancel()
+    await link.close()

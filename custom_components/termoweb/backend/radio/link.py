@@ -559,19 +559,21 @@ class RadioLink:
         The gateway switches its radio to raw capture, reports each RF burst as
         ``RAWB``/``RAW``/``RAWE`` lines and then returns to normal reception. A
         burst without its ``RAWE`` line (lost in transit) is still returned.
+        Every other command (transmits, ``Y``, ``N``) waits until it ends.
         """
         if not 1 <= seconds <= MAX_SURVEY_S:
             raise ValueError(f"survey length must be 1-{MAX_SURVEY_S} s")
-        self._survey = {}
-        done = self._add_line_waiter(lambda line: line.startswith(SURVEY_OFF))
-        try:
-            await self._send_command(f"R{int(seconds)}")
-            if await self._wait(done, seconds + SURVEY_GRACE_S) is None:
-                _LOGGER.debug("Radio survey ended without a 'survey off' line")
-            collected = self._survey
-        finally:
-            self._survey = None
-            self._drop_waiter(done)
+        async with self._send_lock:
+            self._survey = {}
+            done = self._add_line_waiter(lambda line: line.startswith(SURVEY_OFF))
+            try:
+                await self._send_command(f"R{int(seconds)}")
+                if await self._wait(done, seconds + SURVEY_GRACE_S) is None:
+                    _LOGGER.debug("Radio survey ended without a 'survey off' line")
+                collected = self._survey
+            finally:
+                self._survey = None
+                self._drop_waiter(done)
         return [
             RawBurst(rssi, tuple(runs))
             for _number, (rssi, runs) in sorted(collected.items())
