@@ -21,7 +21,6 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb.backend.rest_client import RESTClient
-from custom_components.termoweb.backend.sanitize import mask_identifier
 from custom_components.termoweb.backend.ws_client import (
     HandshakeError,
     WSStats,
@@ -123,7 +122,7 @@ class DucaheatWSClient(_WSCommon):
         coordinator: Any,
         session: aiohttp.ClientSession | None = None,
         namespace: str | None = None,
-        inventory: Inventory | None = None,
+        inventory: Inventory,
     ) -> None:
         """Initialise the Ducaheat websocket client."""
         _WSCommon.__init__(self, inventory=inventory)
@@ -888,16 +887,8 @@ class DucaheatWSClient(_WSCommon):
                             if nodes_map is not None:
                                 self._log_nodes_summary(nodes_map)
                                 normalised = self._normalise_nodes(nodes_map)
-                                inventory = (
-                                    self._inventory
-                                    if isinstance(self._inventory, Inventory)
-                                    else None
-                                )
                                 if isinstance(normalised, Mapping):
-                                    deltas = self._nodes_to_deltas(
-                                        normalised,
-                                        inventory=inventory,
-                                    )
+                                    deltas = self._nodes_to_deltas(normalised)
                                     if deltas:
                                         self._apply_deltas_to_store(
                                             deltas,
@@ -926,28 +917,15 @@ class DucaheatWSClient(_WSCommon):
                                     isinstance(normalised_update, dict)
                                     and normalised_update
                                 ):
-                                    inventory = (
-                                        self._inventory
-                                        if isinstance(self._inventory, Inventory)
-                                        else None
-                                    )
-                                    deltas = self._nodes_to_deltas(
-                                        normalised_update,
-                                        inventory=inventory,
-                                    )
+                                    deltas = self._nodes_to_deltas(normalised_update)
                                     if deltas:
                                         self._apply_deltas_to_store(
                                             deltas,
                                             replace=False,
                                         )
-                                    allowed_types = (
-                                        inventory.energy_sample_types
-                                        if isinstance(inventory, Inventory)
-                                        else None
-                                    )
                                     sample_updates = self._collect_sample_updates(
                                         normalised_update,
-                                        allowed_types=allowed_types,
+                                        allowed_types=self._inventory.energy_sample_types,
                                     )
                                     if sample_updates:
                                         self._forward_sample_updates(sample_updates)
@@ -1269,21 +1247,9 @@ class DucaheatWSClient(_WSCommon):
         attempt_ts = now if isinstance(now, (int, float)) else time.time()
         self._last_subscribe_attempt_ts = attempt_ts
         self._increment_state_counter("subscribe_attempts_total")
-        inventory_container = (
-            self._inventory if isinstance(self._inventory, Inventory) else None
-        )
-        if not isinstance(inventory_container, Inventory):
-            self._pending_subscribe = False
-            self._subscription_paths = set()
-            self._increment_state_counter("subscribe_fail_total")
-            _LOGGER.error(
-                "WS: missing inventory for subscription on %s",
-                mask_identifier(self.dev_id),
-            )
-            raise TypeError("TermoWeb inventory unavailable for subscription")
         try:
             paths: set[str] = set()
-            for node_type, addr in inventory_container.heater_sample_targets:
+            for node_type, addr in self._inventory.heater_sample_targets:
                 base_path = f"/{node_type}/{addr}"
                 paths.add(f"{base_path}/status")
                 paths.add(f"{base_path}/samples")

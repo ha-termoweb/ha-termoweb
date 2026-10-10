@@ -370,4 +370,6 @@ async def test_monitor_backend_wiring(hass: HomeAssistant) -> None:
     for wrong in (normal, object()):
         backend = create_backend(brand=BRAND_RADIO_MONITOR, client=wrong)
         with pytest.raises(TypeError, match="listen-only"):
-            backend.create_ws_client(hass, "entry", DEV_ID, Coordinator())
+            backend.create_ws_client(
+                hass, "entry", DEV_ID, Coordinator(), inventory=Inventory(DEV_ID, [])
+            )

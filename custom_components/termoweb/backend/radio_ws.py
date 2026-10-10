@@ -55,15 +55,13 @@ class RadioListener(_WSStatusMixin):
         dev_id: str,
         client: RadioClient,
         coordinator: Any,
-        inventory: Inventory | None,
+        inventory: Inventory,
         refresh_interval: float = REFRESH_INTERVAL_S,
         sleep: Sleep = asyncio.sleep,
         grant_settle_s: float = GRANT_SETTLE_S,
     ) -> None:
         """Store collaborators; nothing runs until start()."""
 
-        if not isinstance(inventory, Inventory):
-            raise TypeError("RadioListener requires the immutable Inventory")
         self.hass = hass
         self.entry_id = entry_id
         self.dev_id = dev_id
