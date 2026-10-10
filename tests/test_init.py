@@ -309,13 +309,10 @@ async def test_setup_registers_no_dangling_via_device(
 @pytest.mark.parametrize(
     ("devices", "dev_id"),
     [
-        (
-            ["invalid", {"name": "No id"}, {"id": " 00aa11bb22cc33dd "}],
-            "00aa11bb22cc33dd",
-        ),
-        ({"serial_id": " 00aa11bb22cc33ee "}, "00aa11bb22cc33ee"),
+        ([{"name": "No id"}, {"id": " 00aa11bb22cc33dd "}], "00aa11bb22cc33dd"),
+        ([{"serial_id": " 00aa11bb22cc33ee "}], "00aa11bb22cc33ee"),
     ],
-    ids=["list-skips-entries-without-id", "single-mapping"],
+    ids=["list-skips-entries-without-id", "serial-id"],
 )
 async def test_setup_picks_gateway_id_from_device_payload(
     hass: HomeAssistant,
@@ -333,9 +330,7 @@ async def test_setup_picks_gateway_id_from_device_payload(
     cloud.get_nodes.assert_awaited_once_with(dev_id)
 
 
-@pytest.mark.parametrize(
-    "devices", [[{"name": "Missing"}, {}], "unexpected"], ids=["no-ids", "not-a-list"]
-)
+@pytest.mark.parametrize("devices", [[{"name": "Missing"}, {}]], ids=["no-ids"])
 async def test_setup_retries_without_a_usable_gateway(
     hass: HomeAssistant,
     cloud: FakeCloud,

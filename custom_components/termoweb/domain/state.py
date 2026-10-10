@@ -134,10 +134,7 @@ def canonicalize_settings_payload(payload: Mapping[str, typing.Any]) -> dict[str
         for key, value in source.items():
             if key not in _SETTING_FIELD_NAMES:
                 continue
-            cloned = _copy_mapping(value)
-            if cloned is None:
-                cloned = _copy_sequence(value) or value
-            canonical.setdefault(key, cloned)
+            canonical.setdefault(key, _copy_sequence(value) or value)
 
     _merge(payload)
     status = payload.get("status")
@@ -320,16 +317,6 @@ def _populate_power_monitor_state(
         state.current = as_number(payload.get("current"))
     if "energy" in payload:
         state.energy = as_number(payload.get("energy"))
-    status = payload.get("status")
-    if isinstance(status, Mapping):
-        if state.power is None and "power" in status:
-            state.power = as_number(status.get("power"))
-        if state.voltage is None and "voltage" in status:
-            state.voltage = as_number(status.get("voltage"))
-        if state.current is None and "current" in status:
-            state.current = as_number(status.get("current"))
-        if state.energy is None and "energy" in status:
-            state.energy = as_number(status.get("energy"))
     return state
 
 

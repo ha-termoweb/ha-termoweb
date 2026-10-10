@@ -202,35 +202,6 @@ def test_build_power_monitor_state_basic() -> None:
     assert state.voltage == 230
 
 
-def test_power_monitor_state_status_fallback() -> None:
-    """Power monitor fields in status should fill in when top-level is missing (lines 334-352)."""
-
-    state = _build_power_monitor_state(
-        {
-            "status": {
-                "power": 150,
-                "voltage": 220,
-                "current": 0.68,
-                "energy": 5.0,
-            }
-        }
-    )
-    assert state.power == 150
-    assert state.voltage == 220
-    assert state.current == 0.68
-    assert state.energy == 5.0
-
-
-def test_power_monitor_state_top_level_overrides_status() -> None:
-    """Top-level fields should take precedence over status fields."""
-
-    state = _build_power_monitor_state(
-        {"power": 200, "status": {"power": 100, "voltage": 230}}
-    )
-    assert state.power == 200
-    assert state.voltage == 230
-
-
 # ---------------------------------------------------------------------------
 # _build_state and _merge_state dispatch
 # ---------------------------------------------------------------------------

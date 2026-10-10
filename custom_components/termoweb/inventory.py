@@ -79,7 +79,6 @@ class Inventory:
     _nodes: tuple[PrebuiltNode, ...]
     _addresses_by_type_cache: dict[str, tuple[str, ...]] | None
     _nodes_by_type_cache: dict[str, tuple[PrebuiltNode, ...]] | None
-    _heater_nodes_cache: tuple[PrebuiltNode, ...] | None
     _explicit_name_pairs_cache: frozenset[tuple[str, str]] | None
     _heater_address_map_cache: (
         tuple[dict[str, tuple[str, ...]], dict[str, frozenset[str]]] | None
@@ -108,7 +107,6 @@ class Inventory:
         object.__setattr__(self, "_nodes", tuple(nodes))
         object.__setattr__(self, "_addresses_by_type_cache", None)
         object.__setattr__(self, "_nodes_by_type_cache", None)
-        object.__setattr__(self, "_heater_nodes_cache", None)
         object.__setattr__(self, "_explicit_name_pairs_cache", None)
         object.__setattr__(self, "_heater_address_map_cache", None)
         object.__setattr__(self, "_heater_sample_address_cache", None)
@@ -141,14 +139,8 @@ class Inventory:
             addr,
             use_default_when_falsey=True,
         )
-        if not normalized_type or not normalized_addr:
-            return False
-
         addresses = self._ensure_addresses_by_type_cache()
-        candidates = addresses.get(normalized_type)
-        if not candidates:
-            return False
-        return normalized_addr in candidates
+        return normalized_addr in addresses.get(normalized_type, ())
 
     def iter_known_entries(
         self, entries: Iterable[Any]
@@ -168,8 +160,6 @@ class Inventory:
                 use_default_when_falsey=True,
             )
 
-            if not node_type or not addr:
-                continue
             if not self.has_node(node_type, addr):
                 continue
 
@@ -203,10 +193,7 @@ class Inventory:
 
         grouped: dict[str, list[PrebuiltNode]] = defaultdict(list)
         for node in self._nodes:
-            node_type = normalize_node_type(getattr(node, "type", ""))
-            if not node_type:
-                continue
-            grouped[node_type].append(node)
+            grouped[node.type].append(node)
 
         normalised = {key: tuple(values) for key, values in grouped.items()}
         object.__setattr__(self, "_nodes_by_type_cache", normalised)
@@ -218,20 +205,6 @@ class Inventory:
 
         cached = self._ensure_nodes_by_type_cache()
         return {key: list(values) for key, values in cached.items()}
-
-    @property
-    def heater_nodes(self) -> tuple[PrebuiltNode, ...]:
-        """Return tuple of nodes belonging to heater-compatible types."""
-
-        cached = self._heater_nodes_cache
-        if cached is None:
-            grouped = self._ensure_nodes_by_type_cache()
-            heater_list: list[PrebuiltNode] = []
-            for node_type in HEATER_NODE_TYPES:
-                heater_list.extend(grouped.get(node_type, ()))
-            cached = tuple(heater_list)
-            object.__setattr__(self, "_heater_nodes_cache", cached)
-        return cached
 
     @property
     def explicit_heater_names(self) -> set[tuple[str, str]]:
@@ -313,9 +286,6 @@ class Inventory:
                 normalize_node_type(candidate, use_default_when_falsey=True)
                 for candidate in node_types
             }
-            allowed_types.discard("")
-            if not allowed_types:
-                return
 
         grouped = self._ensure_nodes_by_type_cache()
 
@@ -338,12 +308,7 @@ class Inventory:
                         default_factory=factory,
                     )
                 else:
-                    raw_name = getattr(candidate, "name", None)
-                    if isinstance(raw_name, str):
-                        stripped = raw_name.strip()
-                        name = stripped or f"{node_type.upper()} {addr}"
-                    else:
-                        name = f"{node_type.upper()} {addr}"
+                    name = candidate.name or f"{node_type.upper()} {addr}"
 
                 yield InventoryNodeMetadata(
                     node_type=node_type,
@@ -429,9 +394,6 @@ class Inventory:
         )
 
         factory = default_factory or _default_heater_name
-        if not node_type_norm or not addr_norm:
-            return factory(normalize_node_addr(addr) or str(addr))
-
         names_by_type = self.heater_names_by_type(factory)
 
         default_simple = factory(addr_norm)
@@ -543,22 +505,13 @@ class Inventory:
 
         cached = self._energy_sample_types_cache
         if cached is None:
-            sample_types: set[str] = set()
-            for node_type, _ in self.heater_sample_targets:
-                normalized = normalize_node_type(
-                    node_type,
-                    use_default_when_falsey=True,
+            cached = frozenset(
+                node_type
+                for node_type, _ in (
+                    *self.heater_sample_targets,
+                    *self.power_monitor_sample_targets,
                 )
-                if normalized:
-                    sample_types.add(normalized)
-            for node_type, _ in self.power_monitor_sample_targets:
-                normalized = normalize_node_type(
-                    node_type,
-                    use_default_when_falsey=True,
-                )
-                if normalized:
-                    sample_types.add(normalized)
-            cached = frozenset(sample_types)
+            )
             object.__setattr__(self, "_energy_sample_types_cache", cached)
         return cached
 
@@ -622,87 +575,22 @@ class Inventory:
     ) -> dict[str, str]:
         """Return compatibility aliases for sample payload processing."""
 
-        alias_map: dict[str, str] = {}
-
-        def _merge_alias(raw_type: Any, canonical_type: Any) -> None:
-            """Insert a normalised alias pair into ``alias_map``."""
-
-            normalized_raw = _normalize_node_identifier(
-                raw_type,
-                use_default_when_falsey=True,
-                lowercase=True,
-            )
-            if not normalized_raw:
-                return
-            normalized_canonical = normalize_node_type(
-                canonical_type,
-                use_default_when_falsey=True,
-            )
-            if not normalized_canonical:
-                if isinstance(canonical_type, str):
-                    normalized_canonical = canonical_type.strip().lower()
-                if not normalized_canonical:
-                    return
-            alias_map[normalized_raw] = normalized_canonical
-
-        canonical_types: set[str] = set()
-
         heater_forward, heater_aliases = self.heater_sample_address_map
         power_forward, power_aliases = self.power_monitor_sample_address_map
 
-        for node_type in heater_forward:
-            normalized = normalize_node_type(
-                node_type,
-                use_default_when_falsey=True,
-            )
-            if normalized:
-                canonical_types.add(normalized)
-        for node_type in power_forward:
-            normalized = normalize_node_type(
-                node_type,
-                use_default_when_falsey=True,
-            )
-            if normalized:
-                canonical_types.add(normalized)
-
-        if include_types is not None:
-            for node_type in include_types:
-                normalized = normalize_node_type(
-                    node_type,
-                    use_default_when_falsey=True,
-                )
-                if normalized:
-                    canonical_types.add(normalized)
-
-        if isinstance(base_aliases, Mapping):
-            for raw_type, canonical_type in base_aliases.items():
-                _merge_alias(raw_type, canonical_type)
-
-        for raw_type, canonical_type in heater_aliases.items():
-            _merge_alias(raw_type, canonical_type)
-        for raw_type, canonical_type in power_aliases.items():
-            _merge_alias(raw_type, canonical_type)
-
-        for node_type in canonical_types:
+        alias_map: dict[str, str] = {**(base_aliases or {})}
+        alias_map.update(heater_aliases)
+        alias_map.update(power_aliases)
+        for node_type in (*heater_forward, *power_forward, *(include_types or ())):
             alias_map.setdefault(node_type, node_type)
 
         if restrict_to is not None:
-            allowed: set[str] = {
-                normalized
-                for node_type in restrict_to
-                if (
-                    normalized := normalize_node_type(
-                        node_type,
-                        use_default_when_falsey=True,
-                    )
-                )
+            allowed = set(restrict_to)
+            alias_map = {
+                key: value
+                for key, value in alias_map.items()
+                if key in allowed or value in allowed
             }
-            if allowed:
-                alias_map = {
-                    key: value
-                    for key, value in alias_map.items()
-                    if key in allowed or value in allowed
-                }
 
         return alias_map
 
@@ -857,28 +745,20 @@ def build_heater_address_map(
 
 
 def normalize_heater_addresses(
-    addrs: Iterable[Any] | Mapping[Any, Iterable[Any]] | None,
+    addrs: Mapping[Any, Iterable[Any]] | None,
 ) -> tuple[dict[str, list[str]], dict[str, str]]:
     """Return canonical heater addresses and compatibility aliases."""
 
     cleaned_map: dict[str, list[str]] = {}
     compat_aliases: dict[str, str] = {}
 
-    if addrs is None:
-        sources: Iterable[tuple[Any, Iterable[Any] | Any]] = []
-    elif isinstance(addrs, Mapping):
-        sources = addrs.items()
-    else:
-        sources = [("htr", addrs)]
+    sources = addrs.items() if addrs is not None else ()
 
     for raw_type, values in sources:
         node_type = normalize_node_type(
             raw_type,
             use_default_when_falsey=True,
         )
-        if not node_type:
-            continue
-
         if node_type not in HEATER_NODE_TYPES:
             continue
 
@@ -1117,9 +997,7 @@ def _iter_node_payload(raw_nodes: Any) -> Iterable[dict[str, Any]]:
     node_list = raw_nodes.get("nodes") if isinstance(raw_nodes, Mapping) else raw_nodes
     if not isinstance(node_list, list):
         return
-    for entry in node_list:
-        if isinstance(entry, dict):
-            yield entry
+    yield from node_list
 
 
 def _resolve_node_class(node_type: str) -> type[Node]:

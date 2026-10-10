@@ -179,45 +179,34 @@ async def async_setup_entry(  # noqa: C901
 
     dev: Mapping[str, typing.Any] | None = None
     dev_id = ""
-    if isinstance(devices, list):
-        usable: list[tuple[str, Mapping[str, typing.Any]]] = []
-        for index, candidate in enumerate(devices):
-            if not isinstance(candidate, Mapping):
-                continue
-            candidate_id = str(
-                candidate.get("dev_id")
-                or candidate.get("id")
-                or candidate.get("serial_id")
-                or ""
-            ).strip()
-            if candidate_id:
-                usable.append((candidate_id, candidate))
-                continue
-            _LOGGER.debug(
-                "Skipping device entry without identifier at index %s: %s",
-                index,
-                candidate,
-            )
-        if usable:
-            dev_id, dev = usable[0]
-        if len(usable) > 1:
-            _LOGGER.warning(
-                "This account has %d gateways; only the first (%s) is set up. "
-                "Ignored: %s",
-                len(usable),
-                dev.get("name") or mask_identifier(dev_id),
-                ", ".join(
-                    str(ignored.get("name") or mask_identifier(ignored_id))
-                    for ignored_id, ignored in usable[1:]
-                ),
-            )
-    elif isinstance(devices, Mapping):
-        dev = devices
-        dev_id = str(
-            dev.get("dev_id") or dev.get("id") or dev.get("serial_id") or ""
+    usable: list[tuple[str, Mapping[str, typing.Any]]] = []
+    for index, candidate in enumerate(devices):
+        candidate_id = str(
+            candidate.get("dev_id")
+            or candidate.get("id")
+            or candidate.get("serial_id")
+            or ""
         ).strip()
-    else:
-        _LOGGER.debug("Unexpected list_devices payload: %s", devices)
+        if candidate_id:
+            usable.append((candidate_id, candidate))
+            continue
+        _LOGGER.debug(
+            "Skipping device entry without identifier at index %s: %s",
+            index,
+            candidate,
+        )
+    if usable:
+        dev_id, dev = usable[0]
+    if len(usable) > 1:
+        _LOGGER.warning(
+            "This account has %d gateways; only the first (%s) is set up. Ignored: %s",
+            len(usable),
+            dev.get("name") or mask_identifier(dev_id),
+            ", ".join(
+                str(ignored.get("name") or mask_identifier(ignored_id))
+                for ignored_id, ignored in usable[1:]
+            ),
+        )
 
     if not dev_id:
         _LOGGER.info("list_devices returned no usable devices")
@@ -314,24 +303,17 @@ async def async_setup_entry(  # noqa: C901
     entry.async_on_unload(remove_stop_listener)
 
     async def _start_ws(dev_id: str) -> None:
-        """Ensure a websocket client exists and is running for ``dev_id``."""
+        """Create and start the websocket client for ``dev_id`` (once per setup)."""
         backend: Backend = runtime.backend
-        tasks = runtime.ws_tasks
-        clients = runtime.ws_clients
-        if dev_id in tasks and not tasks[dev_id].done():
-            return
-        ws_client = clients.get(dev_id)
-        if not ws_client:
-            ws_client = backend.create_ws_client(
-                hass,
-                entry_id=entry.entry_id,
-                dev_id=dev_id,
-                coordinator=coordinator,
-                inventory=inventory,
-            )
-            clients[dev_id] = ws_client
-        task = ws_client.start()
-        tasks[dev_id] = task
+        ws_client = backend.create_ws_client(
+            hass,
+            entry_id=entry.entry_id,
+            dev_id=dev_id,
+            coordinator=coordinator,
+            inventory=inventory,
+        )
+        runtime.ws_clients[dev_id] = ws_client
+        runtime.ws_tasks[dev_id] = ws_client.start()
         _LOGGER.info("WS: started read-only client for %s", mask_identifier(dev_id))
 
     def _recalc_poll_interval() -> None:
@@ -344,31 +326,15 @@ async def async_setup_entry(  # noqa: C901
 
         def _cancel_timer() -> None:
             handle = runtime.poll_resume_unsub
-            if callable(handle):
-                try:
-                    handle()
-                except Exception:  # noqa: BLE001 - defensive cancellation
-                    _LOGGER.debug(
-                        "WS: failed to cancel poll resume timer", exc_info=True
-                    )
+            if handle is not None:
+                handle()
             runtime.poll_resume_unsub = None
-
-        if not tasks:
-            if suspended:
-                coordinator.resume_polling(base_interval)
-                runtime.poll_suspended = False
-                _cancel_timer()
-                _LOGGER.info(
-                    "WS: websocket clients idle; resuming REST polling at %ss",
-                    base_interval,
-                )
-            return
 
         now = time.time()
         any_running = False
         all_healthy = True
         fresh_payload = True
-        earliest_deadline: float | None = None
+        deadlines: list[float] = []
 
         for dev_id, task in tasks.items():
             if task.done():
@@ -376,39 +342,16 @@ async def async_setup_entry(  # noqa: C901
                 fresh_payload = False
                 continue
             any_running = True
-            tracker = trackers.get(dev_id)
-            if tracker is None:
+            # The client registers its tracker before it sends any status.
+            tracker = trackers[dev_id]
+            if tracker.status != "healthy":
                 all_healthy = False
+            if tracker.is_payload_stale(now=now):
                 fresh_payload = False
-                continue
-            status = getattr(tracker, "status", None)
-            if status != "healthy":
-                all_healthy = False
-            payload_at = getattr(tracker, "last_payload_at", None)
-            if payload_at is None:
-                fresh_payload = False
-            else:
-                is_stale = getattr(tracker, "is_payload_stale", None)
-                try:
-                    stale = (
-                        bool(is_stale(now=now))
-                        if callable(is_stale)
-                        else bool(getattr(tracker, "payload_stale", False))
-                    )
-                except TypeError:
-                    stale = bool(is_stale()) if callable(is_stale) else False
-                if stale:
-                    fresh_payload = False
-            deadline_func = getattr(tracker, "stale_deadline", None)
-            deadline: float | None = None
-            if callable(deadline_func):
-                try:
-                    deadline = deadline_func()
-                except TypeError:
-                    deadline = None
-            if isinstance(deadline, (int, float)):
-                if earliest_deadline is None or deadline < earliest_deadline:
-                    earliest_deadline = deadline
+            deadline = tracker.stale_deadline()
+            if deadline is not None:
+                deadlines.append(deadline)
+        earliest_deadline = min(deadlines, default=None)
 
         if not any_running:
             if suspended:
@@ -451,8 +394,6 @@ async def async_setup_entry(  # noqa: C901
             )
         runtime.poll_suspended = False
         _cancel_timer()
-
-    runtime.recalc_poll = _recalc_poll_interval
 
     @callback
     def _on_ws_status(payload: dict[str, Any]) -> None:
@@ -541,35 +482,23 @@ async def _shutdown_ws_tasks(ws_tasks: Mapping[str, typing.Any]) -> None:
     """Cancel and await websocket tasks."""
 
     for dev_id, task in list(ws_tasks.items()):
-        cancel = getattr(task, "cancel", None)
-        if callable(cancel):
-            try:
-                cancel()
-            except Exception:  # pragma: no cover - defensive logging
-                _LOGGER.exception(
-                    "WS task for %s raised during cancel", mask_identifier(dev_id)
-                )
-                continue
-        if hasattr(task, "__await__"):
-            try:
-                await task  # type: ignore[func-returns-value]
-            except asyncio.CancelledError:
-                pass
-            except Exception:  # pragma: no cover - defensive logging
-                _LOGGER.exception(
-                    "WS task for %s failed to cancel cleanly", mask_identifier(dev_id)
-                )
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:  # pragma: no cover - defensive logging
+            _LOGGER.exception(
+                "WS task for %s failed to cancel cleanly", mask_identifier(dev_id)
+            )
 
 
 async def _shutdown_ws_clients(ws_clients: Mapping[str, typing.Any]) -> None:
     """Stop websocket clients that expose a stop coroutine."""
 
     for dev_id, client in list(ws_clients.items()):
-        stop = getattr(client, "stop", None)
-        if not callable(stop):
-            continue
         try:
-            await stop()
+            await client.stop()
         except Exception:  # pragma: no cover - defensive logging
             _LOGGER.exception(
                 "WS client for %s failed to stop", mask_identifier(dev_id)

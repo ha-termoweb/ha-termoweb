@@ -70,7 +70,7 @@ async def test_gateway_and_site_take_their_details_from_the_coordinator(
     build_entry_runtime(
         hass=hass,
         coordinator=coordinator,
-        brand="  Ducaheat  ",
+        brand="ducaheat",
         version="7",
     )
 
@@ -119,7 +119,9 @@ async def test_brand_sets_labels_portal_link_and_site_parent(
     hass: HomeAssistant, brand: str, label: str, has_site: bool, portal: bool
 ) -> None:
     """Brand keys become labels; radio has no portal; a monitor has no site parent."""
-    build_entry_runtime(hass=hass, brand=brand)
+    build_entry_runtime(
+        hass=hass, brand=brand, coordinator=state_coordinator(hass, brand=brand)
+    )
     site = dr.async_get(hass).async_get_or_create(
         config_entry_id="entry", identifiers={(DOMAIN, "dev", "site")}
     )

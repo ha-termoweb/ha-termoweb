@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from itertools import chain
@@ -19,18 +19,14 @@ from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from .backend.base import SAMPLE_COUNTER_SCALES
 from .backend.factory import backend_capabilities
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import mask_identifier, redact_text
 from .boost import resolve_boost_end_from_fields
 from .coerce import as_float, as_int
 from .const import BRAND_TERMOWEB, MIN_POLL_INTERVAL
-from .domain.energy import (
-    EnergyNodeMetrics,
-    EnergySnapshot,
-    build_empty_snapshot,
-    coerce_snapshot,
-)
+from .domain.energy import EnergyNodeMetrics, EnergySnapshot, build_empty_snapshot
 from .domain.ids import (
     ENERGY_NODE_TYPES,
     NodeId as DomainNodeId,
@@ -161,12 +157,10 @@ def build_device_metadata(
     )
 
 
-def _device_display_name(device: DeviceMetadata | None, dev_id: str) -> str:
+def _device_display_name(device: DeviceMetadata, dev_id: str) -> str:
     """Return the trimmed device name or a fallback for ``dev_id``."""
 
-    if isinstance(device, DeviceMetadata):
-        return device.name.strip() or f"Device {dev_id}"
-    return f"Device {dev_id}"
+    return device.name.strip() or f"Device {dev_id}"
 
 
 class StateCoordinator(
@@ -300,11 +294,8 @@ class StateCoordinator(
     def _device_record(self) -> dict[str, dict[str, Any]]:
         """Return a minimal coordinator payload for this device."""
 
-        model: str | None = None
+        model = self._device_metadata.model
         backend = self._brand
-
-        if isinstance(self._device_metadata, DeviceMetadata):
-            model = self._device_metadata.model
 
         record = {
             "dev_id": self._dev_id,
@@ -354,7 +345,7 @@ class StateCoordinator(
                         addr,
                     )
                     continue
-                if resolved_type == "acm" and isinstance(payload, MutableMapping):
+                if resolved_type == "acm":
                     now_value: datetime | None = None
                     if self._requires_boost_resolution(payload) and current_rtc is None:
                         current_rtc = await self._async_fetch_rtc_datetime()
@@ -365,27 +356,21 @@ class StateCoordinator(
                     addr,
                     payload,
                 )
-                stored = store.get_state(resolved_type, addr)
-                if stored and hasattr(stored, "max_power"):
-                    _LOGGER.debug(
-                        "Node %s/%s max_power=%s",
-                        resolved_type,
-                        addr,
-                        getattr(stored, "max_power", None),
-                    )
+                _LOGGER.debug(
+                    "Node %s/%s max_power=%s",
+                    resolved_type,
+                    addr,
+                    store.get_state(resolved_type, addr).max_power,
+                )
         return current_rtc
 
     @staticmethod
-    def _normalize_mode_value(value: Any) -> str | None:
+    def _normalize_mode_value(value: str | None) -> str | None:
         """Return a canonical string for backend HVAC modes."""
 
         if value is None:
             return None
-        if isinstance(value, str):
-            candidate = value.strip().lower()
-        else:
-            candidate = str(value).strip().lower()
-        return candidate or None
+        return value.strip().lower() or None
 
     @staticmethod
     def _node_key(node_type: str, addr: str) -> tuple[str, str] | None:
@@ -540,11 +525,9 @@ class StateCoordinator(
         return rtc_now
 
     @staticmethod
-    def _requires_boost_resolution(payload: Mapping[str, typing.Any] | None) -> bool:
+    def _requires_boost_resolution(payload: Mapping[str, typing.Any]) -> bool:
         """Return True when ``payload`` exposes boost day/min metadata."""
 
-        if not isinstance(payload, Mapping):
-            return False
         day = as_int(payload.get("boost_end_day"))
         minute = as_int(payload.get("boost_end_min"))
         return day is not None or minute is not None
@@ -577,14 +560,11 @@ class StateCoordinator(
         self,
         node_type: str,
         addr: str,
-        payload: Mapping[str, typing.Any] | None,
+        payload: Mapping[str, typing.Any],
     ) -> bool:
         """Return True when a pending write should defer payload merging."""
 
         key = self._node_key(node_type, addr)
-        if key is None:
-            return False
-
         entry = self._pending_settings.get(key)
         if entry is None:
             return False
@@ -597,14 +577,6 @@ class StateCoordinator(
 
         mode_expected = entry.mode
         stemp_expected = entry.stemp
-        if payload is None:
-            _LOGGER.debug(
-                "Deferring merge due to pending settings type=%s addr=%s payload=None",
-                key[0],
-                key[1],
-            )
-            return True
-
         mode_payload = self._normalize_mode_value(payload.get("mode"))
         stemp_payload = as_float(payload.get("stemp"))
 
@@ -787,8 +759,7 @@ class StateCoordinator(
                     now_value = await self._async_fetch_rtc_datetime()
                 if now_value is None:
                     now_value = self._device_now_estimate()
-                if isinstance(payload, MutableMapping):
-                    self._apply_accumulator_boost_metadata(payload, now=now_value)
+                self._apply_accumulator_boost_metadata(payload, now=now_value)
 
             if self._should_defer_pending_setting(resolved_type, addr, payload):
                 _LOGGER.debug(
@@ -927,11 +898,6 @@ class EnergyStateCoordinator(
             self._state_coordinator = state_coordinator
         else:
             self._state_coordinator = None
-        self._counter_scales: dict[str, float] = {
-            "htr": 1000.0,
-            "acm": 1000.0,
-            "pmo": 3_600_000.0,
-        }
         self.data = build_empty_snapshot(dev_id)
 
     def _publish_to_state_store(self, snapshot: EnergySnapshot) -> None:
@@ -945,55 +911,19 @@ class EnergyStateCoordinator(
     def async_set_updated_data(self, data: EnergySnapshot) -> None:
         """Store ``data`` in the domain state before notifying listeners."""
 
-        if isinstance(data, EnergySnapshot):
-            self._publish_to_state_store(data)
+        self._publish_to_state_store(data)
         super().async_set_updated_data(data)
 
     @staticmethod
-    def _node_id_for(node_type: str, addr: str) -> DomainNodeId | None:
-        """Return a canonical node identifier for energy tracking."""
+    def _targets_by_type(inventory: Inventory) -> dict[str, list[str]]:
+        """Return the inventory's energy sample addresses grouped by node type."""
 
-        node_type_enum = DomainNodeType.coerce(node_type)
-        if node_type_enum is None:
-            return None
-        try:
-            return DomainNodeId(node_type_enum, addr)
-        except ValueError:
-            return None
-
-    def _iter_energy_targets(self, inventory: Inventory) -> Iterator[tuple[str, str]]:
-        """Yield normalised energy node targets from ``inventory``."""
-
+        buckets: dict[str, list[str]] = {}
         for node_type, addr in chain(
             inventory.heater_sample_targets,
             inventory.power_monitor_sample_targets,
         ):
-            normalized_type = normalize_node_type(
-                node_type,
-                use_default_when_falsey=True,
-            )
-            normalized_addr = normalize_node_addr(
-                addr,
-                use_default_when_falsey=True,
-            )
-            if (
-                not normalized_type
-                or not normalized_addr
-                or normalized_type not in ENERGY_NODE_TYPES
-            ):
-                continue
-            if not inventory.has_node(normalized_type, normalized_addr):
-                continue
-            yield normalized_type, normalized_addr
-
-    def _targets_by_type(self, inventory: Inventory) -> dict[str, list[str]]:
-        """Return energy node addresses grouped by canonical type."""
-
-        buckets: dict[str, list[str]] = {}
-        for node_type, addr in self._iter_energy_targets(inventory):
-            bucket = buckets.setdefault(node_type, [])
-            if addr not in bucket:
-                bucket.append(addr)
+            buckets.setdefault(node_type, []).append(addr)
         return buckets
 
     def _prefill_energy_buckets(
@@ -1005,29 +935,14 @@ class EnergyStateCoordinator(
     ) -> None:
         """Seed energy and power buckets from cached coordinator state."""
 
-        snapshot = coerce_snapshot(self.data)
-        if snapshot is not None and snapshot.dev_id == dev_id:
-            for node_type, addrs_for_type in targets_by_type.items():
-                metrics = snapshot.metrics_for_type(node_type)
-                if not metrics:
-                    continue
-                energy_bucket = energy_by_type.setdefault(node_type, {})
-                power_bucket = power_by_type.setdefault(node_type, {})
-                for addr in addrs_for_type:
-                    current = metrics.get(addr)
-                    if current is None:
-                        continue
-                    if current.energy_kwh is not None:
-                        energy_bucket.setdefault(addr, current.energy_kwh)
-                    if current.power_w is not None:
-                        power_bucket.setdefault(addr, current.power_w)
+        for node_id, current in self.data.iter_metrics():
+            node_type = node_id.node_type.value
+            energy_by_type[node_type].setdefault(node_id.addr, current.energy_kwh)
+            if current.power_w is not None:
+                power_by_type[node_type].setdefault(node_id.addr, current.power_w)
 
         for (node_type, addr), (_, kwh) in self._last.items():
-            addrs_for_type = targets_by_type.get(node_type)
-            if not addrs_for_type or addr not in addrs_for_type:
-                continue
-            energy_bucket = energy_by_type.setdefault(node_type, {})
-            energy_bucket.setdefault(addr, kwh)
+            energy_by_type[node_type].setdefault(addr, kwh)
 
     def _build_snapshot(
         self,
@@ -1045,9 +960,7 @@ class EnergyStateCoordinator(
         metrics: dict[DomainNodeId, EnergyNodeMetrics] = {}
         for node_type, addrs_for_type in targets_by_type.items():
             for addr in addrs_for_type:
-                node_id = self._node_id_for(node_type, addr)
-                if node_id is None:
-                    continue
+                node_id = DomainNodeId(DomainNodeType(node_type), addr)
                 energy_value = energy_by_type.get(node_type, {}).get(addr)
                 power_value = power_by_type.get(node_type, {}).get(addr)
                 if energy_value is None and power_value is None:
@@ -1149,10 +1062,7 @@ class EnergyStateCoordinator(
     ) -> bool:
         """Update cached energy and derived power for ``addr``."""
 
-        scale = float(self._counter_scales.get(node_type, 1000.0) or 1000.0)
-        if scale <= 0:
-            scale = 1000.0
-        kwh = counter / scale
+        kwh = counter / SAMPLE_COUNTER_SCALES[node_type]
         key = (node_type, addr)
         prev = self._last.get(key)
         if prev and when <= prev[0]:
@@ -1183,15 +1093,10 @@ class EnergyStateCoordinator(
 
     async def _async_update_data(self) -> EnergySnapshot:
         """Fetch recent heater energy samples and derive totals and power."""
-        existing_snapshot = coerce_snapshot(self.data)
         if self._should_skip_poll():
-            if existing_snapshot is not None:
-                _LOGGER.debug("Energy poll skipped (fresh websocket samples)")
-                self._publish_to_state_store(existing_snapshot)
-                return existing_snapshot
-            snapshot = build_empty_snapshot(self._dev_id, ws_deadline=self._ws_deadline)
-            self._publish_to_state_store(snapshot)
-            return snapshot
+            _LOGGER.debug("Energy poll skipped (fresh websocket samples)")
+            self._publish_to_state_store(self.data)
+            return self.data
 
         dev_id = self._dev_id
         try:
@@ -1232,8 +1137,6 @@ class EnergyStateCoordinator(
 
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
-        except (ClientError, BackendAuthError) as err:
-            raise UpdateFailed(f"API error: {err}") from err
         else:
             self._ws_deadline = None
             self._publish_to_state_store(snapshot)
@@ -1264,16 +1167,11 @@ class EnergyStateCoordinator(
     def _should_skip_poll(self) -> bool:
         """Return True when websocket pushes keep energy data fresh."""
 
-        snapshot = coerce_snapshot(self.data)
-        if snapshot is None or snapshot.dev_id != self._dev_id:
-            return False
         return self._ws_deadline is not None and time_mod() < self._ws_deadline
 
     def _ws_margin_seconds(self) -> float:
-        """Return the buffer to wait after the websocket lease expires."""
+        """Return the buffer to wait after a positive websocket lease expires."""
 
-        if self._ws_lease <= 0:
-            return self._ws_margin_default
         return max(self._ws_margin_default, min(self._ws_lease * 0.25, 600.0))
 
     @staticmethod
@@ -1347,35 +1245,21 @@ class EnergyStateCoordinator(
             restrict_to=ENERGY_NODE_TYPES,
         )
 
-        snapshot = coerce_snapshot(self.data)
         energy_by_type: dict[str, dict[str, float]] = {
             node_type: {} for node_type in targets_by_type
         }
         power_by_type: dict[str, dict[str, float]] = {
             node_type: {} for node_type in targets_by_type
         }
-        if snapshot is not None and snapshot.dev_id == dev_id:
-            for node_id, metrics in snapshot.iter_metrics():
-                node_type = node_id.node_type.value
-                if node_type not in targets_by_type:
-                    continue
-                if node_id.addr not in targets_by_type[node_type]:
-                    continue
-                if metrics.energy_kwh is not None:
-                    energy_by_type.setdefault(node_type, {})[node_id.addr] = (
-                        metrics.energy_kwh
-                    )
-                if metrics.power_w is not None:
-                    power_by_type.setdefault(node_type, {})[node_id.addr] = (
-                        metrics.power_w
-                    )
+        for node_id, metrics in self.data.iter_metrics():
+            node_type = node_id.node_type.value
+            energy_by_type[node_type][node_id.addr] = metrics.energy_kwh
+            if metrics.power_w is not None:
+                power_by_type[node_type][node_id.addr] = metrics.power_w
 
         changed = False
 
-        for raw_type, payload in updates.items():
-            node_type = normalize_node_type(raw_type)
-            if not node_type:
-                continue
+        for node_type, payload in updates.items():
             canonical_type = alias_map.get(node_type, node_type)
             tracked_addrs = targets_by_type.get(canonical_type)
             if not tracked_addrs:
@@ -1435,11 +1319,5 @@ def _wrap_logger(logger: Any) -> Any:
             if msg == suppressed_message:
                 return None
             return self._inner.debug(msg, *args, **kwargs)
-
-        def isEnabledFor(self, _level: int) -> bool:
-            checker = getattr(self._inner, "isEnabledFor", None)
-            if callable(checker):
-                return bool(checker(_level))
-            return False
 
     return _LoggerProxy(logger)

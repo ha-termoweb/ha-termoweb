@@ -24,7 +24,7 @@ from custom_components.termoweb.inventory import (
 
 _LOGGER = logging.getLogger(__name__)
 
-_SAMPLE_COUNTER_SCALES: dict[str, float] = {
+SAMPLE_COUNTER_SCALES: dict[str, float] = {
     "htr": 1000.0,
     "acm": 1000.0,
     "pmo": 3_600_000.0,
@@ -340,7 +340,7 @@ def normalise_sample_records(
 ) -> list[dict[str, Any]]:
     """Return sorted sample dictionaries containing ``ts`` and ``energy_wh``."""
 
-    scale = float(_SAMPLE_COUNTER_SCALES.get(node_type, 1000.0))
+    scale = float(SAMPLE_COUNTER_SCALES.get(node_type, 1000.0))
     divider = scale / 1000.0 if scale else 1.0
     samples: list[dict[str, Any]] = []
 
