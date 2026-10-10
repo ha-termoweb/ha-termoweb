@@ -18,10 +18,6 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.entities import heater as heater_module
-from custom_components.termoweb.entities.heater import (
-    get_boost_runtime_minutes,
-    get_boost_temperature,
-)
 
 from .conftest import FakeCloud
 
@@ -83,7 +79,7 @@ async def test_boost_duration_writes_boost_time(
     assert extra_options.await_args.kwargs["boost_time"] == 180
     assert extra_options.await_args.kwargs["boost_temp"] is None
     assert float(hass.states.get(BOOST_DURATION).state) == 3.0
-    assert get_boost_runtime_minutes(hass, config_entry.entry_id, "acm", "2") == 180
+    assert hass.states.get(ACM).attributes["preferred_boost_minutes"] == 180
 
 
 async def test_boost_duration_not_kept_when_write_fails(
@@ -92,14 +88,14 @@ async def test_boost_duration_not_kept_when_write_fails(
     """A rejected boost_time write raises and keeps the previous value."""
     await _setup(hass, config_entry)
     before = hass.states.get(BOOST_DURATION).state
-    stored = get_boost_runtime_minutes(hass, config_entry.entry_id, "acm", "2")
+    preferred = hass.states.get(ACM).attributes["preferred_boost_minutes"]
     extra_options.side_effect = ClientError("rejected")
 
     with pytest.raises(HomeAssistantError, match="Boost preset write"):
         await _set(hass, BOOST_DURATION, 5)
 
     assert hass.states.get(BOOST_DURATION).state == before
-    assert get_boost_runtime_minutes(hass, config_entry.entry_id, "acm", "2") == stored
+    assert hass.states.get(ACM).attributes["preferred_boost_minutes"] == preferred
 
 
 async def test_boost_duration_follows_device_value(
@@ -136,7 +132,8 @@ async def test_boost_temperature_works_without_climate_entity(
     assert extra_options.await_args.kwargs["boost_temp"] == 24.0
     assert extra_options.await_args.kwargs["boost_time"] is None
     assert float(hass.states.get(BOOST_TEMP).state) == 24.0
-    assert get_boost_temperature(hass, config_entry.entry_id, "acm", "2") == 24.0
+    view = config_entry.runtime_data.coordinator.domain_view
+    assert view.get_heater_state("acm", "2").boost_temp == "24.0"
 
 
 async def test_boost_buttons_listen_to_coordinator_once(

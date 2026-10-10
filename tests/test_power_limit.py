@@ -17,10 +17,12 @@ _install_stubs()
 from custom_components.termoweb.backend import termoweb_ws as ws_module
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.const import DOMAIN, BRAND_DUCAHEAT, BRAND_TERMOWEB
+from custom_components.termoweb.coordinator import StateCoordinator
 from custom_components.termoweb.entities import number as entities_number_module
 from custom_components.termoweb.identifiers import build_gateway_entity_unique_id
-from custom_components.termoweb.runtime import EntryRuntime, require_runtime
+from custom_components.termoweb.inventory import Inventory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.termoweb.number as number_module
 
@@ -40,24 +42,45 @@ def _make_hass() -> HomeAssistant:
     return hass
 
 
+def _make_coordinator(
+    hass: HomeAssistant,
+    *,
+    dev_id: str = "dev-pl",
+    client: Any | None = None,
+    brand: str = BRAND_TERMOWEB,
+) -> StateCoordinator:
+    """Return a real StateCoordinator with an empty inventory."""
+    return StateCoordinator(
+        hass,
+        client or MagicMock(spec=RESTClient),
+        base_interval=30,
+        dev_id=dev_id,
+        device=None,
+        inventory=Inventory(dev_id, []),
+        brand=brand,
+    )
+
+
 def _make_power_limit_entity(
     *,
     hass: HomeAssistant | None = None,
     entry_id: str = "entry-pl",
     dev_id: str = "dev-pl",
     power_limit: int | None = 5000,
+    backend: Any | None = None,
 ) -> PowerLimitNumber:
-    """Create a PowerLimitNumber wired to a runtime with the given power limit."""
+    """Create a PowerLimitNumber whose coordinator stores ``power_limit``."""
     if hass is None:
         hass = _make_hass()
-    coordinator = FakeCoordinator(hass, dev_id=dev_id)
-    runtime = build_entry_runtime(
+    coordinator = _make_coordinator(hass, dev_id=dev_id)
+    coordinator.apply_power_limit(power_limit)
+    build_entry_runtime(
         hass=hass,
         entry_id=entry_id,
         dev_id=dev_id,
         coordinator=coordinator,
+        backend=backend,
     )
-    runtime.power_limit = power_limit
     unique_id = build_gateway_entity_unique_id(dev_id, "power_limit")
     entity = PowerLimitNumber(coordinator, entry_id, dev_id, unique_id)
     entity.hass = hass
@@ -241,70 +264,43 @@ class TestPowerLimitEntityAvailable:
 
     def test_available_false_when_power_limit_none(self) -> None:
         entity = _make_power_limit_entity(power_limit=None)
-        assert entity.available is False
-
-    def test_available_false_when_runtime_missing(self) -> None:
-        """Entity returns unavailable when runtime lookup fails."""
-        hass = _make_hass()
-        coordinator = FakeCoordinator(hass, dev_id="dev-pl")
-        unique_id = build_gateway_entity_unique_id("dev-pl", "power_limit")
-        entity = PowerLimitNumber(coordinator, "missing-entry", "dev-pl", unique_id)
-        entity.hass = hass
-        # No runtime installed for "missing-entry"
-        assert entity.available is False
 
 
 class TestPowerLimitEntitySetValue:
     """Tests for PowerLimitNumber.async_set_native_value."""
 
     @pytest.mark.asyncio
-    async def test_set_value_calls_client(self) -> None:
-        hass = _make_hass()
-        coordinator = FakeCoordinator(hass, dev_id="dev-pl")
-        mock_client = SimpleNamespace(
-            set_power_limit=AsyncMock(),
-        )
-        runtime = build_entry_runtime(
-            hass=hass,
-            entry_id="entry-pl",
-            dev_id="dev-pl",
-            coordinator=coordinator,
-            client=mock_client,
-        )
-        runtime.power_limit = 3000
-
-        unique_id = build_gateway_entity_unique_id("dev-pl", "power_limit")
-        entity = PowerLimitNumber(coordinator, "entry-pl", "dev-pl", unique_id)
-        entity.hass = hass
+    async def test_set_value_calls_backend_and_stores_value(self) -> None:
+        backend = SimpleNamespace(set_power_limit=AsyncMock())
+        entity = _make_power_limit_entity(power_limit=3000, backend=backend)
 
         await entity.async_set_native_value(5000.0)
 
-        mock_client.set_power_limit.assert_awaited_once_with("dev-pl", power_limit=5000)
-        assert runtime.power_limit == 5000
+        backend.set_power_limit.assert_awaited_once_with("dev-pl", power_limit=5000)
+        assert entity.native_value == 5000
 
     @pytest.mark.asyncio
     async def test_set_value_truncates_float(self) -> None:
         """Verify float values are truncated to int."""
-        hass = _make_hass()
-        coordinator = FakeCoordinator(hass, dev_id="dev-pl")
-        mock_client = SimpleNamespace(
-            set_power_limit=AsyncMock(),
-        )
-        build_entry_runtime(
-            hass=hass,
-            entry_id="entry-pl",
-            dev_id="dev-pl",
-            coordinator=coordinator,
-            client=mock_client,
-        )
-
-        unique_id = build_gateway_entity_unique_id("dev-pl", "power_limit")
-        entity = PowerLimitNumber(coordinator, "entry-pl", "dev-pl", unique_id)
-        entity.hass = hass
+        backend = SimpleNamespace(set_power_limit=AsyncMock())
+        entity = _make_power_limit_entity(power_limit=None, backend=backend)
 
         await entity.async_set_native_value(4999.7)
 
-        mock_client.set_power_limit.assert_awaited_once_with("dev-pl", power_limit=4999)
+        backend.set_power_limit.assert_awaited_once_with("dev-pl", power_limit=4999)
+        assert entity.native_value == 4999
+
+    @pytest.mark.asyncio
+    async def test_set_value_failure_raises_and_keeps_value(self) -> None:
+        backend = SimpleNamespace(
+            set_power_limit=AsyncMock(side_effect=RuntimeError("rejected"))
+        )
+        entity = _make_power_limit_entity(power_limit=3000, backend=backend)
+
+        with pytest.raises(HomeAssistantError, match="Power limit write"):
+            await entity.async_set_native_value(5000.0)
+
+        assert entity.native_value == 3000
 
 
 class TestPowerLimitEntityDeviceInfo:
@@ -458,19 +454,16 @@ class TestWSPowerLimitUpdate:
     """Tests for WebSocket power_limit handling."""
 
     def _make_ws_client(
-        self, monkeypatch: pytest.MonkeyPatch, *, entry_id: str = "entry"
-    ) -> tuple[ws_module.TermoWebWSClient, HomeAssistant, Any]:
-        """Create a TermoWebWSClient wired for testing."""
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[ws_module.TermoWebWSClient, StateCoordinator]:
+        """Create a TermoWebWSClient bound to a real coordinator."""
         hass = _make_hass()
         hass.loop = SimpleNamespace(
             call_soon_threadsafe=lambda cb, *args: cb(*args),
             is_running=lambda: False,
         )
-        coordinator = SimpleNamespace(
-            data={},
-            update_nodes=MagicMock(),
-            async_set_updated_data=MagicMock(),
-        )
+        coordinator = _make_coordinator(hass, dev_id="device")
+        coordinator.async_set_updated_data = MagicMock()
 
         monkeypatch.setattr(
             ws_module.TermoWebWSClient, "_install_write_hook", lambda self: None
@@ -478,118 +471,62 @@ class TestWSPowerLimitUpdate:
 
         client = ws_module.TermoWebWSClient(
             hass,
-            entry_id=entry_id,
+            entry_id="entry",
             dev_id="device",
             api_client=DummyREST(),
             coordinator=coordinator,
             session=SimpleNamespace(closed=False),
         )
-        return client, hass, coordinator
+        return client, coordinator
 
-    def test_handle_power_limit_update_sets_runtime(
+    def test_handle_power_limit_update_stores_value(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Direct call to _handle_power_limit_update stores value on runtime."""
-        client, hass, coordinator = self._make_ws_client(monkeypatch)
-
-        runtime = build_entry_runtime(
-            hass=hass,
-            entry_id="entry",
-            dev_id="device",
-            coordinator=coordinator,
-        )
+        """A power_limit push lands in the store and notifies listeners."""
+        client, coordinator = self._make_ws_client(monkeypatch)
 
         client._handle_power_limit_update({"power_limit": "4200"})
 
-        assert runtime.power_limit == 4200
+        assert coordinator.domain_view.get_power_limit() == 4200
+        coordinator.async_set_updated_data.assert_called()
 
-    def test_handle_power_limit_update_non_mapping_ignored(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        "body",
+        ["not a mapping", None, 42, {"other_key": "value"}, {"power_limit": "abc"}],
+    )
+    def test_handle_power_limit_update_invalid_ignored(
+        self, monkeypatch: pytest.MonkeyPatch, body: Any
     ) -> None:
-        """Non-mapping body is silently ignored."""
-        client, hass, coordinator = self._make_ws_client(monkeypatch)
-        runtime = build_entry_runtime(
-            hass=hass,
-            entry_id="entry",
-            dev_id="device",
-            coordinator=coordinator,
-        )
-        runtime.power_limit = 1000
+        """Invalid bodies keep the stored value."""
+        client, coordinator = self._make_ws_client(monkeypatch)
+        coordinator.apply_power_limit(1000)
 
-        client._handle_power_limit_update("not a mapping")
-        client._handle_power_limit_update(None)
-        client._handle_power_limit_update(42)
-        assert runtime.power_limit == 1000
+        client._handle_power_limit_update(body)
 
-    def test_handle_power_limit_update_missing_key_ignored(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Body without power_limit key is ignored."""
-        client, hass, coordinator = self._make_ws_client(monkeypatch)
-        runtime = build_entry_runtime(
-            hass=hass,
-            entry_id="entry",
-            dev_id="device",
-            coordinator=coordinator,
-        )
-        runtime.power_limit = 1000
-
-        client._handle_power_limit_update({"other_key": "value"})
-        assert runtime.power_limit == 1000
-
-    def test_handle_power_limit_update_non_numeric_ignored(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Non-numeric power_limit value is ignored."""
-        client, hass, coordinator = self._make_ws_client(monkeypatch)
-        runtime = build_entry_runtime(
-            hass=hass,
-            entry_id="entry",
-            dev_id="device",
-            coordinator=coordinator,
-        )
-        runtime.power_limit = 1000
-
-        client._handle_power_limit_update({"power_limit": "abc"})
-        assert runtime.power_limit == 1000
+        assert coordinator.domain_view.get_power_limit() == 1000
 
     def test_ws_legacy_data_batch_routes_power_limit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Simulate 'data' event with htr_system/power_limit path."""
-        client, hass, coordinator = self._make_ws_client(monkeypatch)
-        runtime = build_entry_runtime(
-            hass=hass,
-            entry_id="entry",
-            dev_id="device",
-            coordinator=coordinator,
+        client, coordinator = self._make_ws_client(monkeypatch)
+
+        client._handle_legacy_data_batch(
+            [
+                {
+                    "path": "/api/v2/devs/device/htr_system/power_limit",
+                    "body": {"power_limit": "7500"},
+                }
+            ]
         )
 
-        batch = [
-            {
-                "path": "/api/v2/devs/device/htr_system/power_limit",
-                "body": {"power_limit": "7500"},
-            }
-        ]
-
-        client._handle_legacy_data_batch(batch)
-
-        assert runtime.power_limit == 7500
+        assert coordinator.domain_view.get_power_limit() == 7500
 
     def test_ws_apply_nodes_payload_routes_power_limit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Simulate update event with htr_system path that fails translate_path."""
-        client, hass, coordinator = self._make_ws_client(monkeypatch)
-        runtime = build_entry_runtime(
-            hass=hass,
-            entry_id="entry",
-            dev_id="device",
-            coordinator=coordinator,
-        )
-
-        from custom_components.termoweb.inventory import Inventory
-
+        client, coordinator = self._make_ws_client(monkeypatch)
         client._inventory = Inventory("device", [])
 
         payload = {
@@ -599,23 +536,7 @@ class TestWSPowerLimitUpdate:
 
         client._apply_nodes_payload(payload, merge=True, event="update")
 
-        assert runtime.power_limit == 9000
-
-    def test_handle_power_limit_triggers_coordinator_refresh(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Verify coordinator.async_set_updated_data is called after update."""
-        client, hass, coordinator = self._make_ws_client(monkeypatch)
-        build_entry_runtime(
-            hass=hass,
-            entry_id="entry",
-            dev_id="device",
-            coordinator=coordinator,
-        )
-
-        client._handle_power_limit_update({"power_limit": "3000"})
-
-        coordinator.async_set_updated_data.assert_called_once()
+        assert coordinator.domain_view.get_power_limit() == 9000
 
 
 # ===========================================================================
@@ -626,124 +547,61 @@ class TestWSPowerLimitUpdate:
 class TestCoordinatorPowerLimitPolling:
     """Tests for StateCoordinator power_limit polling behavior."""
 
+    @staticmethod
+    def _client(get_power_limit: AsyncMock) -> MagicMock:
+        """Return a REST client double with the given power limit read."""
+        client = MagicMock(spec=RESTClient)
+        client.get_node_settings = AsyncMock(return_value={})
+        client.get_power_limit = get_power_limit
+        client.get_rtc_time = AsyncMock(return_value={})
+        return client
+
     @pytest.mark.asyncio
     async def test_coordinator_polls_power_limit_termoweb(self) -> None:
-        """Verify get_power_limit is called for TermoWeb brand."""
-        from custom_components.termoweb.coordinator import StateCoordinator
-        from custom_components.termoweb.inventory import Inventory
-
-        hass = _make_hass()
-        mock_client = MagicMock(spec=RESTClient)
-        mock_client.get_node_settings = AsyncMock(return_value={})
-        mock_client.get_power_limit = AsyncMock(return_value=6000)
-        mock_client.get_rtc_time = AsyncMock(return_value={})
-
-        inventory = Inventory("dev-coord", [])
-
-        coord = StateCoordinator(
-            hass,
-            mock_client,
-            base_interval=30,
-            dev_id="dev-coord",
-            device=None,
-            inventory=inventory,
-            brand=BRAND_TERMOWEB,
-            entry_id="entry-coord",
-        )
-
-        runtime = build_entry_runtime(
-            hass=hass,
-            entry_id="entry-coord",
-            dev_id="dev-coord",
-            coordinator=coord,
-            client=mock_client,
-            inventory=inventory,
-        )
+        """The poll stores the power limit in the domain store."""
+        client = self._client(AsyncMock(return_value=6000))
+        coord = _make_coordinator(_make_hass(), client=client)
 
         await coord._async_update_data()
 
-        mock_client.get_power_limit.assert_awaited()
-        assert runtime.power_limit == 6000
+        client.get_power_limit.assert_awaited()
+        assert coord.domain_view.get_power_limit() == 6000
 
     @pytest.mark.asyncio
     async def test_coordinator_skips_power_limit_ducaheat(self) -> None:
         """Verify get_power_limit is NOT called for Ducaheat brand."""
-        from custom_components.termoweb.coordinator import StateCoordinator
-        from custom_components.termoweb.inventory import Inventory
-
-        hass = _make_hass()
-        mock_client = MagicMock(spec=RESTClient)
-        mock_client.get_node_settings = AsyncMock(return_value={})
-        mock_client.get_power_limit = AsyncMock(return_value=6000)
-        mock_client.get_rtc_time = AsyncMock(return_value={})
-
-        inventory = Inventory("dev-coord-dh", [])
-
-        coord = StateCoordinator(
-            hass,
-            mock_client,
-            base_interval=30,
-            dev_id="dev-coord-dh",
-            device=None,
-            inventory=inventory,
-            brand=BRAND_DUCAHEAT,
-            entry_id="entry-coord-dh",
-        )
-
-        build_entry_runtime(
-            hass=hass,
-            entry_id="entry-coord-dh",
-            dev_id="dev-coord-dh",
-            coordinator=coord,
-            client=mock_client,
-            inventory=inventory,
-            brand=BRAND_DUCAHEAT,
-        )
+        client = self._client(AsyncMock(return_value=6000))
+        coord = _make_coordinator(_make_hass(), client=client, brand=BRAND_DUCAHEAT)
 
         await coord._async_update_data()
 
-        mock_client.get_power_limit.assert_not_awaited()
+        client.get_power_limit.assert_not_awaited()
+        assert coord.domain_view.get_power_limit() is None
 
     @pytest.mark.asyncio
     async def test_coordinator_handles_power_limit_failure(self) -> None:
         """Verify coordinator continues when get_power_limit raises."""
-        from custom_components.termoweb.coordinator import StateCoordinator
-        from custom_components.termoweb.inventory import Inventory
+        client = self._client(AsyncMock(side_effect=RuntimeError("network")))
+        coord = _make_coordinator(_make_hass(), client=client)
+        coord.apply_power_limit(1000)
 
-        hass = _make_hass()
-        mock_client = MagicMock(spec=RESTClient)
-        mock_client.get_node_settings = AsyncMock(return_value={})
-        mock_client.get_power_limit = AsyncMock(side_effect=RuntimeError("network"))
-        mock_client.get_rtc_time = AsyncMock(return_value={})
-
-        inventory = Inventory("dev-coord-err", [])
-
-        coord = StateCoordinator(
-            hass,
-            mock_client,
-            base_interval=30,
-            dev_id="dev-coord-err",
-            device=None,
-            inventory=inventory,
-            brand=BRAND_TERMOWEB,
-            entry_id="entry-coord-err",
-        )
-
-        runtime = build_entry_runtime(
-            hass=hass,
-            entry_id="entry-coord-err",
-            dev_id="dev-coord-err",
-            coordinator=coord,
-            client=mock_client,
-            inventory=inventory,
-        )
-        runtime.power_limit = 1000
-
-        # Should not raise despite get_power_limit failing
         result = await coord._async_update_data()
+
         assert isinstance(result, dict)
-        # power_limit stays at its previous value since the update failed
-        assert runtime.power_limit == 1000
+        assert coord.domain_view.get_power_limit() == 1000
+
+    def test_apply_power_limit_notifies_only_on_change(self) -> None:
+        """Listeners are notified for a new value, not for a repeat or junk."""
+        coord = _make_coordinator(_make_hass())
+        coord.async_set_updated_data = MagicMock()
+
+        coord.apply_power_limit("4200")
+        coord.apply_power_limit(4200)
+        coord.apply_power_limit("abc")
+        coord.apply_power_limit(None)
+
+        coord.async_set_updated_data.assert_called_once()
+        assert coord.domain_view.get_power_limit() == 4200
 
 
 # ===========================================================================

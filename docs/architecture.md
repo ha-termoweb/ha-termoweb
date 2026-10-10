@@ -36,7 +36,11 @@ integration. **v2.0.2** is the clean release of this architecture.
 2. **Inventory snapshot** (gateway + nodes) is retrieved once and stored in the
    runtime. Inventory never changes for the lifetime of the entry.
 3. **Update sources** (REST polling, WebSocket push) produce **domain deltas**.
-4. **DomainStateStore** applies deltas and holds the canonical in-memory state.
+4. **DomainStateStore** applies deltas and holds the canonical in-memory state:
+   per-node settings (including accumulator boost defaults `boost_time` /
+   `boost_temp`), the gateway connection state, the installation power limit
+   and the energy snapshot. `EntryRuntime` holds only runtime handles (clients,
+   coordinators, tasks), never device state.
 5. **DomainStateView** provides read-only access for entities.
 
 Entities and services never read raw REST/WS payloads. They **only** read through
@@ -64,7 +68,7 @@ This map defines responsibilities for each module family in the final design.
 - `inventory.py` — immutable inventory models and lookup helpers.
   `normalize_node_type` is the string form (stripped, lowercased, any value).
 - `domain/` — domain dataclasses, deltas, `DomainStateStore` (including energy
-  snapshots), and `DomainStateView`. `domain/ids.py` owns `NodeType`, the
+  snapshots and the gateway power limit), and `DomainStateView`. `domain/ids.py` owns `NodeType`, the
   node-type groups (`HEATER_NODE_TYPES`, `HEATING_NODE_TYPES`,
   `ENERGY_NODE_TYPES`) and `NodeType.coerce` (case-insensitive, `None` for
   unknown types); `NodeType(value)` is the strict, raising form.

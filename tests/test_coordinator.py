@@ -351,8 +351,8 @@ async def test_async_update_data_omits_raw_nodes(
     record = result["dev"]
     assert "nodes" not in record
     assert "settings" not in record
-    assert record["inventory"] is inventory
-    assert record["inventory"].addresses_by_type["htr"] == ["1"]
+    for leaked in ("inventory", "state_store", "domain_view"):
+        assert leaked not in record
     assert _state_payload(coord, "htr", "1") == {}
 
 

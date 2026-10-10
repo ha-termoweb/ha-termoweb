@@ -52,6 +52,13 @@ class DomainStateView:
             return GatewayConnectionState()
         return self._store.get_gateway_connection_state()
 
+    def get_power_limit(self) -> int | None:
+        """Return the gateway power limit in watts when known."""
+
+        if self._store is None:
+            return None
+        return self._store.get_power_limit()
+
     def get_energy_snapshot(self) -> EnergySnapshot | None:
         """Return the latest energy snapshot for this gateway."""
 

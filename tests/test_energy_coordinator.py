@@ -298,9 +298,6 @@ def test_coordinator_success_resets_backoff() -> None:
         )
         assert _state_payload(coord, "htr", "A") == {"mode": "auto"}
         assert _state_payload(coord, "acm", "B") == {"mode": "auto"}
-        assert dev["inventory"] is inventory
-        assert dev["inventory"].addresses_by_type["htr"] == ["A"]
-        assert dev["inventory"].addresses_by_type["acm"] == ["B"]
         assert "nodes" not in dev
         assert "nodes_by_type" not in dev
         assert coord._backoff == 0
@@ -356,9 +353,6 @@ def test_state_coordinator_round_robin_mixed_types() -> None:
         assert _state_payload(coord, "htr", "A") == {"mode": "auto"}
         assert _state_payload(coord, "htr", "C") == {"mode": "eco"}
         assert _state_payload(coord, "acm", "B") == {"mode": "charge"}
-        assert dev["inventory"] is inventory
-        assert dev["inventory"].addresses_by_type["htr"] == ["A", "C"]
-        assert dev["inventory"].addresses_by_type["acm"] == ["B"]
         assert "nodes" not in dev
 
     asyncio.run(_run())
@@ -644,8 +638,6 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         assert "nodes" not in dev
         assert dev["connected"] is True
         assert _state_payload(coord, "htr", "A") == {"mode": "auto"}
-        assert isinstance(dev.get("inventory"), coord_module.Inventory)
-        assert dev["inventory"].addresses_by_type["htr"] == ["A", "B"]
 
         await coord.async_refresh_heater(("htr", "B"))
         assert client.get_node_settings.await_args_list[-1].args == (
@@ -656,9 +648,6 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         second = updates[-1]["dev"]
         assert _state_payload(coord, "htr", "A") == {"mode": "auto"}
         assert _state_payload(coord, "htr", "B") == {"mode": "eco"}
-        assert isinstance(second.get("inventory"), coord_module.Inventory)
-        assert second["inventory"].addresses_by_type["htr"] == ["A", "B"]
-        assert second["inventory"].addresses_by_type["acm"] == ["C"]
         assert _state_payload(coord, "acm", "C") is None
 
     asyncio.run(_run())
@@ -703,9 +692,6 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
         client.get_node_settings.assert_awaited_once()
         assert updates, "Expected coordinator data to be updated"
         latest = updates[-1]["dev"]
-        assert latest["inventory"] is inventory_container
-        addrs = latest["inventory"].addresses_by_type["acm"]
-        assert addrs == ["3"]
         assert _state_payload(coord, "acm", "3") == {"mode": "auto"}
 
     asyncio.run(_run())
@@ -746,8 +732,6 @@ def test_async_refresh_heater_adds_missing_type() -> None:
         await coord.async_refresh_heater(("acm", "B"))
 
         dev_data = coord.data["dev"]
-        assert dev_data["inventory"] is inventory
-        assert "B" in dev_data["inventory"].addresses_by_type["acm"]
         assert _state_payload(coord, "acm", "B") == {"mode": "eco"}
 
     asyncio.run(_run())
@@ -812,8 +796,6 @@ def test_refresh_heater_populates_missing_metadata() -> None:
         assert "nodes" not in result
         assert result["connected"] is True
         assert _state_payload(coord, "htr", "A") == {"mode": "heat"}
-        assert result["inventory"] is inventory
-        assert result["inventory"].addresses_by_type["acm"] == ["B"]
 
     asyncio.run(_run())
 
@@ -920,8 +902,6 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
         dev_data = result["dev"]
         assert _state_payload(coord, "acm", "7") == {"mode": "eco"}
         assert _state_payload(coord, "htr", "legacy") == {"mode": "eco"}
-        assert dev_data["inventory"] is inventory
-        assert dev_data["inventory"].addresses_by_type.get("htr") == ["legacy"]
 
     asyncio.run(_run())
 
@@ -949,8 +929,6 @@ def test_async_refresh_heater_updates_cache() -> None:
 
         dev_data = coord.data["dev"]
         assert _state_payload(coord, "htr", "A") == {"mode": "heat"}
-        assert dev_data["inventory"] is inventory
-        assert dev_data["inventory"].addresses_by_type["htr"] == ["A"]
 
     asyncio.run(_run())
 
@@ -981,8 +959,6 @@ def test_async_update_data_skips_non_dict_sections() -> None:
 
         dev_data = result["dev"]
         assert _state_payload(coord, "acm", "B") == {"mode": "heat"}
-        assert isinstance(dev_data.get("inventory"), coord_module.Inventory)
-        assert dev_data["inventory"].addresses_by_type["acm"] == ["B"]
         assert client.get_node_settings.await_count == 1
 
     asyncio.run(_run())

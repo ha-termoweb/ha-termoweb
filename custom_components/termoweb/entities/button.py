@@ -348,13 +348,8 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
             return
 
         context = self.boost_context
-        minutes = resolve_boost_runtime_minutes(
-            hass,
-            context.entry_id,
-            context.node_type,
-            context.addr,
-        )
         state = self._coordinator_state()
+        minutes = resolve_boost_runtime_minutes(state)
         await self._async_boost_request(
             hass,
             "start",

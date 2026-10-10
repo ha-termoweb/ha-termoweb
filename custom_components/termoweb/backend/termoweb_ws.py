@@ -22,7 +22,6 @@ from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.const import API_BASE, BRAND_TERMOWEB, WS_NAMESPACE
 from custom_components.termoweb.domain import NodeSettingsDelta
 from custom_components.termoweb.inventory import Inventory
-from custom_components.termoweb.runtime import require_runtime
 
 from .ws_client import HandshakeError, WSStats, _WSCommon
 
@@ -176,24 +175,10 @@ class TermoWebWSClient(_WSCommon):
         self._apply_nodes_payload(data, merge=True, event="update")
 
     def _handle_power_limit_update(self, body: Any) -> None:
-        """Apply a system-level power_limit push to the runtime."""
+        """Route a system-level power_limit push into the domain store."""
         if not isinstance(body, Mapping):
             return
-        raw = body.get("power_limit")
-        if raw is None:
-            return
-        try:
-            value = int(raw)
-        except (ValueError, TypeError):
-            return
-        try:
-            runtime = require_runtime(self.hass, self.entry_id)
-            runtime.power_limit = value
-        except LookupError:
-            return
-        coordinator = getattr(self, "_coordinator", None)
-        if coordinator is not None and hasattr(coordinator, "async_set_updated_data"):
-            coordinator.async_set_updated_data(coordinator.data)
+        self._coordinator.apply_power_limit(body.get("power_limit"))
         self._mark_ws_payload(
             timestamp=time.time(),
             stale_after=self._payload_idle_window,

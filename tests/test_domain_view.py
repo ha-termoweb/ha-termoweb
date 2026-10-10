@@ -50,6 +50,21 @@ def test_domain_state_view_gateway_connection_state() -> None:
     assert empty_state.connected is False
 
 
+def test_domain_state_view_power_limit() -> None:
+    """DomainStateView should expose the stored gateway power limit."""
+
+    store = DomainStateStore([])
+    view = DomainStateView("dev", store)
+    assert view.get_power_limit() is None
+
+    assert store.set_power_limit("2500") is True
+    assert store.set_power_limit(2500) is False
+    assert store.set_power_limit("junk") is False
+    assert view.get_power_limit() == 2500
+
+    assert DomainStateView("dev", None).get_power_limit() is None
+
+
 # ---------------------------------------------------------------------------
 # Power monitor state tests
 # ---------------------------------------------------------------------------
