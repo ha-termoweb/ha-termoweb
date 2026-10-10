@@ -1926,7 +1926,7 @@ custom_components/termoweb/backend/radio/survey.py :: _spec
 custom_components/termoweb/backend/radio/survey.py :: merge_runs
     Join consecutive runs of the same level and drop empty ones.
 custom_components/termoweb/backend/radio/survey.py :: find_preambles
-    Return every stretch of one-bit runs with steady pair sums, longest first.
+    Return stretches of one-bit runs with steady pair sums, longest first.
 custom_components/termoweb/backend/radio/survey.py :: find_preamble
     Return the longest preamble-like stretch, or None.
 custom_components/termoweb/backend/radio/survey.py :: _preamble
@@ -1935,6 +1935,24 @@ custom_components/termoweb/backend/radio/survey.py :: runs_to_bits
     Return the bits from the preamble on, stopping at the first idle gap.
 custom_components/termoweb/backend/radio/survey.py :: bits_to_bytes
     Pack whole bytes MSB first, at most ``limit`` of them.
+custom_components/termoweb/backend/radio/survey.py :: _pair_fits
+    Return True when runs j, j+1 look like two bits of the same preamble.
+custom_components/termoweb/backend/radio/survey.py :: deglitch
+    Fold runs shorter than ``min_us`` into the run before, keeping total time.
+custom_components/termoweb/backend/radio/survey.py :: slice_bits
+    Sample runs with a phase-tracking bit clock; idle gaps split the segments.
+custom_components/termoweb/backend/radio/survey.py :: refine_period
+    Return the bit period that best explains every non-idle run.
+custom_components/termoweb/backend/radio/survey.py :: _alternates
+    Return True when ``count`` bits from ``start`` strictly alternate.
+custom_components/termoweb/backend/radio/survey.py :: preamble_end
+    Return where the preamble from ``start`` ends, skipping isolated bit errors.
+custom_components/termoweb/backend/radio/survey.py :: bit_preamble
+    Return (start, end) of the longest preamble in a bit string, or None.
+custom_components/termoweb/backend/radio/survey.py :: _sync_hits
+    Return (offset, errors) of every window within ``max_errors`` of ``pattern``.
+custom_components/termoweb/backend/radio/survey.py :: _timings
+    Return (bit period, bias, first run) candidates: preambles, then common rates.
 custom_components/termoweb/backend/radio/survey.py :: _invert
     Return ``bits`` with every bit flipped.
 custom_components/termoweb/backend/radio/survey.py :: _sync_bits
@@ -1942,9 +1960,9 @@ custom_components/termoweb/backend/radio/survey.py :: _sync_bits
 custom_components/termoweb/backend/radio/survey.py :: preamble_break
     Return the index of the first bit equal to its predecessor (preamble end).
 custom_components/termoweb/backend/radio/survey.py :: _decode_known
-    Return (dialect, inverted, logical frame, sync end) for a known dialect.
+    Return (dialect, inverted, logical frame, sync errors) for a known dialect.
 custom_components/termoweb/backend/radio/survey.py :: _search
-    Return every framing whose CRC validates on this bit stream.
+    Return every framing whose CRC validates after the preamble end ``brk``.
 custom_components/termoweb/backend/radio/survey.py :: analyse_burst
     Decode one burst with the known dialects, else search its framing.
 custom_components/termoweb/backend/radio/survey.py :: Candidate.suggestion

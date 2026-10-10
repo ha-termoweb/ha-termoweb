@@ -213,8 +213,8 @@ def test_decoders_skip_false_sync_hits_and_short_streams() -> None:
     frame = to_bits(b_frame())
     junk = to_bits(bytes([0x40, 1, 2, 3, 4, 5, 6]))  # length byte beyond the data
     found = s._decode_known("1010" + sync + junk + sync + frame)  # noqa: SLF001
-    assert found is not None and found[0] is DIALECT_B
-    assert s._search("11" + "0" * 30) == []  # noqa: SLF001
+    assert found is not None and found[0] is DIALECT_B and found[3] == 0
+    assert s._search("11" + "0" * 30, 1) == []  # noqa: SLF001
 
 
 def test_suggestion_lists_codec_needs() -> None:
@@ -329,3 +329,134 @@ async def test_link_survey_collects_bursts_and_hides_raw_lines() -> None:
     with pytest.raises(ValueError, match="survey length"):
         await link.survey(0)
     await link.close()
+
+
+# --- weak signals ------------------------------------------------------------------
+
+
+def weak_capture(
+    air: bytes,
+    sync: bytes,
+    rng: random.Random,
+    *,
+    jitter: float = 0.15,
+    flips: float = 0.0,
+    flip_frame: bool = False,
+    glitches: int = 0,
+    preamble_bytes: int = 4,
+) -> s.RawBurst:
+    """Return a burst with edge jitter, glitches and bit flips (a weak signal)."""
+    bits = list("10101010" * preamble_bytes + to_bits(sync) + to_bits(air) + "1010")
+    region = len(bits) if flip_frame else 8 * preamble_bytes + 8 * len(sync)
+    for index in range(region):
+        if rng.random() < flips:
+            bits[index] = "1" if bits[index] == "0" else "0"
+    starts = [0] + [i for i in range(1, len(bits)) if bits[i] != bits[i - 1]]
+    times = [0.0]
+    times += [i * BIT_US + rng.uniform(-jitter, jitter) * BIT_US for i in starts[1:]]
+    times.append(len(bits) * BIT_US)
+    runs = [(n % 2, rng.randint(5, 400)) for n in range(12)] + [(0, 20000)]
+    for k, start in enumerate(starts):
+        level = int(bits[start])
+        bias = 18 if level else -18
+        runs.append((level, max(1, round(times[k + 1] - times[k] + bias))))
+    for _ in range(glitches):
+        index = rng.randrange(14, len(runs))
+        level, micros = runs[index]
+        if micros > 60:
+            cut, glitch = rng.randint(20, micros - 30), rng.randint(5, 25)
+            runs[index : index + 1] = [
+                (level, cut),
+                (1 - level, glitch),
+                (level, micros - cut - glitch),
+            ]
+    runs += [(0, 20000)] + [(n % 2, rng.randint(5, 300)) for n in range(6)]
+    return s.RawBurst(-92.0, tuple(runs))
+
+
+def test_weak_signal_bursts_still_decode() -> None:
+    """Jitter of +-15 %, glitches and preamble/sync bit errors: dialect B decodes."""
+    rng = random.Random(40)
+    air = b_frame()
+    decoded = sum(
+        s.analyse_burst(
+            weak_capture(air, DIALECT_B.sync, rng, flips=0.03, glitches=3)
+        ).dialect
+        == "B"
+        for _ in range(20)
+    )
+    assert decoded >= 18
+    # Flips inside the frame break its CRC: only frames without one can decode,
+    # which is why one CRC-valid frame is enough for a known dialect.
+    report = s.analyse(
+        [
+            weak_capture(air, DIALECT_B.sync, rng, flips=0.01, flip_frame=True)
+            for _ in range(10)
+        ]
+    )
+    assert report.verdict == "known" and report.network_ids == ("1234",)
+
+
+def test_sync_errors_are_tolerated_and_reported() -> None:
+    """Up to two flipped sync bits still find the frame; three do not."""
+    air = to_bits(b_frame())
+    sync = to_bits(DIALECT_B.sync)
+    two = (
+        ("1" if sync[0] == "0" else "0")
+        + sync[1:5]
+        + ("1" if sync[5] == "0" else "0")
+        + sync[6:]
+    )
+    found = s._decode_known("10101010" + two + air)  # noqa: SLF001
+    assert found is not None and found[3] == 2
+    three = two[:9] + ("1" if two[9] == "0" else "0") + two[10:]
+    assert s._decode_known("10101010" + three + air) is None  # noqa: SLF001
+
+
+def test_common_rates_are_tried_without_a_clean_preamble() -> None:
+    """A one-byte preamble is too short to time from; 9.6 kbps is tried anyway."""
+    burst = capture(b_frame(), DIALECT_B.sync, 41, preamble_bytes=1)
+    assert s.find_preambles(s.merge_runs(burst.runs)) == []
+    result = s.analyse_burst(burst)
+    assert result.dialect == "B" and result.bit_us == pytest.approx(BIT_US, rel=0.03)
+
+
+def test_slicer_helpers() -> None:
+    """Glitches fold away, idle splits segments, preamble ends skip lone errors."""
+    assert s.deglitch([(1, 100), (0, 10), (1, 100), (0, 200)], 30) == [
+        (1, 210),
+        (0, 200),
+    ]
+    assert s.deglitch([(0, 10), (1, 100)], 30) == [(0, 10), (1, 100)]
+    runs = [(1, 104), (0, 104)] * 6 + [(1, 9000)] + [(0, 104), (1, 104)]
+    assert s.slice_bits(runs, 104.0) == ["101010101010"]
+    assert s.slice_bits([(1, 520), (0, 312), (1, 104)], 104.0) == ["111110001"]
+    assert s.refine_period([(1, 90000)], 104.0) == 104.0
+    bits = "1010101010" + "0" + "10101010" + "00101101"
+    assert s.preamble_end(bits) == len(bits) - 8  # the lone error is skipped
+    assert s.bit_preamble(bits) == (0, len(bits) - 8)
+    assert s.bit_preamble("1100110011") is None
+    assert s.preamble_end("10101010") == 8
+
+
+def test_keep_runs_for_replay_and_redact_drops_them() -> None:
+    """keep_runs puts the raw runs in the report; a shared report never has them."""
+    burst = capture(b_frame(), DIALECT_B.sync, 42)
+    data = s.analyse([burst], keep_runs=True).as_dict()
+    assert data["contains_raw_runs"] is True
+    first = data["bursts"][0]["raw_runs"].split()
+    assert s.parse_run_tokens(first) == list(burst.runs)
+    shared = s.redact(s.analyse([burst], keep_runs=True)).as_dict()
+    assert (
+        shared["contains_raw_runs"] is False and shared["bursts"][0]["raw_runs"] is None
+    )
+    assert s.analyse([burst]).as_dict()["bursts"][0]["raw_runs"] is None
+
+
+def test_timing_preamble_without_bit_preamble(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Runs that time like a preamble but slice to no preamble stay unexplained."""
+    rng = random.Random(43)
+    burst = capture(bytes(rng.randrange(256) for _ in range(20)), b"\x12\x34", 44)
+    monkeypatch.setattr(s, "bit_preamble", lambda _bits: None)
+    result = s.analyse_burst(burst)
+    assert result.bit_us is not None and result.sync is None and result.bits is None

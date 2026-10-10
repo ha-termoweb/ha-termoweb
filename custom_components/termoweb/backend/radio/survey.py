@@ -32,6 +32,16 @@ LENGTH_OFFSETS = range(-4, 5)  # total frame length = byte 0 + offset
 MIN_FRAME_BYTES = 5
 MIN_AGREEING_BURSTS = 2  # a CRC match on one burst alone may be chance
 RAW_BITS_LIMIT = 2000  # bits kept per undecoded burst in the report
+COARSE_GLITCH_US = 30  # removed before timing is known: shorter than any bit
+GLITCH_FRACTION = 0.35  # runs shorter than this many bits are noise spikes
+PLL_GAIN = 0.5  # share of the phase error corrected at every transition
+MAX_PREAMBLE_PAIR_ERRORS = 4  # a flipped preamble bit spoils two run pairs
+ALTERNATION_RESUME = 8  # alternating bits that show a violation was a bit error
+MAX_SYNC_ERRORS = 2  # Hamming distance accepted for a known sync word
+_RATES = (9600, 4800, 19200, 38400)
+FALLBACK_BIT_US: tuple[float, ...] = tuple(
+    1e6 / 9600 * (1 + step / 100) for step in (0, -2, 2, -4, 4, -6, 6, -8, 8, -10, 10)
+) + tuple(1e6 / rate for rate in _RATES[1:])
 IDENTITY_REPLY = 0x5B
 PAYLOAD_START = 12  # logical layout shared by the known dialects
 
@@ -154,20 +164,39 @@ class Preamble:
     bias_us: float  # half the high/low width difference, removed before rounding
 
 
+def _pair_fits(runs: Sequence[tuple[int, int]], j: int, reference: int) -> bool:
+    """Return True when runs j, j+1 look like two bits of the same preamble."""
+    pair = runs[j][1] + runs[j + 1][1]
+    return (
+        abs(pair - reference) <= PAIR_TOLERANCE * reference
+        and max(runs[j][1], runs[j + 1][1]) < 0.85 * reference
+    )
+
+
 def find_preambles(runs: Sequence[tuple[int, int]]) -> list[Preamble]:
-    """Return every stretch of one-bit runs with steady pair sums, longest first."""
+    """Return stretches of one-bit runs with steady pair sums, longest first.
+
+    A few bad pairs (bit errors or glitches) are tolerated when the stretch
+    carries on after them.
+    """
     found: list[tuple[int, int]] = []
     i = 0
     while i + 1 < len(runs):
         reference = runs[i][1] + runs[i + 1][1]
         j = i
-        while (
-            j + 1 < len(runs)
-            and abs(runs[j][1] + runs[j + 1][1] - reference)
-            <= PAIR_TOLERANCE * reference
-            and max(runs[j][1], runs[j + 1][1]) < 0.85 * reference
-        ):
-            j += 1
+        errors = 0
+        while j + 1 < len(runs):
+            if _pair_fits(runs, j, reference):
+                j += 1
+            elif (
+                errors < MAX_PREAMBLE_PAIR_ERRORS
+                and j + 3 < len(runs)
+                and _pair_fits(runs, j + 2, reference)
+            ):
+                errors += 1
+                j += 1
+            else:
+                break
         if j + 1 - i >= MIN_PREAMBLE_RUNS:
             found.append((i, j + 1))
         i = max(j, i + 1)
@@ -226,6 +255,127 @@ def bits_to_bytes(bits: str, limit: int = MAX_FRAME_BYTES) -> bytes:
     return bytes(int(bits[8 * i : 8 * i + 8], 2) for i in range(count))
 
 
+def deglitch(runs: Iterable[tuple[int, int]], min_us: float) -> list[tuple[int, int]]:
+    """Fold runs shorter than ``min_us`` into the run before, keeping total time."""
+    out: list[tuple[int, int]] = []
+    for level, micros in runs:
+        if out and micros < min_us:
+            out[-1] = (out[-1][0], out[-1][1] + micros)
+        elif out and out[-1][0] == level:
+            out[-1] = (level, out[-1][1] + micros)
+        else:
+            out.append((level, micros))
+    return out
+
+
+def slice_bits(
+    runs: Sequence[tuple[int, int]], bit_us: float, bias_us: float = 0.0
+) -> list[str]:
+    """Sample runs with a phase-tracking bit clock; idle gaps split the segments.
+
+    The clock runs on continuously and is pulled half-way towards mid-bit at
+    every transition, so one jittered edge shortens one run and lengthens the
+    next without changing the bit count over both.
+    """
+    segments: list[str] = []
+    out: list[str] = []
+    edge = 0.0
+    sample = bit_us / 2
+    for level, micros in runs:
+        length = micros - bias_us if level else micros + bias_us
+        if length > MAX_RUN_BITS * bit_us:
+            if len(out) >= 8:
+                segments.append("".join(out))
+            out = []
+            edge += length
+            sample = edge + bit_us / 2
+            continue
+        error = (sample - edge) % bit_us - bit_us / 2
+        sample -= PLL_GAIN * error
+        end = edge + length
+        char = "1" if level else "0"
+        while sample < end:
+            out.append(char)
+            sample += bit_us
+        edge = end
+    if len(out) >= 8:
+        segments.append("".join(out))
+    return segments
+
+
+def refine_period(
+    runs: Sequence[tuple[int, int]], bit_us: float, bias_us: float = 0.0
+) -> float:
+    """Return the bit period that best explains every non-idle run.
+
+    A preamble gives the period to about 2 %, which a phase-only clock cannot
+    follow through a long run of equal bits; total time / total bits can.
+    """
+    total_us = 0.0
+    total_bits = 0
+    for level, micros in runs:
+        length = micros - bias_us if level else micros + bias_us
+        count = round(length / bit_us)
+        if 0 < count <= MAX_RUN_BITS:
+            total_us += length
+            total_bits += count
+    return total_us / total_bits if total_bits else bit_us
+
+
+def _alternates(bits: str, start: int, count: int) -> bool:
+    """Return True when ``count`` bits from ``start`` strictly alternate."""
+    window = bits[start : start + count]
+    return len(window) == count and all(a != b for a, b in pairwise(window))
+
+
+def preamble_end(bits: str, start: int = 0) -> int:
+    """Return where the preamble from ``start`` ends, skipping isolated bit errors."""
+    index = start + 1
+    while index < len(bits):
+        if bits[index] != bits[index - 1] or _alternates(
+            bits, index + 1, ALTERNATION_RESUME
+        ):
+            index += 1
+            continue
+        return index
+    return len(bits)
+
+
+def bit_preamble(bits: str) -> tuple[int, int] | None:
+    """Return (start, end) of the longest preamble in a bit string, or None."""
+    best: tuple[int, int] | None = None
+    index = 0
+    while index < len(bits):
+        if _alternates(bits, index, ALTERNATION_RESUME):
+            end = preamble_end(bits, index)
+            if end - index >= MIN_PREAMBLE_RUNS and (
+                best is None or end - index > best[1] - best[0]
+            ):
+                best = (index, end)
+            index = max(end, index + 1)
+        else:
+            index += 1
+    return best
+
+
+def _sync_hits(stream: str, pattern: str, max_errors: int) -> list[tuple[int, int]]:
+    """Return (offset, errors) of every window within ``max_errors`` of ``pattern``."""
+    width = len(pattern)
+    if len(stream) < width:
+        return []
+    target = int(pattern, 2)
+    value = int(stream, 2)
+    mask = (1 << width) - 1
+    hits = []
+    for offset in range(len(stream) - width + 1):
+        window = (value >> (len(stream) - width - offset)) & mask
+        errors = (window ^ target).bit_count()
+        if errors <= max_errors:
+            hits.append((offset, errors))
+    hits.sort(key=lambda hit: hit[1])
+    return hits
+
+
 def _invert(bits: str) -> str:
     """Return ``bits`` with every bit flipped."""
     return bits.translate(str.maketrans("01", "10"))
@@ -274,32 +424,36 @@ class BurstResult:
     frame: bytes | None  # logical frame bytes, CRC included
     bits: str | None  # demodulated bits, kept when nothing decoded
     fits: tuple[Framing, ...] = ()  # every search match (before agreement)
+    preamble_end: int | None = None  # in ``bits``: where the framing search starts
+    sync_errors: int = 0  # bit errors in a known sync word
+    raw: tuple[tuple[int, int], ...] | None = None  # kept runs (opt-in)
 
 
 def _decode_known(bits: str) -> tuple[Dialect, bool, bytes, int] | None:
-    """Return (dialect, inverted, logical frame, sync end) for a known dialect."""
+    """Return (dialect, inverted, logical frame, sync errors) for a known dialect.
+
+    The sync word may carry up to MAX_SYNC_ERRORS bit errors; the frame's own
+    length byte and CRC still have to check.
+    """
     for inverted in (False, True):
         stream = _invert(bits) if inverted else bits
         for dialect in DIALECTS.values():
             pattern = _sync_bits(dialect.sync)
-            start = stream.find(pattern)
-            while start >= 0:
-                end = start + len(pattern)
-                air = bits_to_bytes(stream[end:])
-                if air:
-                    total = frame_total_length(dialect, air[0])
-                    if MIN_FRAME_BYTES <= total <= len(air):
-                        frame = decode(dialect, air[:total])
-                        if frame.ok:
-                            return dialect, inverted, frame.logical[:total], end
-                start = stream.find(pattern, start + 1)
+            for offset, errors in _sync_hits(stream, pattern, MAX_SYNC_ERRORS):
+                air = bits_to_bytes(stream[offset + len(pattern) :])
+                if not air:
+                    continue
+                total = frame_total_length(dialect, air[0])
+                if MIN_FRAME_BYTES <= total <= len(air):
+                    frame = decode(dialect, air[:total])
+                    if frame.ok:
+                        return dialect, inverted, frame.logical[:total], errors
     return None
 
 
-def _search(bits: str) -> list[tuple[Framing, bytes]]:
-    """Return every framing whose CRC validates on this bit stream."""
+def _search(bits: str, brk: int) -> list[tuple[Framing, bytes]]:
+    """Return every framing whose CRC validates after the preamble end ``brk``."""
     fits: list[tuple[Framing, bytes]] = []
-    brk = preamble_break(bits)
     for inverted in (False, True):
         stream = _invert(bits) if inverted else bits
         for offset in SYNC_SEARCH:
@@ -341,38 +495,59 @@ def _search(bits: str) -> list[tuple[Framing, bytes]]:
     return fits
 
 
+def _timings(runs: Sequence[tuple[int, int]]) -> list[tuple[float, float, int]]:
+    """Return (bit period, bias, first run) candidates: preambles, then common rates."""
+    found = [(p.bit_us, p.bias_us, p.start) for p in find_preambles(runs)]
+    return found + [(bit_us, 0.0, 0) for bit_us in FALLBACK_BIT_US]
+
+
 def analyse_burst(burst: RawBurst) -> BurstResult:
     """Decode one burst with the known dialects, else search its framing."""
-    runs = merge_runs(burst.runs)
+    runs = deglitch(merge_runs(burst.runs), COARSE_GLITCH_US)
+    for rough_us, bias_us, first in _timings(runs):
+        clean = deglitch(runs[first:], GLITCH_FRACTION * rough_us)
+        bit_us = refine_period(clean, rough_us, bias_us)
+        for segment in slice_bits(clean, bit_us, bias_us):
+            known = _decode_known(segment)
+            if known is not None:
+                dialect, inverted, frame, errors = known
+                return BurstResult(
+                    burst.rssi_dbm,
+                    len(runs),
+                    bit_us,
+                    dialect.sync.hex().upper(),
+                    inverted,
+                    dialect.name,
+                    None,
+                    frame,
+                    None,
+                    sync_errors=errors,
+                )
     preambles = find_preambles(runs)
     if not preambles:
         return BurstResult(
             burst.rssi_dbm, len(runs), None, None, False, None, None, None, None
         )
-    for candidate in preambles:
-        known = _decode_known(runs_to_bits(runs, candidate))
-        if known is not None:
-            dialect, inverted, frame, _end = known
-            return BurstResult(
-                burst.rssi_dbm,
-                len(runs),
-                candidate.bit_us,
-                dialect.sync.hex().upper(),
-                inverted,
-                dialect.name,
-                None,
-                frame,
-                None,
-            )
     preamble = preambles[0]
-    bits = runs_to_bits(runs, preamble)
-    fits = _search(bits)
-    brk = preamble_break(bits)
+    clean = deglitch(runs[preamble.start :], GLITCH_FRACTION * preamble.bit_us)
+    bit_us = refine_period(clean, preamble.bit_us, preamble.bias_us)
+    best: tuple[str, int] | None = None
+    for segment in slice_bits(clean, bit_us, preamble.bias_us):
+        found = bit_preamble(segment)
+        if found and (best is None or found[1] - found[0] > best[1]):
+            best = (segment[found[0] :], found[1] - found[0])
+    if best is None:
+        return BurstResult(
+            burst.rssi_dbm, len(runs), bit_us, None, False, None, None, None, None
+        )
+    bits = best[0]
+    brk = preamble_end(bits)
+    fits = _search(bits, brk)
     plain_sync = bits_to_bytes(bits[brk - 1 : brk + 15]).hex().upper() or None
     return BurstResult(
         burst.rssi_dbm,
         len(runs),
-        preamble.bit_us,
+        bit_us,
         plain_sync,
         False,
         None,
@@ -380,6 +555,7 @@ def analyse_burst(burst: RawBurst) -> BurstResult:
         None,
         bits[:RAW_BITS_LIMIT],
         tuple(framing for framing, _frame in fits),
+        preamble_end=brk,
     )
 
 
@@ -448,7 +624,13 @@ class SurveyReport:
                 "dialect": b.dialect,
                 "framing": asdict(b.framing) if b.framing else None,
                 "frame": b.frame.hex(" ").upper() if b.frame else None,
+                "sync_errors": b.sync_errors,
                 "bits": b.bits,
+                "raw_runs": (
+                    " ".join(f"{'+' if level else '-'}{us}" for level, us in b.raw)
+                    if b.raw is not None
+                    else None
+                ),
             }
             bursts.append(entry)
         return {
@@ -462,6 +644,7 @@ class SurveyReport:
             "confidence": round(self.confidence, 2),
             "redacted": self.redacted,
             "contains_raw_bits": any(b.bits for b in self.bursts),
+            "contains_raw_runs": any(b.raw is not None for b in self.bursts),
             "bursts": bursts,
         }
 
@@ -471,9 +654,16 @@ def _network_id(frame: bytes | None) -> str | None:
     return frame[1:3].hex().upper() if frame and len(frame) >= 3 else None
 
 
-def analyse(bursts: Iterable[RawBurst]) -> SurveyReport:
-    """Analyse a survey: known dialects first, then framings bursts agree on."""
-    results = [analyse_burst(burst) for burst in bursts]
+def analyse(bursts: Iterable[RawBurst], *, keep_runs: bool = False) -> SurveyReport:
+    """Analyse a survey: known dialects first, then framings bursts agree on.
+
+    ``keep_runs`` keeps every burst's raw runs in the report so a survey can be
+    replayed later; ``redact`` always drops them.
+    """
+    results = []
+    for burst in bursts:
+        result = analyse_burst(burst)
+        results.append(replace(result, raw=burst.runs) if keep_runs else result)
     heard = [r for r in results if r.bit_us is not None]
     if not heard:
         return SurveyReport(tuple(results), "silent", None, (), (), None, 0.0)
@@ -518,13 +708,13 @@ def _with_framing(result: BurstResult, framing: Framing) -> BurstResult:
     """Return ``result`` decoded with ``framing`` when that framing fits it."""
     if framing not in result.fits or result.bits is None:
         return result
-    frame = _frame_for(result.bits, framing)
+    frame = _frame_for(result.bits, framing, result.preamble_end or 0)
     return replace(result, framing=framing, frame=frame, sync=framing.sync, bits=None)
 
 
-def _frame_for(bits: str, framing: Framing) -> bytes | None:
+def _frame_for(bits: str, framing: Framing, brk: int) -> bytes | None:
     """Re-extract the logical frame bytes a framing found."""
-    for fit, frame in _search(bits):
+    for fit, frame in _search(bits, brk):
         if fit == framing:
             return frame
     return None  # pragma: no cover - a fit always reproduces
@@ -532,7 +722,7 @@ def _frame_for(bits: str, framing: Framing) -> bytes | None:
 
 def redact(report: SurveyReport) -> SurveyReport:
     """Mask network ids and drop identity-reply payloads before sharing a report."""
-    bursts = tuple(replace(b, frame=_mask(b.frame)) for b in report.bursts)
+    bursts = tuple(replace(b, frame=_mask(b.frame), raw=None) for b in report.bursts)
     return replace(
         report,
         bursts=bursts,
@@ -573,12 +763,17 @@ __all__ = [
     "SurveyReport",
     "analyse",
     "analyse_burst",
+    "bit_preamble",
     "bits_to_bytes",
+    "deglitch",
     "find_preamble",
     "find_preambles",
     "merge_runs",
     "parse_run_tokens",
     "preamble_break",
+    "preamble_end",
     "redact",
+    "refine_period",
     "runs_to_bits",
+    "slice_bits",
 ]
