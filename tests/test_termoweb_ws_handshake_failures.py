@@ -36,6 +36,7 @@ async def test_handshake_failures_reset_after_threshold(monkeypatch, caplog) -> 
         return None
 
     monkeypatch.setattr(asyncio, "sleep", _immediate_sleep)
+    client._connect_limiter._sleep = _immediate_sleep
 
     attempts = 0
 

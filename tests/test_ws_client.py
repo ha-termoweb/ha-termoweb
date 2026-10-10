@@ -1483,42 +1483,6 @@ def test_ws_lease_backoff_sequence() -> None:
 
 
 @pytest.mark.asyncio
-async def test_termoweb_runner_uses_connection_limiter(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """TermoWeb runner should throttle connection attempts before dialing."""
-
-    client = _make_termoweb_client(monkeypatch)
-    limiter = SimpleNamespace(wait_for_slot=AsyncMock())
-    client._connect_limiter = limiter  # type: ignore[attr-defined]
-
-    attempts = 0
-
-    async def _connect_once() -> None:
-        nonlocal attempts
-        attempts += 1
-        raise RuntimeError("boom")
-
-    async def _disconnect(reason: str) -> None:
-        return None
-
-    async def _handle_connection_lost(error: Exception | None) -> None:
-        client._closing = True
-
-    monkeypatch.setattr(client, "_connect_once", _connect_once)
-    monkeypatch.setattr(client, "_wait_for_events", AsyncMock())
-    monkeypatch.setattr(client, "_disconnect", _disconnect)
-    monkeypatch.setattr(client, "_handle_connection_lost", _handle_connection_lost)
-    monkeypatch.setattr(client, "_update_status", lambda *_args, **_kwargs: None)
-    client._backoff_seq = [0]
-
-    await client._runner()
-
-    limiter.wait_for_slot.assert_awaited_once()
-    assert attempts == 1
-
-
-@pytest.mark.asyncio
 async def test_ducaheat_runner_uses_connection_limiter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

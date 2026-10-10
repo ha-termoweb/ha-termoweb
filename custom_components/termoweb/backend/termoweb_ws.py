@@ -1159,7 +1159,7 @@ class WebSocketClient(_WSCommon):
 # ----------------------------------------------------------------------
 
 
-class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network client
+class TermoWebWSClient(WebSocketClient):
     """Legacy Socket.IO 0.9 websocket client for TermoWeb."""
 
     def __init__(
@@ -1177,6 +1177,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
     ) -> None:
         """Initialise the legacy websocket client container."""
 
+        # Run only the shared _WSCommon init (connect limiter, inventory);
+        # the socketio base initialiser is not used by this client.
+        _WSCommon.__init__(self, inventory=inventory)
         self.hass = hass
         self.entry_id = entry_id
         self.dev_id = dev_id
@@ -1218,8 +1221,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._last_heartbeat_at: float | None = None
 
         self._handshake_payload: dict[str, Any] | None = None
-
-        self._inventory: Inventory | None = inventory
 
         self._payload_idle_window: float = 240.0
         self._idle_restart_task: asyncio.Task | None = None
@@ -1451,18 +1452,10 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 self._update_status("disconnected")
             if self._closing or not should_retry:
                 break
-            # If we've never successfully connected, use a short retry
-            # delay so the first boot doesn't stall for 5 s due to a
-            # transient transport close.
-            if self._connected_since is None:
-                delay = 0.5
-            else:
-                delay = self._backoff_seq[
-                    min(self._backoff_idx, len(self._backoff_seq) - 1)
-                ]
-                self._backoff_idx = min(
-                    self._backoff_idx + 1, len(self._backoff_seq) - 1
-                )
+            delay = self._backoff_seq[
+                min(self._backoff_idx, len(self._backoff_seq) - 1)
+            ]
+            self._backoff_idx = min(self._backoff_idx + 1, len(self._backoff_seq) - 1)
             jitter = random.uniform(0.8, 1.2)
             await asyncio.sleep(delay * jitter)
 
