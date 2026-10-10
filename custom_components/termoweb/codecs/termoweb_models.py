@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 import typing
 from typing import Any
 
@@ -37,14 +37,10 @@ class NodeSummary(BaseModel):
 
     @field_validator("addr", "address", mode="before")
     @classmethod
-    def _stringify_numeric(cls, value: Any) -> Any:
-        """Convert numeric addresses to strings for consistency."""
+    def _stringify_numeric(cls, value: Any) -> str:
+        """Convert the integer wire addresses to strings for consistency."""
 
-        if isinstance(value, (int, float)):
-            if isinstance(value, float) and value.is_integer():
-                return str(int(value))
-            return str(value)
-        return value
+        return str(value)
 
 
 class NodesResponse(BaseModel):
@@ -62,8 +58,6 @@ class NodesResponse(BaseModel):
 def normalise_prog(value: Any) -> Any:
     """Coerce program values to integers when possible without raising."""
 
-    if not isinstance(value, list):
-        return value
     normalised: list[int | float | str] = []
     for item in value:
         try:
@@ -76,8 +70,6 @@ def normalise_prog(value: Any) -> Any:
 def normalise_ptemp(value: Any) -> Any:
     """Format preset temperatures while preserving the original length."""
 
-    if not isinstance(value, Iterable) or isinstance(value, (str, bytes)):
-        return value
     return [safe_temperature(item) for item in value]
 
 

@@ -149,14 +149,11 @@ def decode_devs_payload(raw: Any) -> list[dict[str, Any]]:
         for key in ("devs", "devices"):
             value = raw.get(key)
             if isinstance(value, list):
-                filtered = [item for item in value if isinstance(item, dict)]
-                try:
-                    return [
-                        DevSummary.model_validate(item).model_dump(exclude_none=True)
-                        for item in filtered
-                    ]
-                except ValidationError:
-                    return filtered
+                return [
+                    DevSummary.model_validate(item).model_dump(exclude_none=True)
+                    for item in value
+                    if isinstance(item, dict)
+                ]
 
     return []
 

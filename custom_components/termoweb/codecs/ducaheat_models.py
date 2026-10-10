@@ -30,29 +30,23 @@ class StatusWritePayload(DucaheatModel):
 
     @field_validator("mode")
     @classmethod
-    def _normalise_mode(cls, value: str | None) -> str | None:
-        """Lowercase mode strings when provided."""
+    def _normalise_mode(cls, value: str) -> str:
+        """Lowercase mode strings."""
 
-        if value is None:
-            return None
-        return str(value).lower()
+        return value.lower()
 
     @field_validator("stemp", "ice_temp", "eco_temp", "comf_temp", mode="before")
     @classmethod
-    def _format_temps(cls, value: Any) -> str | None:
+    def _format_temps(cls, value: Any) -> str:
         """Validate and format temperature strings."""
 
-        if value is None:
-            return None
         return format_temperature(value)
 
     @field_validator("units")
     @classmethod
-    def _clean_units(cls, value: str | None) -> str | None:
-        """Ensure units are uppercase when provided."""
+    def _clean_units(cls, value: str) -> str:
+        """Ensure units are uppercase."""
 
-        if value is None:
-            return None
         return validate_units(value, trim=True)
 
     @field_validator("boost_time")
