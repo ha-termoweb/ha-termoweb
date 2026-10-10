@@ -18,6 +18,7 @@ test = [
     "pytest-cov",
     "pytest-homeassistant-custom-component==0.13.371",
     "pytest-randomly>=5.0.0",
+    "ruff==0.17.0",
 ]
 
 
@@ -61,7 +62,7 @@ skip_covered = true
 
 
 [tool.ruff]
-required-version = ">=0.12.0"
+required-version = "==0.17.0"
 
 [tool.ruff.lint]
 select = [
@@ -198,7 +199,6 @@ ignore = [
   "TC006",
   "TRY003",
   "TRY400",
-  "UP038",
   "UP046",
   "UP047",
   "UP049",
@@ -215,7 +215,18 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["ALL"]
+"tests/**" = [
+  "ARG",     # fixtures and mocks have unused arguments by design
+  "BLE001",  # tests catch broad exceptions to assert on failure modes
+  "D",       # test names and bodies document themselves; no docstring policy
+  "INP001",  # tests/ subfolders are not packages
+  "PLC0415", # imports inside tests are used to patch/reload modules
+  "PLR2004", # magic values are the point of assertions
+  "PT",      # pytest-style opinions (parametrize names, raises match) not enforced
+  "S",       # asserts, hard-coded tokens and temp paths are fine in tests
+  "SLF001",  # tests exercise private members
+  "TRY",     # exception-style rules are irrelevant for test doubles
+]
 
 [tool.ruff.lint.flake8-pytest-style]
 fixture-parentheses = false
@@ -238,289 +249,3 @@ max-complexity = 25
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 property-decorators = ["propcache.api.cached_property"]
-
-[tool.pylint.MAIN]
-py-version = "3.14"
-jobs = 2
-init-hook = """\
-    from pathlib import Path; \
-    import sys; \
-
-    from pylint.config import find_default_config_files; \
-
-    sys.path.append( \
-        str(Path(next(find_default_config_files())).parent.joinpath('pylint/plugins'))
-    ) \
-    """
-load-plugins = [
-  "pylint.extensions.code_style",
-  "pylint.extensions.typing",
-]
-persistent = false
-extension-pkg-allow-list = [
-  "av.audio.stream",
-  "av.logging",
-  "av.stream",
-  "ciso8601",
-  "orjson",
-  "cv2",
-]
-fail-on = ["I"]
-
-[tool.pylint.BASIC]
-class-const-naming-style = "any"
-
-[tool.pylint."MESSAGES CONTROL"]
-disable = [
-  "format",
-  "abstract-method",
-  "cyclic-import",
-  "duplicate-code",
-  "inconsistent-return-statements",
-  "locally-disabled",
-  "not-context-manager",
-  "too-few-public-methods",
-  "too-many-ancestors",
-  "too-many-arguments",
-  "too-many-instance-attributes",
-  "too-many-lines",
-  "too-many-locals",
-  "too-many-public-methods",
-  "too-many-boolean-expressions",
-  "too-many-positional-arguments",
-  "wrong-import-order",
-  "consider-using-namedtuple-or-dataclass",
-  "consider-using-assignment-expr",
-  "possibly-used-before-assignment",
-  "await-outside-async",
-  "bad-str-strip-call",
-  "bad-string-format-type",
-  "bidirectional-unicode",
-  "continue-in-finally",
-  "duplicate-bases",
-  "misplaced-bare-raise",
-  "format-needs-mapping",
-  "function-redefined",
-  "invalid-all-object",
-  "invalid-character-backspace",
-  "invalid-character-esc",
-  "invalid-character-nul",
-  "invalid-character-sub",
-  "invalid-character-zero-width-space",
-  "logging-too-few-args",
-  "logging-too-many-args",
-  "missing-format-string-key",
-  "mixed-format-string",
-  "no-method-argument",
-  "no-self-argument",
-  "nonexistent-operator",
-  "nonlocal-without-binding",
-  "not-in-loop",
-  "notimplemented-raised",
-  "return-in-init",
-  "return-outside-function",
-  "syntax-error",
-  "too-few-format-args",
-  "too-many-format-args",
-  "too-many-star-expressions",
-  "truncated-format-string",
-  "undefined-all-variable",
-  "undefined-variable",
-  "used-prior-global-declaration",
-  "yield-inside-async-function",
-  "yield-outside-function",
-  "anomalous-backslash-in-string",
-  "assert-on-string-literal",
-  "assert-on-tuple",
-  "bad-format-string",
-  "bad-format-string-key",
-  "bare-except",
-  "binary-op-exception",
-  "cell-var-from-loop",
-  "duplicate-except",
-  "duplicate-key",
-  "duplicate-string-formatting-argument",
-  "duplicate-value",
-  "eval-used",
-  "exec-used",
-  "expression-not-assigned",
-  "f-string-without-interpolation",
-  "forgotten-debug-statement",
-  "format-string-without-interpolation",
-  "global-variable-not-assigned",
-  "implicit-str-concat",
-  "import-outside-toplevel",
-  "import-self",
-  "inconsistent-quotes",
-  "invalid-envvar-default",
-  "keyword-arg-before-vararg",
-  "logging-format-interpolation",
-  "logging-fstring-interpolation",
-  "logging-not-lazy",
-  "misplaced-future",
-  "named-expr-without-context",
-  "nested-min-max",
-  "pointless-statement",
-  "raise-missing-from",
-  "redefined-builtin",
-  "try-except-raise",
-  "unused-argument",
-  "unused-format-string-argument",
-  "unused-format-string-key",
-  "unused-import",
-  "unused-variable",
-  "useless-else-on-loop",
-  "wildcard-import",
-  "bad-classmethod-argument",
-  "consider-iterating-dictionary",
-  "empty-docstring",
-  "invalid-name",
-  "line-too-long",
-  "missing-class-docstring",
-  "missing-final-newline",
-  "missing-function-docstring",
-  "missing-module-docstring",
-  "multiple-imports",
-  "singleton-comparison",
-  "subprocess-run-check",
-  "superfluous-parens",
-  "ungrouped-imports",
-  "unidiomatic-typecheck",
-  "unnecessary-direct-lambda-call",
-  "unnecessary-lambda-assignment",
-  "unnecessary-pass",
-  "unneeded-not",
-  "useless-import-alias",
-  "wrong-import-position",
-  "comparison-of-constants",
-  "comparison-with-itself",
-  "consider-alternative-union-syntax",
-  "consider-merging-isinstance",
-  "consider-using-alias",
-  "consider-using-dict-comprehension",
-  "consider-using-generator",
-  "consider-using-get",
-  "consider-using-set-comprehension",
-  "consider-using-sys-exit",
-  "consider-using-ternary",
-  "literal-comparison",
-  "property-with-parameters",
-  "super-with-arguments",
-  "too-many-branches",
-  "too-many-return-statements",
-  "too-many-statements",
-  "trailing-comma-tuple",
-  "unnecessary-comprehension",
-  "use-a-generator",
-  "use-dict-literal",
-  "use-list-literal",
-  "useless-object-inheritance",
-  "useless-return",
-  "no-else-break",
-  "no-else-continue",
-  "no-else-raise",
-  "no-else-return",
-  "broad-except",
-  "protected-access",
-  "broad-exception-raised",
-  "consider-using-f-string",
-  "abstract-class-instantiated",
-  "arguments-differ",
-  "assigning-non-slot",
-  "assignment-from-no-return",
-  "assignment-from-none",
-  "bad-exception-cause",
-  "bad-format-character",
-  "bad-reversed-sequence",
-  "bad-super-call",
-  "bad-thread-instantiation",
-  "catching-non-exception",
-  "comparison-with-callable",
-  "deprecated-class",
-  "dict-iter-missing-items",
-  "format-combined-specification",
-  "global-variable-undefined",
-  "import-error",
-  "inconsistent-mro",
-  "inherit-non-class",
-  "init-is-generator",
-  "invalid-class-object",
-  "invalid-enum-extension",
-  "invalid-envvar-value",
-  "invalid-format-returned",
-  "invalid-hash-returned",
-  "invalid-metaclass",
-  "invalid-overridden-method",
-  "invalid-repr-returned",
-  "invalid-sequence-index",
-  "invalid-slice-index",
-  "invalid-slots-object",
-  "invalid-slots",
-  "invalid-star-assignment-target",
-  "invalid-str-returned",
-  "invalid-unary-operand-type",
-  "invalid-unicode-codec",
-  "isinstance-second-argument-not-valid-type",
-  "method-hidden",
-  "misplaced-format-function",
-  "missing-format-argument-key",
-  "missing-format-attribute",
-  "missing-kwoa",
-  "no-member",
-  "no-value-for-parameter",
-  "non-iterator-returned",
-  "non-str-assignment-to-dunder-name",
-  "nonlocal-and-global",
-  "not-a-mapping",
-  "not-an-iterable",
-  "not-async-context-manager",
-  "not-callable",
-  "not-context-manager",
-  "overridden-final-method",
-  "raising-bad-type",
-  "raising-non-exception",
-  "redundant-keyword-arg",
-  "relative-beyond-top-level",
-  "self-cls-assignment",
-  "signature-differs",
-  "star-needs-assignment-target",
-  "subclassed-final-class",
-  "super-without-brackets",
-  "too-many-function-args",
-  "typevar-double-variance",
-  "typevar-name-mismatch",
-  "unbalanced-dict-unpacking",
-  "unbalanced-tuple-unpacking",
-  "unexpected-keyword-arg",
-  "unhashable-member",
-  "unpacking-non-sequence",
-  "unsubscriptable-object",
-  "unsupported-assignment-operation",
-  "unsupported-binary-operation",
-  "unsupported-delete-operation",
-  "unsupported-membership-test",
-  "used-before-assignment",
-  "using-final-decorator-in-unsupported-version",
-  "wrong-exception-operation",
-]
-enable = [
-  "use-symbolic-message-instead",
-]
-
-[tool.pylint.REPORTS]
-score = false
-
-[tool.pylint.FORMAT]
-expected-line-ending-format = "LF"
-
-[tool.pylint.EXCEPTIONS]
-overgeneral-exceptions = [
-  "builtins.BaseException",
-  "builtins.Exception",
-]
-
-[tool.pylint.TYPING]
-runtime-typing = false
-
-[tool.pylint.CODE_STYLE]
-max-line-length-suggestions = 72
