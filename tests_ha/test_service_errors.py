@@ -22,6 +22,7 @@ from custom_components.termoweb.backend.ducaheat import (
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.const import BRAND_DUCAHEAT, CONF_BRAND, DOMAIN
 from custom_components.termoweb.entities import climate as climate_module
+from custom_components.termoweb.entities import heater as heater_module
 from custom_components.termoweb.entities.heater import get_boost_temperature
 
 from .conftest import PASSWORD, USERNAME, FakeCloud
@@ -92,7 +93,7 @@ def writes(node_settings: dict) -> Generator[Writes]:
         patch.object(RESTClient, "set_acm_boost_state", fake.boost_state),
         patch.object(RESTClient, "set_node_priority", fake.priority),
         patch.object(climate_module, "_WRITE_DEBOUNCE", 0),
-        patch.object(climate_module, "_WS_ECHO_FALLBACK_REFRESH", 0),
+        patch.object(heater_module, "WS_ECHO_FALLBACK_REFRESH", 0),
     ):
         yield fake
 

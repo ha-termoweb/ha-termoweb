@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -60,7 +60,7 @@ def _make_heater(
         coordinator, "entry-write-queue", DEV_ID, ADDR, "Heater"
     )
     heater.hass = hass
-    heater._schedule_refresh_fallback = lambda: None
+    heater._refresh_fallback = MagicMock()
     return hass, heater
 
 
