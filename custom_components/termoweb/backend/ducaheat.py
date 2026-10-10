@@ -534,13 +534,10 @@ class DucaheatRESTClient(RESTClient):
             )
         except ClientResponseError as err:
             if 400 <= err.status < 500:
-                message = getattr(err, "message", None)
-                if not message and err.args:
-                    message = str(err.args[0])
                 raise DucaheatRequestError(
                     status=err.status,
                     path=path,
-                    body=str(message or ""),
+                    body=err.message,
                 ) from err
             raise
 
@@ -568,13 +565,10 @@ class DucaheatRESTClient(RESTClient):
             )
         except ClientResponseError as err:
             if 400 <= err.status < 500:
-                message = getattr(err, "message", None)
-                if not message and err.args:
-                    message = str(err.args[0])
                 raise DucaheatRequestError(
                     status=err.status,
                     path=path,
-                    body=str(message or ""),
+                    body=err.message,
                 ) from err
             raise
 
