@@ -1683,6 +1683,10 @@ def _install_stubs() -> None:
             def unique_id(self) -> str | None:
                 return getattr(self, "_attr_unique_id", None)
 
+            @property
+            def available(self) -> bool:
+                return bool(getattr(self.coordinator, "last_update_success", True))
+
             @classmethod
             def __class_getitem__(cls, _item: Any) -> type:
                 return cls

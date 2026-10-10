@@ -243,8 +243,10 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """Return True when the inventory exposes this accumulator."""
+        """Return True when the last update succeeded and the node is in inventory."""
 
+        if not super().available:
+            return False
         forward_map, _ = self.boost_context.inventory.heater_address_map
         return self.boost_context.addr in forward_map.get(
             self.boost_context.node_type, ()
@@ -445,11 +447,12 @@ class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """Return True when the target node is still in immutable inventory."""
+        """Return True when the last update succeeded and the node is in inventory."""
 
         inventory = getattr(self.coordinator, "_inventory", None)
         return bool(
-            isinstance(inventory, Inventory)
+            super().available
+            and isinstance(inventory, Inventory)
             and inventory.has_node(
                 self._flash_context.node_type,
                 self._flash_context.addr,
