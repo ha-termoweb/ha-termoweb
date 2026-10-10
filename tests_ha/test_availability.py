@@ -80,7 +80,7 @@ async def _setup(hass: HomeAssistant, entry: MockConfigEntry) -> None:
 
 async def _refresh(hass: HomeAssistant, entry: MockConfigEntry, name: str) -> None:
     """Advance time past the coordinator's update interval and let it poll."""
-    coordinator = getattr(hass.data[DOMAIN][entry.entry_id], name)
+    coordinator = getattr(entry.runtime_data, name)
     async_fire_time_changed(
         hass, dt_util.utcnow() + coordinator.update_interval + timedelta(seconds=1)
     )

@@ -8,6 +8,7 @@ from datetime import timedelta
 from aiohttp import ClientError
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 import pytest
@@ -18,10 +19,19 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.termoweb.backend.rest_client import BackendAuthError
 from custom_components.termoweb.const import DOMAIN
+from custom_components.termoweb.runtime import require_runtime
 
-from .conftest import FakeCloud
+from .conftest import DEV_ID, DEVICES, FakeCloud
 
 PLATFORM_DOMAINS = {"binary_sensor", "button", "climate", "number", "sensor"}
+SERVICES = {
+    "import_energy_history",
+    "radio_survey",
+    "radio_capture",
+    "radio_pair",
+    "radio_factory_reset",
+    "radio_rehome",
+}
 
 
 async def _setup(hass: HomeAssistant, entry: MockConfigEntry) -> bool:
@@ -51,7 +61,7 @@ async def test_setup_entry_loads_and_forwards_platforms(
     assert await _setup(hass, config_entry)
 
     assert config_entry.state is ConfigEntryState.LOADED
-    runtime = hass.data[DOMAIN][config_entry.entry_id]
+    runtime = config_entry.runtime_data
     assert runtime.dev_id == "0123456789abcdef"
     assert len(cloud.ws_clients) == 1
     assert not cloud.ws_clients[0].task.done()
@@ -70,16 +80,28 @@ async def test_setup_entry_loads_and_forwards_platforms(
 async def test_unload_entry_stops_runtime(
     hass: HomeAssistant, cloud: FakeCloud, config_entry: MockConfigEntry
 ) -> None:
-    """Unload stops the websocket and poller and drops the runtime."""
+    """Unload removes the entities first, then stops the websocket and poller."""
     assert await _setup(hass, config_entry)
     ws_client = cloud.ws_clients[0]
+    climate_at_stop: list[str] = []
+    stop = ws_client.stop
+
+    async def _stop() -> None:
+        climate_at_stop.append(hass.states.get("climate.living_room").state)
+        await stop()
+
+    ws_client.stop = _stop
 
     assert await hass.config_entries.async_unload(config_entry.entry_id)
     await hass.async_block_till_done()
 
     assert config_entry.state is ConfigEntryState.NOT_LOADED
-    assert config_entry.entry_id not in hass.data[DOMAIN]
+    assert not hasattr(config_entry, "runtime_data")
+    with pytest.raises(LookupError):
+        require_runtime(hass, config_entry.entry_id)
     assert ws_client.stop_calls == 1
+    # B16: the platforms were already unloaded when the websocket stopped.
+    assert climate_at_stop == ["unavailable"]
     assert ws_client.task.cancelled()
     assert hass.states.get("climate.living_room").state == "unavailable"
 
@@ -88,21 +110,33 @@ async def test_unload_entry_stops_runtime(
     cloud.get_node_samples.assert_not_awaited()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="B14: services are registered per entry and never removed on the "
-    "last unload (PLAN Phase 3, setup_energy.md B14)",
-)
-async def test_unload_last_entry_removes_services(
+async def test_services_registered_once_and_refuse_without_loaded_entry(
     hass: HomeAssistant, cloud: FakeCloud, config_entry: MockConfigEntry
 ) -> None:
-    """Unloading the last entry removes the integration's services."""
+    """Services come from async_setup and fail clearly once no entry is loaded.
+
+    B14: they used to be registered per entry and lingered after unload with
+    nothing behind them. Quality-scale action-setup keeps them registered and
+    raises ServiceValidationError instead.
+    """
     assert await _setup(hass, config_entry)
+    assert set(hass.services.async_services_for_domain(DOMAIN)) >= SERVICES
 
     assert await hass.config_entries.async_unload(config_entry.entry_id)
     await hass.async_block_till_done()
 
-    assert not hass.services.has_service(DOMAIN, "import_energy_history")
+    with pytest.raises(ServiceValidationError, match="No loaded TermoWeb entry"):
+        await hass.services.async_call(
+            DOMAIN, "import_energy_history", {}, blocking=True
+        )
+    with pytest.raises(ServiceValidationError, match="No loaded TermoWeb entry"):
+        await hass.services.async_call(
+            DOMAIN,
+            "radio_survey",
+            {"entry_id": config_entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
 
 
 async def test_setup_retries_when_cloud_unreachable(
@@ -114,6 +148,53 @@ async def test_setup_retries_when_cloud_unreachable(
     assert not await _setup(hass, config_entry)
 
     assert config_entry.state is ConfigEntryState.SETUP_RETRY
+
+
+@pytest.mark.parametrize("error", [ClientError("offline"), TimeoutError()])
+async def test_setup_retries_when_nodes_unreachable(
+    hass: HomeAssistant,
+    cloud: FakeCloud,
+    config_entry: MockConfigEntry,
+    error: Exception,
+) -> None:
+    """A network error while reading the node list asks HA to retry."""
+    cloud.get_nodes.side_effect = error
+
+    assert not await _setup(hass, config_entry)
+
+    assert config_entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_setup_nodes_auth_failure_starts_reauth(
+    hass: HomeAssistant, cloud: FakeCloud, config_entry: MockConfigEntry
+) -> None:
+    """Rejected credentials while reading the node list start a reauth flow."""
+    cloud.get_nodes.side_effect = BackendAuthError("expired")
+
+    assert not await _setup(hass, config_entry)
+
+    assert config_entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def test_setup_uses_first_gateway_and_warns(
+    hass: HomeAssistant,
+    cloud: FakeCloud,
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An account with several gateways sets up the first and names the rest."""
+    cloud.list_devices.return_value = [
+        {"name": "No id"},
+        *DEVICES,
+        {"dev_id": "fedcba9876543210", "name": "Cabin"},
+        {"dev_id": "00112233445566ff"},
+    ]
+
+    assert await _setup(hass, config_entry)
+
+    assert config_entry.runtime_data.dev_id == DEV_ID
+    assert "3 gateways; only the first (Home) is set up" in caplog.text
+    assert "Ignored: Cabin, 00112233445566ff" in caplog.text
 
 
 async def test_setup_retries_when_no_devices(
@@ -157,11 +238,6 @@ async def test_setup_does_not_modify_entry_data(
     assert dict(config_entry.data) == before
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="B9: when the first state refresh fails, the hourly poller listener "
-    "and the runtime in hass.data are left behind (PLAN Phase 3, setup_energy.md B9)",
-)
 async def test_failed_first_refresh_cleans_up(
     hass: HomeAssistant, cloud: FakeCloud, config_entry: MockConfigEntry
 ) -> None:
@@ -177,7 +253,9 @@ async def test_failed_first_refresh_cleans_up(
     cloud.get_node_samples.reset_mock()
     await _fire_next_hourly_poll(hass)
     cloud.get_node_samples.assert_not_awaited()
-    assert config_entry.entry_id not in hass.data.get(DOMAIN, {})
+    with pytest.raises(LookupError):
+        require_runtime(hass, config_entry.entry_id)
+    assert config_entry.runtime_data._shutdown_complete  # noqa: SLF001
 
 
 @pytest.mark.xfail(
@@ -198,7 +276,7 @@ async def test_setup_registers_no_dangling_via_device(
     # 2026.10 the via_device deprecation notice takes that slot, so check the
     # registry link itself rather than the log.
     dev_reg = dr.async_get(hass)
-    dev_id = hass.data[DOMAIN][config_entry.entry_id].dev_id
+    dev_id = config_entry.runtime_data.dev_id
     entry_id = config_entry.entry_id
     gateway = dev_reg.async_get_device_by_identifier((DOMAIN, dev_id), entry_id)
     site = dev_reg.async_get_device_by_identifier((DOMAIN, dev_id, "site"), entry_id)

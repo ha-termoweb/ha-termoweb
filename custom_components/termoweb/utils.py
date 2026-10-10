@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import math
 from typing import Any
 
@@ -38,17 +37,10 @@ async def async_get_integration_version(hass: HomeAssistant) -> str:
 def _entry_gateway_record(
     hass: HomeAssistant | None, entry_id: str | None
 ) -> EntryRuntime | None:
-    """Return the mapping storing integration data for ``entry_id``."""
+    """Return the running runtime of ``entry_id``, or None."""
 
     if hass is None or entry_id is None:
         return None
-
-    domain_data = hass.data.get(DOMAIN) if getattr(hass, "data", None) else None
-    if isinstance(domain_data, Mapping):
-        record = domain_data.get(entry_id)
-        if isinstance(record, EntryRuntime):
-            return record
-
     try:
         return require_runtime(hass, entry_id)
     except LookupError:

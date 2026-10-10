@@ -100,7 +100,7 @@ async def _setup(hass: HomeAssistant) -> MockConfigEntry:
 
 def _set_ws(hass: HomeAssistant, entry: MockConfigEntry, *, healthy: bool) -> None:
     """Report the WebSocket as healthy (recent payload) or disconnected."""
-    coordinator = hass.data[DOMAIN][entry.entry_id].coordinator
+    coordinator = entry.runtime_data.coordinator
     now = time.time()
     coordinator.update_gateway_connection(
         status="healthy" if healthy else "disconnected",
@@ -269,7 +269,7 @@ async def test_fallback_refresh_failure_is_logged(
     """A failing fallback refresh is logged instead of crashing."""
     entry = await _setup(hass)
     _set_ws(hass, entry, healthy=False)
-    coordinator = hass.data[DOMAIN][entry.entry_id].coordinator
+    coordinator = entry.runtime_data.coordinator
 
     with patch.object(
         coordinator, "async_refresh_heater", AsyncMock(side_effect=RuntimeError("x"))

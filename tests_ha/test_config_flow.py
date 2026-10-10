@@ -340,7 +340,7 @@ async def test_reconfigure_reloads_loaded_entry(
     config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
-    runtime_before = hass.data[DOMAIN][config_entry.entry_id]
+    runtime_before = config_entry.runtime_data
     form = await config_entry.start_reconfigure_flow(hass)
 
     await hass.config_entries.flow.async_configure(
@@ -349,7 +349,7 @@ async def test_reconfigure_reloads_loaded_entry(
     await hass.async_block_till_done()
 
     assert config_entry.state is ConfigEntryState.LOADED
-    assert hass.data[DOMAIN][config_entry.entry_id] is not runtime_before
+    assert config_entry.runtime_data is not runtime_before
 
 
 async def _start_reauth(

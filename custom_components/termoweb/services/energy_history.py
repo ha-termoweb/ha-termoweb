@@ -13,7 +13,7 @@ from custom_components.termoweb.energy import (
     MAX_HISTORY_DAYS,
     async_import_energy_history,
 )
-from custom_components.termoweb.runtime import EntryRuntime
+from custom_components.termoweb.runtime import loaded_runtimes
 
 SERVICE_IMPORT_ENERGY_HISTORY = "import_energy_history"
 IMPORT_ENERGY_HISTORY_SCHEMA = vol.Schema(
@@ -36,9 +36,8 @@ async def async_register_import_energy_history_service(hass: HomeAssistant) -> N
         """Import energy history for every loaded entry whose backend supports it."""
         runtimes = [
             runtime
-            for runtime in hass.data.get(DOMAIN, {}).values()
-            if isinstance(runtime, EntryRuntime)
-            and backend_capabilities(runtime.brand).energy_history
+            for runtime in loaded_runtimes(hass)
+            if backend_capabilities(runtime.brand).energy_history
         ]
         if not runtimes:
             raise ServiceValidationError(

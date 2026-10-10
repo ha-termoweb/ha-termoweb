@@ -30,7 +30,9 @@ integration. **v2.0.2** is the clean release of this architecture.
 ## Canonical data pipeline
 
 1. **Config entry setup** takes the brand selection, authenticates, and creates a
-   single runtime container (`EntryRuntime`).
+   single runtime container (`EntryRuntime`), stored as `entry.runtime_data`.
+   Every listener and task it starts is tied to `entry.async_on_unload`, so a
+   setup that fails part-way (or an unload) leaves nothing running.
 2. **Inventory snapshot** (gateway + nodes) is retrieved once and stored in the
    runtime. Inventory never changes for the lifetime of the entry.
 3. **Update sources** (REST polling, WebSocket push) produce **domain deltas**.
@@ -55,8 +57,8 @@ clients, payload shapes, or protocol details.
 
 This map defines responsibilities for each module family in the final design.
 
-- `__init__.py` — config entry setup/teardown, runtime construction, and platform
-  forwarding.
+- `__init__.py` — service registration (`async_setup`), config entry
+  setup/teardown, runtime construction, and platform forwarding.
 - `runtime.py` — `EntryRuntime` definition, `require_runtime(...)` accessor, and
   runtime invariants (single instance per entry).
 - `inventory.py` — immutable inventory models and lookup helpers.

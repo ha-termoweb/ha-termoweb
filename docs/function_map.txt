@@ -12,6 +12,8 @@ custom_components/termoweb/__init__.py :: _create_client
     Return the cloud REST client, or the radio gateway client for radio entries.
 custom_components/termoweb/__init__.py :: _create_client._save_power
     Store the power manager's settings in the entry options.
+custom_components/termoweb/__init__.py :: async_setup
+    Register the integration's services once; they look up loaded entries.
 custom_components/termoweb/__init__.py :: async_setup_entry
     Set up the TermoWeb integration for a config entry.
 custom_components/termoweb/__init__.py :: async_setup_entry._async_handle_hass_stop
@@ -33,7 +35,7 @@ custom_components/termoweb/__init__.py :: _shutdown_runtime_callback
 custom_components/termoweb/__init__.py :: _async_shutdown_entry
     Cancel websocket tasks and listeners for an integration record.
 custom_components/termoweb/__init__.py :: async_unload_entry
-    Unload a config entry for TermoWeb.
+    Unload the platforms; the runtime shuts down afterwards via async_on_unload.
 custom_components/termoweb/__init__.py :: async_remove_entry
     Delete the entry's stored energy import progress.
 custom_components/termoweb/__init__.py :: _migrate_to_1_2
@@ -1798,8 +1800,14 @@ custom_components/termoweb/radio_rehome.py :: async_rehome
     Reset, re-pair and restore every heater on the site network; reload the entry.
 custom_components/termoweb/radio_rehome.py :: rehome_summary
     Return a plain-English summary of a finished network move.
+custom_components/termoweb/runtime.py :: _live_runtime
+    Return the entry's runtime unless the entry is missing or was shut down.
+custom_components/termoweb/runtime.py :: _domain_entries
+    Return the config entries of this integration.
 custom_components/termoweb/runtime.py :: require_runtime
-    Return the runtime container stored for ``entry_id``.
+    Return the running runtime of ``entry_id``; raise LookupError otherwise.
+custom_components/termoweb/runtime.py :: loaded_runtimes
+    Return the runtimes of every running TermoWeb entry.
 custom_components/termoweb/services/energy_history.py :: async_register_import_energy_history_service
     Register the import_energy_history service if it is missing.
 custom_components/termoweb/services/energy_history.py :: async_register_import_energy_history_service._service_import_energy_history
@@ -1841,7 +1849,7 @@ custom_components/termoweb/utils.py :: async_get_integration
 custom_components/termoweb/utils.py :: async_get_integration_version
     Return the installed integration version string.
 custom_components/termoweb/utils.py :: _entry_gateway_record
-    Return the mapping storing integration data for ``entry_id``.
+    Return the running runtime of ``entry_id``, or None.
 custom_components/termoweb/utils.py :: apply_entry_device_overrides
     Return device info with brand and version overrides.
 custom_components/termoweb/utils.py :: _set_configuration_url
@@ -2224,7 +2232,7 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.gateway_info
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_connect
     Return the shared link, opening the gateway connection if needed.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_close
-    Close the gateway connection if one is open.
+    Close the gateway connection for good; later use raises RadioLinkError.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.add_disconnect_listener
     Call ``callback`` when an established gateway connection drops.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.add_disconnect_listener._remove

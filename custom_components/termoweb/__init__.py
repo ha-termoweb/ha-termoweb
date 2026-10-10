@@ -6,6 +6,7 @@ import asyncio
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+import functools
 import inspect
 import logging
 import time
@@ -18,8 +19,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.typing import ConfigType
 
 from .backend import (
     Backend,
@@ -70,7 +73,7 @@ from .inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
-from .runtime import EntryRuntime
+from .runtime import EntryRuntime, TermoWebConfigEntry
 from .services.energy_history import async_register_import_energy_history_service
 from .services.radio_capture import async_register_radio_capture_service
 from .services.radio_pairing import async_register_radio_pairing_services
@@ -85,6 +88,25 @@ SupportsDiagnostics = getattr(config_entries_module, "SupportsDiagnostics", None
 PLATFORMS = ["button", "binary_sensor", "climate", "number", "sensor"]
 LOCK_PLATFORMS = ["lock"]
 MONITOR_PLATFORMS = ["binary_sensor", "sensor"]  # gateway online + frames heard
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+_SETUP_ERRORS = (
+    TimeoutError,
+    ClientError,
+    BackendRateLimitError,
+    RadioLinkError,
+    RadioError,
+)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the integration's services once; they look up loaded entries."""
+    await async_register_import_energy_history_service(hass)
+    await async_register_radio_survey_service(hass)
+    await async_register_radio_capture_service(hass)
+    await async_register_radio_pairing_services(hass)
+    return True
 
 
 def _platforms_for_brand(brand: str) -> list[str]:
@@ -208,7 +230,9 @@ def _create_client(hass: HomeAssistant, entry: ConfigEntry, brand: str) -> Any:
     return create_rest_client(hass, data["username"], data["password"], brand)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  # noqa: C901
+async def async_setup_entry(  # noqa: C901
+    hass: HomeAssistant, entry: TermoWebConfigEntry
+) -> bool:
     """Set up the TermoWeb integration for a config entry."""
     base_interval = int(DEFAULT_POLL_INTERVAL)
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
@@ -229,18 +253,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     version = await _async_get_integration_version(hass)
 
     client = _create_client(hass, entry, brand)
+    if brand in RADIO_BRANDS:
+        # Release the gateway or serial port if setup fails after connecting;
+        # a retry opens a new client, and the gateway serves one at a time.
+        entry.async_on_unload(client.async_close)
     backend = create_backend(brand=brand, client=client)
     try:
         devices = await async_list_devices(client)
     except BackendAuthError as err:
         raise ConfigEntryAuthFailed from err
-    except (
-        TimeoutError,
-        ClientError,
-        BackendRateLimitError,
-        RadioLinkError,
-        RadioError,
-    ) as err:
+    except _SETUP_ERRORS as err:
         raise ConfigEntryNotReady from err
 
     if not devices:
@@ -250,6 +272,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     dev: Mapping[str, typing.Any] | None = None
     dev_id = ""
     if isinstance(devices, list):
+        usable: list[tuple[str, Mapping[str, typing.Any]]] = []
         for index, candidate in enumerate(devices):
             if not isinstance(candidate, Mapping):
                 continue
@@ -260,13 +283,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
                 or ""
             ).strip()
             if candidate_id:
-                dev = candidate
-                dev_id = candidate_id
-                break
+                usable.append((candidate_id, candidate))
+                continue
             _LOGGER.debug(
                 "Skipping device entry without identifier at index %s: %s",
                 index,
                 candidate,
+            )
+        if usable:
+            dev_id, dev = usable[0]
+        if len(usable) > 1:
+            _LOGGER.warning(
+                "This account has %d gateways; only the first (%s) is set up. "
+                "Ignored: %s",
+                len(usable),
+                dev.get("name") or dev_id,
+                ", ".join(
+                    str(ignored.get("name") or ignored_id)
+                    for ignored_id, ignored in usable[1:]
+                ),
             )
     elif isinstance(devices, Mapping):
         dev = devices
@@ -297,7 +332,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
             geo_data=geo_data,
         )
 
-    nodes = await client.get_nodes(dev_id)
+    try:
+        nodes = await client.get_nodes(dev_id)
+    except BackendAuthError as err:
+        raise ConfigEntryAuthFailed from err
+    except _SETUP_ERRORS as err:
+        raise ConfigEntryNotReady from err
     node_inventory = build_node_inventory(nodes)
     # Inventory-centric design: build and freeze the gateway/node topology once
     # during setup so every runtime component can trust the shared metadata.
@@ -333,7 +373,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     await energy_coordinator.async_config_entry_first_refresh()
     entry.async_on_unload(energy_coordinator.async_start_hourly_poll())
 
-    hass.data.setdefault(DOMAIN, {})
     runtime = EntryRuntime(
         backend=backend,
         client=backend.client,
@@ -354,7 +393,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         boost_runtime={},
         boost_temperature={},
     )
-    hass.data[DOMAIN][entry.entry_id] = runtime
+    entry.runtime_data = runtime
+    # Runs on unload (after the platforms) and when setup fails from here on,
+    # so a ConfigEntryNotReady retry leaves no websocket or listener behind.
+    entry.async_on_unload(functools.partial(_async_shutdown_entry, runtime))
 
     async def _async_handle_hass_stop(_event: Any) -> None:
         """Stop background activity gracefully when Home Assistant stops."""
@@ -532,18 +574,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     await coordinator.async_config_entry_first_refresh()
 
     # Always-on push: start the websocket client for this device
-    hass.async_create_task(_start_ws(dev_id))
+    entry.async_create_background_task(
+        hass, _start_ws(dev_id), f"{DOMAIN}-start-ws-{entry.entry_id}"
+    )
 
     platforms = _platforms_for_brand(brand)
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
-
-    await async_register_import_energy_history_service(hass)
-
-    if brand in RADIO_BRANDS:
-        await async_register_radio_survey_service(hass)
-        await async_register_radio_capture_service(hass)
-    if brand == BRAND_RADIO:
-        await async_register_radio_pairing_services(hass)
 
     _LOGGER.info("TermoWeb setup complete (v%s)", version)
     return True
@@ -649,23 +685,12 @@ async def _async_shutdown_entry(runtime: EntryRuntime) -> None:
     )
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry for TermoWeb."""
-    domain_data = hass.data.get(DOMAIN)
-    rec = domain_data.get(entry.entry_id) if domain_data else None
-    if not rec:
-        return True
-
-    await _async_shutdown_entry(rec)
-
+async def async_unload_entry(hass: HomeAssistant, entry: TermoWebConfigEntry) -> bool:
+    """Unload the platforms; the runtime shuts down afterwards via async_on_unload."""
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
-    platforms = _platforms_for_brand(brand)
-    ok = await hass.config_entries.async_unload_platforms(entry, platforms)
-
-    if ok and domain_data:
-        domain_data.pop(entry.entry_id, None)
-
-    return ok
+    return await hass.config_entries.async_unload_platforms(
+        entry, _platforms_for_brand(brand)
+    )
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

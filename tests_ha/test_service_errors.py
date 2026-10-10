@@ -274,12 +274,13 @@ async def test_write_without_backend_raises(
     """A write while the entry's runtime is gone raises instead of passing."""
     await _setup(hass, config_entry)
     heater = _entity(hass, HTR)
-    runtime = hass.data[DOMAIN].pop(config_entry.entry_id)
+    runtime = config_entry.runtime_data
+    runtime._shutdown_complete = True  # noqa: SLF001 - the runtime is gone
     try:
         with pytest.raises(HomeAssistantError, match="backend unavailable"):
             await heater.async_set_schedule([0] * 168)
     finally:
-        hass.data[DOMAIN][config_entry.entry_id] = runtime
+        runtime._shutdown_complete = False  # noqa: SLF001
 
 
 async def test_invalid_modes_and_temperatures_raise(

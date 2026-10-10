@@ -431,6 +431,7 @@ class TestHeaterPriorityNumber:
 
         runtime = EntryRuntime.__new__(EntryRuntime)
         runtime.backend = mock_backend
+        runtime._shutdown_complete = False
 
         from custom_components.termoweb.const import DOMAIN
 
