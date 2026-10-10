@@ -29,6 +29,13 @@ from .backend.radio.discovery import (
     survey_network,
 )
 from .backend.radio.link import DEFAULT_PORT as RADIO_DEFAULT_PORT
+from .backend.radio.pairing import (
+    IDLE_STOP_S,
+    PAIR_WINDOW_S,
+    PAIRING_DIALECTS,
+    PairingError,
+    pair_new_network,
+)
 from .backend.radio.serial_link import serial_device_id, serial_opener
 from .backend.radio.survey import RawBurst, SurveyReport, analyse
 from .backend.radio_client import dev_id_from_mac
@@ -57,7 +64,9 @@ from .const import (
     RADIO_TYPE_NANOCUL,
     get_brand_label,
 )
+from .radio_pairing import add_nodes, async_site_network_id, radio_node
 from .radio_survey import ISSUE_URL, async_analyse, async_save_report, report_payload
+from .runtime import require_runtime
 from .utils import async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
@@ -103,6 +112,8 @@ MANUAL_DEVICE = "manual"  # nanoCUL port choice: type a path or URL instead
 SERIAL_BY_ID_DIR = "/dev/serial/by-id"
 NANOCUL_LABEL = "nanoCUL"
 _CAPABLE = "dialect_capable"  # flow state: firmware switches dialects at runtime
+_GATEWAY_ID = "gateway_id"  # flow state: the gateway's dev_id, seeds the network id
+_PAIRING = "pairing"  # flow state: the user chose to pair new heaters
 
 
 @dataclass(frozen=True)
@@ -392,6 +403,31 @@ async def discover_radio(
     return sighting, heaters
 
 
+async def pair_radio(
+    host: str,
+    port: int,
+    dialect: str,
+    network_id: bytes,
+    *,
+    link_factory: Any = RadioLink,
+    dialect_capable: bool = True,
+) -> tuple[NetworkSighting, dict[int, Any]]:
+    """Pair new heaters into ``network_id``; return them like discover_radio does."""
+    if dialect != DIALECT_AUTO:
+        dialects: tuple[Any, ...] = (DIALECTS[dialect],)
+    elif dialect_capable:
+        dialects = PAIRING_DIALECTS
+    else:
+        dialects = (DIALECT_A,)  # stock nanoCUL firmware: dialect A only
+    paired_dialect, paired = await pair_new_network(
+        host, port, network_id, dialects=dialects, link_factory=link_factory
+    )
+    if paired_dialect is None or not paired:
+        raise RadioSetupError("no_heaters_paired")
+    heaters = {heater.node_id: heater for heater in paired}
+    return NetworkSighting(paired_dialect, network_id, frozenset(heaters)), heaters
+
+
 def radio_entry_data(
     radio: Mapping[str, Any], sighting: NetworkSighting, heaters: dict[int, Any]
 ) -> dict[str, Any]:
@@ -413,10 +449,7 @@ def radio_entry_data(
         **connection,
         CONF_DIALECT: sighting.dialect.name,
         CONF_NETWORK_ID: sighting.network_id.hex().upper(),
-        CONF_NODES: [
-            {"type": "htr", "addr": str(addr), "name": f"Heater {addr}"}
-            for addr in sorted(heaters)
-        ],
+        CONF_NODES: [radio_node(addr) for addr in sorted(heaters)],
         "supports_diagnostics": True,
     }
 
@@ -580,7 +613,59 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(f"{BRAND_RADIO}:{dev_id}")
         self._abort_if_unique_id_configured()
         self._radio["network_bytes"] = network_id
-        return await self.async_step_radio_discover()
+        self._radio[_GATEWAY_ID] = dev_id
+        return await self.async_step_radio_method()
+
+    async def async_step_radio_method(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Offer to find heaters that are already paired, or to pair new ones."""
+        return self.async_show_menu(
+            step_id="radio_method", menu_options=["radio_discover", "radio_pair"]
+        )
+
+    async def async_step_radio_pair(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Explain pairing mode; start pairing when the user submits."""
+        if user_input is None:
+            return self.async_show_form(
+                step_id="radio_pair", data_schema=vol.Schema({})
+            )
+        self._radio[_PAIRING] = True
+        return await self.async_step_radio_pair_run()
+
+    async def async_step_radio_pair_run(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Pair heaters into the site network while showing progress."""
+        if self._radio_task is None:
+            self._radio_result = None
+            self._radio_error = None
+            self._radio_placeholders = {}
+            network_id = self._radio.get("network_bytes")
+            if network_id is None:
+                network_id = await async_site_network_id(
+                    self.hass, str(self._radio.get(_GATEWAY_ID))
+                )
+            host, port = radio_address(self._radio)
+            self._radio_task = self.hass.async_create_task(
+                pair_radio(
+                    host,
+                    port,
+                    self._radio.get(CONF_DIALECT, DIALECT_AUTO),
+                    network_id,
+                    link_factory=radio_link_factory(self._radio),
+                    dialect_capable=self._radio.get(_CAPABLE, True),
+                )
+            )
+        if not self._radio_task.done():
+            return self.async_show_progress(
+                step_id="radio_pair_run",
+                progress_action="radio_pair",
+                progress_task=self._radio_task,
+            )
+        return await self._radio_task_done()
 
     async def async_step_radio_discover(
         self, user_input: dict[str, Any] | None = None
@@ -608,7 +693,12 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 progress_action="radio_discover",
                 progress_task=self._radio_task,
             )
+        return await self._radio_task_done()
+
+    async def _radio_task_done(self) -> FlowResult:
+        """Collect the finished discovery or pairing task and move to radio_finish."""
         task, self._radio_task = self._radio_task, None
+        assert task is not None  # only called once the task finished
         try:
             sighting, heaters = task.result()
         except UnknownDialectError as err:
@@ -619,7 +709,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except RadioLinkError:
             self._radio_error = self._connect_error()
         except Exception:
-            _LOGGER.exception("Unexpected error during radio discovery")
+            _LOGGER.exception("Unexpected error during radio setup")
             self._radio_error = "unknown"
         else:
             self._radio_result = radio_entry_data(self._radio, sighting, heaters)
@@ -676,6 +766,8 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def _radio_form(self) -> tuple[str, vol.Schema]:
         """Return the step id and schema to show again after a failed discovery."""
+        if self._radio.get(_PAIRING):
+            return "radio_pair", vol.Schema({})
         if self._reconfigure_entry() is not None:
             if self._nanocul_flow():
                 return "reconfigure_nanocul", _reconfigure_nanocul_schema(self._radio)
@@ -760,9 +852,10 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "network_bytes": network_id,
                 CONF_RADIO_DEVICE_ID: dev_id,
                 _CAPABLE: capable,
+                _GATEWAY_ID: dev_id,
             }
         )
-        return await self.async_step_radio_discover()
+        return await self.async_step_radio_method()
 
     async def async_step_reconfigure_nanocul(
         self, user_input: dict[str, Any] | None = None
@@ -899,17 +992,36 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class TermoWebOptionsFlow(config_entries.OptionsFlow):
-    """Options flow to toggle debug logging."""
+    """Options flow: debug and heater power; radio entries can also pair heaters."""
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Store the entry being configured."""
         self.entry = entry
+        self._pair_task: asyncio.Task[Any] | None = None
+        self._pair_error: str | None = None
+        self._paired: list[int] = []
+
+    def _is_radio(self) -> bool:
+        """Return True for a radio gateway or nanoCUL entry."""
+        return self.entry.data.get(CONF_BRAND) == BRAND_RADIO
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
+        """Radio entries choose settings or pairing; others go to the settings form."""
+        if self._is_radio() and user_input is None:
+            return self.async_show_menu(
+                step_id="init", menu_options=["settings", "pair_heaters"]
+            )
+        return await self._settings_step("init", user_input)
+
+    async def async_step_settings(self, user_input: dict[str, Any] | None = None):
+        """Show or save the settings form of a radio entry."""
+        return await self._settings_step("settings", user_input)
+
+    async def _settings_step(self, step_id: str, user_input: dict[str, Any] | None):
         """Show or process the options form: debug, plus heater power for radio."""
         radio_addrs = (
             [str(node.get("addr")) for node in self.entry.data.get(CONF_NODES, [])]
-            if self.entry.data.get(CONF_BRAND) == BRAND_RADIO
+            if self._is_radio()
             else []
         )
         power = dict(self.entry.options.get(CONF_RADIO_POWER) or {})
@@ -945,7 +1057,57 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
             else ""
         )
         return self.async_show_form(
-            step_id="init",
+            step_id=step_id,
             data_schema=vol.Schema(fields),
             description_placeholders={"version": ver, "heaters": heaters},
         )
+
+    async def async_step_pair_heaters(self, user_input: dict[str, Any] | None = None):
+        """Explain pairing mode; start pairing into this entry's network on submit."""
+        if user_input is None:
+            errors = {"base": self._pair_error} if self._pair_error else {}
+            return self.async_show_form(
+                step_id="pair_heaters", data_schema=vol.Schema({}), errors=errors
+            )
+        return await self.async_step_pair_run()
+
+    async def async_step_pair_run(self, user_input: dict[str, Any] | None = None):
+        """Pair heaters with the running gateway connection while showing progress."""
+        if self._pair_task is None:
+            try:
+                client = require_runtime(self.hass, self.entry.entry_id).client
+            except LookupError:
+                return self.async_abort(reason="not_loaded")
+            self._pair_task = self.hass.async_create_task(
+                client.async_pair(PAIR_WINDOW_S, idle_stop_s=IDLE_STOP_S)
+            )
+        if not self._pair_task.done():
+            return self.async_show_progress(
+                step_id="pair_run",
+                progress_action="pair_heaters",
+                progress_task=self._pair_task,
+            )
+        task, self._pair_task = self._pair_task, None
+        self._pair_error = None
+        try:
+            paired = task.result()
+        except PairingError as err:
+            paired = err.paired
+            if not paired:
+                self._pair_error = "no_free_address"
+        except RadioLinkError:
+            paired, self._pair_error = [], "cannot_connect_radio"
+        except Exception:
+            _LOGGER.exception("Unexpected error while pairing radio heaters")
+            paired, self._pair_error = [], "unknown"
+        self._paired = [heater.node_id for heater in paired]
+        if not self._paired and self._pair_error is None:
+            self._pair_error = "no_heaters_paired"
+        return self.async_show_progress_done(next_step_id="pair_done")
+
+    async def async_step_pair_done(self, user_input: dict[str, Any] | None = None):
+        """Add the paired heaters and reload, or show the pairing form with the error."""
+        if not self._paired:
+            return await self.async_step_pair_heaters()
+        add_nodes(self.hass, self.entry, self._paired)
+        return self.async_create_entry(title="", data=dict(self.entry.options))

@@ -42,9 +42,15 @@ repository.
 3. Choose your stick in the **USB port** list. If it is not in the list,
    choose **Enter the port path or URL myself** and type the path, for
    example `/dev/serial/by-id/usb-...`.
-4. Leave **Radio dialect** on **auto** and **Network id** empty.
-5. Turn one heater's temperature up, so that it starts heating, then press
-   **Submit** and wait. This takes up to 6 minutes.
+4. Leave **Radio dialect** on **auto** and **Network id** empty, and press
+   **Submit**.
+5. Choose one:
+   - **Find heaters that are already paired**: turn one heater's
+     temperature up, so that it starts heating, and wait. This takes up to
+     6 minutes.
+   - **Pair new heaters**: press **Submit**, then put one heater at a time
+     into pairing mode (see the heater's manual). Wait about 10 seconds
+     between heaters. You have 5 minutes.
 6. When it finishes, your heaters appear under **Devices**.
 
 If you see "Cannot open the nanoCUL stick": check the cable, the port and the

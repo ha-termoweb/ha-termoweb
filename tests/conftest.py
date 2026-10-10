@@ -898,6 +898,13 @@ def _install_stubs() -> None:
     entity_registry_mod = sys.modules.get(
         "homeassistant.helpers.entity_registry"
     ) or types.ModuleType("homeassistant.helpers.entity_registry")
+    instance_id_mod = types.ModuleType("homeassistant.helpers.instance_id")
+
+    async def _async_get_instance_id(_hass: Any) -> str:
+        return "test-instance-id"
+
+    instance_id_mod.async_get = _async_get_instance_id  # type: ignore[attr-defined]
+    helpers_mod.instance_id = instance_id_mod
     dispatcher_mod = sys.modules.get(
         "homeassistant.helpers.dispatcher"
     ) or types.ModuleType("homeassistant.helpers.dispatcher")
@@ -1074,6 +1081,7 @@ def _install_stubs() -> None:
     sys.modules["homeassistant.helpers"] = helpers_mod
     sys.modules["homeassistant.helpers.frame"] = frame_mod
     sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client_mod
+    sys.modules["homeassistant.helpers.instance_id"] = instance_id_mod
     sys.modules["homeassistant.data_entry_flow"] = data_entry_flow_mod
     sys.modules["homeassistant.helpers.entity"] = entity_mod
     sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
@@ -1493,6 +1501,11 @@ def _install_stubs() -> None:
             return FlowResult({"type": "progress_done", "step_id": next_step_id})
 
     class OptionsFlow:
+        async_show_menu = ConfigFlow.async_show_menu
+        async_show_progress = ConfigFlow.async_show_progress
+        async_show_progress_done = ConfigFlow.async_show_progress_done
+        async_abort = ConfigFlow.async_abort
+
         def async_show_form(
             self,
             *,

@@ -86,7 +86,10 @@ def stick(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 async def _finish(flow: config_flow.TermoWebConfigFlow, first: Any) -> Any:
-    """Drive the progress step to completion and return the finish result."""
+    """Choose discovery, drive the progress step and return the finish result."""
+    if first["type"] == "menu":
+        assert first["step_id"] == "radio_method"
+        first = await flow.async_step_radio_discover()
     assert first["type"] == "progress"
     await asyncio.wait([first["progress_task"]])
     assert (await flow.async_step_radio_discover())["type"] == "progress_done"
