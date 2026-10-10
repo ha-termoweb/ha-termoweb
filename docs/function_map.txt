@@ -24,8 +24,6 @@ custom_components/termoweb/__init__.py :: async_setup_entry._on_ws_status
     Recalculate polling intervals when websocket state changes.
 custom_components/termoweb/__init__.py :: _collect_shutdown_targets
     Return shutdown targets or ``None`` if shutdown already ran.
-custom_components/termoweb/__init__.py :: _shutdown_hourly_poller
-    Stop the hourly poller when it exposes async_shutdown.
 custom_components/termoweb/__init__.py :: _shutdown_ws_tasks
     Cancel and await websocket tasks.
 custom_components/termoweb/__init__.py :: _shutdown_ws_clients
@@ -934,6 +932,8 @@ custom_components/termoweb/coordinator.py :: StateCoordinator.async_refresh_heat
     Refresh settings for a specific node and push the update to listeners.
 custom_components/termoweb/coordinator.py :: StateCoordinator._async_update_data
     Fetch the latest settings for every known node on each poll.
+custom_components/termoweb/coordinator.py :: StateCoordinator.resume_polling
+    Resume REST polling at ``base_interval`` or the rate-limit backoff.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.__init__
     Initialize the heater energy coordinator.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._publish_to_state_store
@@ -951,11 +951,15 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._prefill_ene
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._build_snapshot
     Return an :class:`EnergySnapshot` built from metric buckets.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._poll_recent_samples
-    Fetch recent energy samples for every tracked node.
+    Fetch recent energy samples for every tracked node; stop on a 429.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._process_energy_sample
     Update cached energy and derived power for ``addr``.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._async_update_data
     Fetch recent heater energy samples and derive totals and power.
+custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.async_start_hourly_poll
+    Schedule the HH:05 REST sample poll; return its unsubscribe callback.
+custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._async_hourly_poll
+    Poll REST samples for the past hour unless backing off after a 429.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._should_skip_poll
     Return True when websocket pushes keep energy data fresh.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._ws_margin_seconds
@@ -964,8 +968,6 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._extract_sam
     Extract ``(timestamp, counter)`` from websocket sample payloads.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.handle_ws_samples
     Update cached heater metrics from websocket ``samples`` payloads.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.merge_samples_for_window
-    Merge normalised hourly samples into the cached energy state.
 custom_components/termoweb/coordinator.py :: _wrap_logger
     Return a logger proxy that exposes ``isEnabledFor`` when missing.
 custom_components/termoweb/diagnostics.py :: _extract_websocket_clients
@@ -1602,18 +1604,6 @@ custom_components/termoweb/entities/switch.py :: _iter_lockable_inventory_nodes
     Yield htr and acm node metadata from ``inventory``.
 custom_components/termoweb/entities/switch.py :: _build_settings_resolver
     Return callable resolving the domain state for a node.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.__init__
-    Initialise the poller with Home Assistant context and dependencies.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.async_setup
-    Register the HH:05 local trigger and perform optional catch-up.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.async_shutdown
-    Cancel scheduled triggers and pending polling tasks.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._on_time
-    Callback invoked by Home Assistant's time tracker in a thread-safe way.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._run_for_previous_hour
-    Fetch and merge samples for the hour preceding ``now_local``.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._poll_device
-    Fetch samples for ``dev_id`` and merge them into the coordinator.
 custom_components/termoweb/identifiers.py :: build_heater_unique_id
     Return the canonical unique ID for a heater node.
 custom_components/termoweb/identifiers.py :: build_heater_energy_unique_id

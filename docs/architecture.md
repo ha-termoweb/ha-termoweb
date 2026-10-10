@@ -173,6 +173,11 @@ See `radio_protocol.md` section 10.
   installation total energy is unknown unless every heater/accumulator reports
   a value, so a missing node never shows up as a drop in a `TOTAL_INCREASING`
   meter.
+- Energy samples have one REST pipeline: `EnergyStateCoordinator` fetches the
+  past hour for each node once at setup and then at HH:05 local time. The
+  poll is skipped while WebSocket samples are fresh (lease plus margin), and
+  WS samples never make REST polling more frequent. A 429 stops the per-node
+  loop and skips the next 1, 2, 4… (max 8) hourly polls.
 
 ## Temperature units
 

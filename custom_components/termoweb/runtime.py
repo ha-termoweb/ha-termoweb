@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from .backend import Backend, WsClientProto
     from .backend.base import HttpClientProto
     from .coordinator import EnergyStateCoordinator, StateCoordinator
-    from .hourly_poller import HourlySamplesPoller
 
 
 @dataclass(slots=True)
@@ -30,7 +29,6 @@ class EntryRuntime:
     energy_coordinator: EnergyStateCoordinator
     dev_id: str
     inventory: Inventory
-    hourly_poller: HourlySamplesPoller
     config_entry: ConfigEntry
     base_poll_interval: int
     poll_suspended: bool = False

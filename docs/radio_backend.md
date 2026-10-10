@@ -158,7 +158,7 @@ radio gateway". Every caller of these methods already catches `Exception`
 (entity writes, button press) or is gated by a capability flag.
 
 `RadioBackend.fetch_hourly_samples` returns `{}`: there is no energy history
-to import, so the hourly poller stores nothing.
+to import.
 
 ## Push traffic (RadioListener)
 

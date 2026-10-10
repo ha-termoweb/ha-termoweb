@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import timedelta
 from typing import Final
 
 # Domain
@@ -167,5 +166,3 @@ def signal_radio_frames(entry_id: str) -> str:
 # Polling
 DEFAULT_POLL_INTERVAL: Final = 1800  # seconds (30 minutes)
 MIN_POLL_INTERVAL: Final = 30  # seconds
-# Heater energy polling interval when relying on push updates
-HTR_ENERGY_UPDATE_INTERVAL: Final = timedelta(hours=1)

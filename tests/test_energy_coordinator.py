@@ -19,7 +19,6 @@ from custom_components.termoweb.backend.rest_client import (
     BackendAuthError,
     BackendRateLimitError,
 )
-from custom_components.termoweb.const import HTR_ENERGY_UPDATE_INTERVAL
 from custom_components.termoweb.domain import state_to_dict
 from custom_components.termoweb.domain.energy import (
     EnergyNodeMetrics,
@@ -1075,45 +1074,6 @@ def test_energy_processing_consistent_between_poll_and_ws(
     asyncio.run(_run())
 
 
-def test_merge_samples_for_window_updates_energy(
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-) -> None:
-    """Normalised hourly samples should merge into coordinator caches."""
-
-    async def _run() -> None:
-        hass = HomeAssistant()
-        client = types.SimpleNamespace()
-        client.get_node_samples = AsyncMock(return_value=[])
-        inventory = inventory_from_map({"htr": ["A"], "pmo": ["M"]})
-        coord = EnergyStateCoordinator(hass, client, "dev", inventory)
-        await coord.async_refresh()
-
-        start = datetime(2023, 3, 27, 7, 0, tzinfo=UTC)
-        await coord.merge_samples_for_window(
-            "dev",
-            {
-                ("htr", "A"): [
-                    {"ts": start, "energy_wh": 1_200.0},
-                    {"ts": start + timedelta(hours=1), "energy_wh": 2_400.0},
-                ],
-                ("pmo", "M"): [
-                    {"ts": start + timedelta(minutes=30), "energy_wh": 500.0},
-                ],
-            },
-        )
-
-        assert _energy_metric(coord, "htr", "A") == pytest.approx(2.4)
-        assert _power_metric(coord, "htr", "A") == pytest.approx(1_200.0)
-        assert _energy_metric(coord, "pmo", "M") == pytest.approx(0.5)
-        last_point = coord._last[("htr", "A")]
-        assert last_point[0] == pytest.approx((start + timedelta(hours=1)).timestamp())
-        assert last_point[1] == pytest.approx(2.4)
-
-    asyncio.run(_run())
-
-
 def _ws_coordinator(
     monkeypatch: pytest.MonkeyPatch,
     inventory_from_map: Callable[
@@ -1133,26 +1093,24 @@ def _ws_coordinator(
     return coord
 
 
-def test_merge_samples_older_than_ws_do_not_rewind_energy(
+def test_rest_samples_older_than_ws_do_not_rewind_energy(
     monkeypatch: pytest.MonkeyPatch,
     inventory_from_map: Callable[
         [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
     ],
 ) -> None:
-    """Hourly history older than the latest WS sample must not rewind energy."""
+    """Hourly REST samples older than the latest WS sample must not rewind energy."""
 
     async def _run() -> None:
         coord = _ws_coordinator(monkeypatch, inventory_from_map)
-
-        await coord.merge_samples_for_window(
-            "dev",
-            {
-                ("htr", "A"): [
-                    {"timestamp": 3_600.0, "energy_wh": 9_000.0},
-                    {"timestamp": 7_200.0, "energy_wh": 9_800.0},
-                ]
-            },
+        coord.client.get_node_samples = AsyncMock(
+            return_value=[
+                {"t": 3_600.0, "counter": 9_000.0},
+                {"t": 7_200.0, "counter": 9_800.0},
+            ]
         )
+
+        await coord.async_refresh()
 
         assert _energy_metric(coord, "htr", "A") == pytest.approx(10.5)
         assert _power_metric(coord, "htr", "A") == pytest.approx(3_000.0)
@@ -1202,10 +1160,11 @@ def test_handle_ws_samples_newer_lower_counter_is_reset(
         assert _energy_metric(coord, "htr", "A") == pytest.approx(0.2)
         assert _power_metric(coord, "htr", "A") is None
 
-        # History newer than the reset point keeps advancing from it.
-        await coord.merge_samples_for_window(
-            "dev", {("htr", "A"): [{"timestamp": 11_200.0, "energy_wh": 300.0}]}
+        # A REST sample newer than the reset point keeps advancing from it.
+        coord.client.get_node_samples = AsyncMock(
+            return_value=[{"t": 11_200.0, "counter": 300}]
         )
+        await coord.async_refresh()
         assert _energy_metric(coord, "htr", "A") == pytest.approx(0.3)
         assert _power_metric(coord, "htr", "A") == pytest.approx(600.0)
 
@@ -1322,7 +1281,8 @@ def test_ws_samples_update_defers_polling(
         last_t, last_kwh = coord._last[("htr", "A")]
         assert last_t == pytest.approx(3600.0)
         assert last_kwh == pytest.approx(2.0)
-        assert coord.update_interval == timedelta(seconds=375)
+        # WS samples never schedule extra REST polls (core B2).
+        assert coord.update_interval is None
 
         fake_time = 3800.0
         await coord.async_refresh()
@@ -1331,7 +1291,7 @@ def test_ws_samples_update_defers_polling(
         fake_time = 3976.0
         await coord.async_refresh()
         assert client.get_node_samples.await_count == 1
-        assert coord.update_interval == HTR_ENERGY_UPDATE_INTERVAL
+        assert coord.update_interval is None
 
     asyncio.run(_run())
 
@@ -2052,7 +2012,7 @@ def test_handle_ws_samples_wrong_dev_id(
 
     coord.async_set_updated_data.assert_not_called()
     assert coord.data is initial
-    assert coord.update_interval == HTR_ENERGY_UPDATE_INTERVAL
+    assert coord.update_interval is None
 
 
 @pytest.mark.parametrize(
@@ -2101,148 +2061,3 @@ def test_handle_ws_samples_with_existing_snapshot(
     assert snapshot is not None
     metrics = snapshot.metrics_for_type("htr")
     assert "A" in metrics
-
-
-# ---------------------------------------------------------------------------
-# merge_samples_for_window edge cases (lines 1740-1820)
-# ---------------------------------------------------------------------------
-
-
-def test_merge_samples_wrong_dev_id(
-    monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-) -> None:
-    """merge_samples_for_window should ignore samples for another gateway."""
-
-    coord = _energy_coordinator(inventory_from_map)
-    initial = coord.data
-    coord.async_set_updated_data = MagicMock()
-    monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
-
-    asyncio.run(
-        coord.merge_samples_for_window(
-            "other", {("htr", "A"): [{"timestamp": 100.0, "energy_wh": 1000.0}]}
-        )
-    )
-
-    coord.async_set_updated_data.assert_not_called()
-    assert coord.data is initial
-
-
-@pytest.mark.parametrize(
-    "samples",
-    [
-        pytest.param(
-            {"bad": [{"timestamp": 100.0, "energy_wh": 1000.0}]}, id="bad_descriptor"
-        ),
-        pytest.param(
-            {("", "A"): [{"timestamp": 100.0, "energy_wh": 1000.0}]}, id="empty_type"
-        ),
-        pytest.param(
-            {("htr", "Z"): [{"timestamp": 100.0, "energy_wh": 1000.0}]},
-            id="untracked_addr",
-        ),
-        pytest.param({("htr", "A"): ["not-a-mapping"]}, id="non_mapping_record"),
-        pytest.param({("htr", "A"): [{"timestamp": 100.0}]}, id="no_energy_wh"),
-        pytest.param({("htr", "A"): [{"energy_wh": 1000.0}]}, id="no_timestamp"),
-        pytest.param(
-            {("htr", "A"): [{"energy_wh": None, "timestamp": 100.0}]},
-            id="null_energy_wh",
-        ),
-    ],
-)
-def test_merge_samples_skips_invalid_samples(
-    monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-    samples: dict[Any, Any],
-) -> None:
-    """merge_samples_for_window should record no energy from unusable samples."""
-
-    coord = _energy_coordinator(inventory_from_map)
-    monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
-
-    asyncio.run(coord.merge_samples_for_window("dev", samples))
-
-    assert coerce_snapshot(coord.data) is not None
-    assert _recorded_energy(coord.data) == {}
-
-
-def test_merge_samples_records_valid_sample(
-    monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-) -> None:
-    """A valid sample for a tracked node is recorded (control for the skips)."""
-
-    coord = _energy_coordinator(inventory_from_map)
-    monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
-
-    asyncio.run(
-        coord.merge_samples_for_window(
-            "dev", {("htr", "A"): [{"timestamp": 100.0, "energy_wh": 1000.0}]}
-        )
-    )
-
-    assert _recorded_energy(coord.data) == {("htr", "A"): pytest.approx(1.0)}
-
-
-def test_merge_samples_with_existing_snapshot(
-    monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-) -> None:
-    """merge_samples_for_window should incorporate existing snapshot."""
-
-    async def _run() -> None:
-        hass = HomeAssistant()
-        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
-        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
-        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
-        coord.handle_ws_samples("dev", {"htr": {"A": {"t": 50, "counter": 500}}})
-
-        samples = {
-            ("htr", "A"): [
-                {"timestamp": 100.0, "energy_wh": 1000.0},
-                {"timestamp": 200.0, "energy_wh": 2000.0},
-            ]
-        }
-        await coord.merge_samples_for_window("dev", samples)
-
-        snapshot = coerce_snapshot(coord.data)
-        assert snapshot is not None
-
-    asyncio.run(_run())
-
-
-def test_merge_samples_datetime_ts(
-    monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-) -> None:
-    """merge_samples_for_window should convert datetime ts values."""
-
-    async def _run() -> None:
-        hass = HomeAssistant()
-        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
-        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
-        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
-
-        ts_dt = datetime(2024, 1, 1, 0, 0, tzinfo=UTC)
-        samples = {
-            ("htr", "A"): [
-                {"ts": ts_dt, "energy_wh": 1000.0},
-                {"ts": datetime(2024, 1, 1, 1, 0, tzinfo=UTC), "energy_wh": 2000.0},
-            ]
-        }
-        await coord.merge_samples_for_window("dev", samples)
-        snapshot = coerce_snapshot(coord.data)
-        assert snapshot is not None
-
-    asyncio.run(_run())

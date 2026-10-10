@@ -102,7 +102,6 @@ def build_entry_runtime(
     energy_coordinator: Any | None = None,
     client: Any | None = None,
     backend: Any | None = None,
-    hourly_poller: Any | None = None,
     config_entry: Any | None = None,
     brand: str = "termoweb",
     version: str = "0.0.0",
@@ -148,9 +147,6 @@ def build_entry_runtime(
             set_acm_boost_state=AsyncMock(),
         )
 
-    if hourly_poller is None:
-        hourly_poller = SimpleNamespace(async_shutdown=AsyncMock())
-
     if config_entry is None:
         config_entry = SimpleNamespace(entry_id=entry_id, data={}, options={})
 
@@ -161,7 +157,6 @@ def build_entry_runtime(
         energy_coordinator=energy_coordinator,
         dev_id=dev_id,
         inventory=inventory_obj,
-        hourly_poller=hourly_poller,
         config_entry=config_entry,
         base_poll_interval=base_poll_interval,
         version=version,
@@ -2350,6 +2345,9 @@ class FakeCoordinator:
         self.async_refresh_heater = AsyncMock()
         self.pending_settings: dict[tuple[str, str], dict[str, Any]] = {}
         type(self).instances.append(self)
+
+    def resume_polling(self, base_interval: int) -> None:
+        self.update_interval = dt.timedelta(seconds=base_interval)
 
     def update_gateway_connection(
         self,
