@@ -1866,6 +1866,8 @@ custom_components/termoweb/services/radio_pairing.py :: _radio_runtime
     Return the loaded radio entry's runtime and client, or raise for the user.
 custom_components/termoweb/services/radio_pairing.py :: _require_node
     Raise unless heater ``addr`` is one of the entry's stored nodes.
+custom_components/termoweb/services/radio_pairing.py :: _with_manual_target
+    Add the last manual target the client saw when the mode was not manual.
 custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services
     Register the radio_factory_reset and radio_pair services once.
 custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services._async_factory_reset
@@ -2267,6 +2269,8 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.async_factory_
     Factory-reset a heater (dialect B ``C8 01 D0``): settings and pairing are wiped.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_restore
     Give a freshly paired heater its clock, then presets, mode and program back.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.manual_setpoint
+    Return the heater's last manual target seen or written, if any.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._forget
     Drop what this client remembers about a heater's program and lock.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._exchange
