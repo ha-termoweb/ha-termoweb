@@ -74,6 +74,10 @@ This map defines responsibilities for each module family in the final design.
   unknown types); `NodeType(value)` is the strict, raising form.
 - `backend/` — vendor-specific REST/WS clients (including the REST client
   implementation), protocol details, and brand selection.
+  `backend/ducaheat_engineio.py` holds the pure Engine.IO v3 polling framing
+  and Socket.IO event encode/decode; `backend/ducaheat_ws.py` holds the
+  stateful Ducaheat client (handshake, read loop, subscriptions, health and
+  idle recovery).
 - `coerce.py` — the only lenient value coercers (`as_float`, `as_number`,
   `as_int`, `as_bool`, `as_percentage`); each returns `None` instead of raising
   and has one documented semantics (see the module docstring).
