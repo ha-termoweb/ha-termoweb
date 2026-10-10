@@ -948,6 +948,8 @@ custom_components/termoweb/const.py :: get_brand_basic_auth
     Return Base64-encoded client credentials for the brand.
 custom_components/termoweb/const.py :: get_brand_label
     Return human-readable brand label.
+custom_components/termoweb/const.py :: brand_has_site_device
+    Return False for listen-only radio entries: they have no site device.
 custom_components/termoweb/const.py :: get_brand_configuration_url
     Return the web portal URL for a cloud brand; None for the local radio.
 custom_components/termoweb/const.py :: get_brand_user_agent
