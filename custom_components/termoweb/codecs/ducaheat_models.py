@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from custom_components.termoweb.boost import validate_boost_minutes
 from custom_components.termoweb.codecs.common import format_temperature, validate_units
@@ -84,50 +84,6 @@ class ModeWritePayload(DucaheatModel):
         return validate_boost_minutes(value)
 
 
-class ExtraOptionsPayload(DucaheatModel):
-    """Setup payload used for extra options such as default boost settings."""
-
-    boost_time: int | None = None
-    boost_temp: str | None = None
-
-    @field_validator("boost_time")
-    @classmethod
-    def _validate_boost_time(cls, value: int | None) -> int | None:
-        """Validate boost duration values."""
-
-        return validate_boost_minutes(value)
-
-    @field_validator("boost_temp", mode="before")
-    @classmethod
-    def _format_boost_temp(cls, value: Any) -> str | None:
-        """Format boost temperature strings."""
-
-        if value is None:
-            return None
-        return format_temperature(value)
-
-
-class SetupPayload(DucaheatModel):
-    """Wrapper payload for setup writes."""
-
-    extra_options: ExtraOptionsPayload | None = None
-
-    @model_validator(mode="after")
-    def _require_options(self) -> SetupPayload:
-        """Ensure at least one setup field is provided."""
-
-        if self.extra_options is None:
-            msg = "extra_options must be provided for setup writes"
-            raise ValueError(msg)
-        if (
-            self.extra_options.boost_time is None
-            and self.extra_options.boost_temp is None
-        ):
-            msg = "extra_options must include boost_time or boost_temp"
-            raise ValueError(msg)
-        return self
-
-
 class BoostPayload(DucaheatModel):
     """Accumulator boost payload."""
 
@@ -176,10 +132,8 @@ class PriorityWritePayload(DucaheatModel):
 
 __all__ = [
     "BoostPayload",
-    "ExtraOptionsPayload",
     "LockWritePayload",
     "ModeWritePayload",
     "PriorityWritePayload",
-    "SetupPayload",
     "StatusWritePayload",
 ]
