@@ -160,7 +160,7 @@ def test_token_429_pauses_client(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_segmented_write_after_401_fetches_one_token(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Three stale-token segments after server-side expiry cost one token POST."""
+    """Four stale-token requests after server-side expiry cost one token POST."""
     client, session, _ = _client(
         monkeypatch, DucaheatRESTClient, api_base=api.DUCAHEAT_API_BASE
     )
@@ -169,8 +169,11 @@ def test_segmented_write_after_401_fetches_one_token(
     def _unauth() -> MockResponse:
         return MockResponse(401, {"e": 1}, headers=JSON, text_data='{"e":1}')
 
-    # The server rejects T1 for each segment (status, prog, prog_temps).
-    session.queue_request(_unauth(), _ok(), _unauth(), _ok(), _unauth(), _ok())
+    # The server rejects T1 for the prog GET (slot-resolution echo) and for
+    # each segment (status setpoint, prog, status presets).
+    session.queue_request(
+        _unauth(), _ok(), _unauth(), _ok(), _unauth(), _ok(), _unauth(), _ok()
+    )
 
     async def _run() -> None:
         await client.set_node_settings(
@@ -181,7 +184,7 @@ def test_segmented_write_after_401_fetches_one_token(
         asyncio.run(_run())
 
     assert len(session.post_calls) == 2  # initial token + exactly one refresh
-    assert len(session.request_calls) == 6
+    assert len(session.request_calls) == 8
     retried = [c for c in session.request_calls[1::2]]
     assert all(c[2]["headers"]["Authorization"] == "Bearer T2" for c in retried)
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

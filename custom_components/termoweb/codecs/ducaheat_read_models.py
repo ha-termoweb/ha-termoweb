@@ -34,6 +34,9 @@ ACCUMULATOR_ONLY_FIELDS: set[str] = {
 }
 
 
+_STATUS_PRESET_KEYS = ("ice_temp", "eco_temp", "comf_temp")
+
+
 def _coerce_bool(value: Any) -> bool | None:
     """Coerce common truthy and falsy values to ``bool``."""
 
@@ -138,7 +141,7 @@ def _normalise_prog(data: Any) -> list[int] | None:
     day_order = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
     def _coerce_slots(entry: Any) -> list[int] | None:
-        """Convert a day's slots into a 24-value list."""
+        """Convert a day's 24 or 48 slots into 24 hourly values (pairs folded by max)."""
 
         candidate = entry
         if isinstance(candidate, Mapping):
@@ -160,11 +163,6 @@ def _normalise_prog(data: Any) -> list[int] | None:
         if len(values) == 48:
             values = [max(values[i : i + 2]) for i in range(0, 48, 2)]
 
-        if len(values) < 24:
-            values = values + [0] * (24 - len(values))
-        if len(values) > 24:
-            values = values[:24]
-
         return values if len(values) == 24 else None
 
     values: list[int] = []
@@ -173,33 +171,40 @@ def _normalise_prog(data: Any) -> list[int] | None:
         if entry is None and isinstance(days_section, Mapping):
             entry = days_section.get(str(idx)) or days_section.get(idx)
 
-        if entry is None:
-            day_values = [0] * 24
-        else:
-            day_values = _coerce_slots(entry)
-            if day_values is None:
-                return None
+        day_values = None if entry is None else _coerce_slots(entry)
+        if day_values is None:
+            return None
         values.extend(day_values)
 
     return values if len(values) == 168 else None
 
 
+def _first_present(data: Mapping[str, Any], *keys: str) -> Any:
+    """Return the first value in ``data`` for ``keys`` that is not ``None``."""
+
+    for key in keys:
+        value = data.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 def _normalise_prog_temps(data: Any) -> list[str] | None:
-    """Convert preset temperature payloads into stringified list."""
+    """Return [ice, eco, comfort] preset strings, or None unless all three parse."""
 
     if not isinstance(data, Mapping):
         return None
-    antifrost = data.get("antifrost") or data.get("cold")
-    eco = data.get("eco") or data.get("night")
-    comfort = data.get("comfort") or data.get("day")
-    temps = [antifrost, eco, comfort]
+    temps = [
+        _first_present(data, "ice_temp", "antifrost", "cold"),
+        _first_present(data, "eco_temp", "eco", "night"),
+        _first_present(data, "comf_temp", "comfort", "day"),
+    ]
     formatted: list[str] = []
     for value in temps:
-        if value is None:
-            formatted.append("")
-            continue
         safe = _safe_temperature(value)
-        formatted.append(str(value) if safe is None else safe)
+        if safe is None:
+            return None
+        formatted.append(safe)
     return formatted
 
 
@@ -241,6 +246,9 @@ class DucaheatStatusSegment(DucaheatReadModel):
     charge_level: float | int | None = None
     current_charge_per: int | None = None
     target_charge_per: int | None = None
+    ice_temp: str | None = Field(default=None, exclude=True)
+    eco_temp: str | None = Field(default=None, exclude=True)
+    comf_temp: str | None = Field(default=None, exclude=True)
 
     @field_validator("mode")
     @classmethod
@@ -274,7 +282,15 @@ class DucaheatStatusSegment(DucaheatReadModel):
         except ValueError:
             return None
 
-    @field_validator("stemp", "mtemp", "boost_temp", mode="before")
+    @field_validator(
+        "stemp",
+        "mtemp",
+        "boost_temp",
+        "ice_temp",
+        "eco_temp",
+        "comf_temp",
+        mode="before",
+    )
     @classmethod
     def _format_temps(cls, value: Any) -> str | None:
         """Validate and format temperature strings."""
@@ -342,12 +358,10 @@ class DucaheatStatusSegment(DucaheatReadModel):
         """Populate boost end fields from nested mappings when supplied."""
 
         if self.boost_end and isinstance(self.boost_end, Mapping):
-            self.boost_end_day = self.boost_end_day or _coerce_int(
-                self.boost_end.get("day")
-            )
-            self.boost_end_min = self.boost_end_min or _coerce_int(
-                self.boost_end.get("minute")
-            )
+            if self.boost_end_day is None:
+                self.boost_end_day = _coerce_int(self.boost_end.get("day"))
+            if self.boost_end_min is None:
+                self.boost_end_min = _coerce_int(self.boost_end.get("minute"))
         return self
 
     @model_validator(mode="after")
@@ -420,12 +434,10 @@ class DucaheatExtraOptions(DucaheatReadModel):
         """Populate boost end fields from nested mappings when supplied."""
 
         if self.boost_end and isinstance(self.boost_end, Mapping):
-            self.boost_end_day = self.boost_end_day or _coerce_int(
-                self.boost_end.get("day")
-            )
-            self.boost_end_min = self.boost_end_min or _coerce_int(
-                self.boost_end.get("minute")
-            )
+            if self.boost_end_day is None:
+                self.boost_end_day = _coerce_int(self.boost_end.get("day"))
+            if self.boost_end_min is None:
+                self.boost_end_min = _coerce_int(self.boost_end.get("minute"))
         return self
 
 
@@ -499,12 +511,10 @@ class DucaheatSetupSegment(DucaheatReadModel):
         """Populate boost end fields from nested mappings when supplied."""
 
         if self.boost_end and isinstance(self.boost_end, Mapping):
-            self.boost_end_day = self.boost_end_day or _coerce_int(
-                self.boost_end.get("day")
-            )
-            self.boost_end_min = self.boost_end_min or _coerce_int(
-                self.boost_end.get("minute")
-            )
+            if self.boost_end_day is None:
+                self.boost_end_day = _coerce_int(self.boost_end.get("day"))
+            if self.boost_end_min is None:
+                self.boost_end_min = _coerce_int(self.boost_end.get("minute"))
         return self
 
 
@@ -677,7 +687,16 @@ class DucaheatSegmentedSettings(DucaheatReadModel):
         if self.prog is not None:
             flattened["prog"] = self.prog
 
-        if self.prog_temps is not None:
+        status_presets = (
+            _normalise_prog_temps(
+                {key: getattr(self.status, key) for key in _STATUS_PRESET_KEYS}
+            )
+            if self.status
+            else None
+        )
+        if status_presets is not None:
+            flattened["ptemp"] = status_presets
+        elif self.prog_temps is not None:
             flattened["ptemp"] = self.prog_temps
 
         if not accumulator:

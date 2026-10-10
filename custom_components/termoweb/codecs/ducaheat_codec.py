@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 from typing import Any
 
@@ -21,7 +22,7 @@ from custom_components.termoweb.domain.commands import (
 )
 from custom_components.termoweb.domain.ids import NodeType
 
-from .common import format_temperature, validate_units
+from .common import validate_units
 from .ducaheat_models import (
     BoostPayload,
     ExtraOptionsPayload,
@@ -101,31 +102,54 @@ def encode_setpoint_command(
 def encode_units_command(command: SetUnits) -> dict[str, Any]:
     """Encode a SetUnits command for the status endpoint."""
 
-    return {"units": command.units}
+    return {"units": validate_units(command.units, trim=True)}
 
 
 def encode_preset_temps_command(
     command: SetPresetTemps, *, units: str | None = None
 ) -> dict[str, Any]:
-    """Encode preset temperature updates for the status endpoint."""
+    """Encode preset temperatures as ``ice_temp``/``eco_temp``/``comf_temp`` for /status."""
 
     if len(command.presets) != 3:
         msg = "presets must contain [cold, night, day] values"
         raise ValueError(msg)
 
-    cold, night, day = command.presets
-    payload: dict[str, Any] = {
-        "cold": format_temperature(cold),
-        "night": format_temperature(night),
-        "day": format_temperature(day),
-    }
-    if units is not None:
-        payload["units"] = validate_units(units, trim=True)
-    return payload
+    ice, eco, comf = command.presets
+    return StatusWritePayload.model_validate(
+        {"ice_temp": ice, "eco_temp": eco, "comf_temp": comf, "units": units}
+    ).model_dump(exclude_none=True)
 
 
-def encode_program_command(command: SetProgram) -> dict[str, Any]:
-    """Encode a SetProgram command for the prog endpoint."""
+def extract_prog_days(section: Any) -> dict[str, list[int]]:
+    """Return the ``"0"``..``"6"`` day slot lists from a GET ``prog`` section."""
+
+    if isinstance(section, Mapping) and isinstance(section.get("prog"), Mapping):
+        section = section["prog"]
+    if not isinstance(section, Mapping):
+        return {}
+    days: dict[str, list[int]] = {}
+    for idx in range(7):
+        slots = section.get(str(idx))
+        if not isinstance(slots, list):
+            continue
+        try:
+            values = [int(value) for value in slots]
+        except (TypeError, ValueError):
+            continue
+        if len(values) in (24, 48) and all(value in (0, 1, 2) for value in values):
+            days[str(idx)] = values
+    return days
+
+
+def encode_program_command(
+    command: SetProgram, *, current: Mapping[str, list[int]] | None = None
+) -> dict[str, Any]:
+    """Encode a 168-slot program, echoing the slot resolution of ``current`` days.
+
+    Without 48-slot days in ``current`` the documented 24 hourly slots per day
+    are written. With 48-slot days, each half-hour pair is kept when its hourly
+    value (``max`` of the pair, as shown on read) is unchanged.
+    """
 
     if not isinstance(command.program, list) or len(command.program) != 168:
         msg = "prog must be a list of 168 integers (0, 1, or 2)"
@@ -141,16 +165,25 @@ def encode_program_command(command: SetProgram) -> dict[str, Any]:
         msg = "prog values must be 0, 1, or 2"
         raise ValueError(msg)
 
-    half_hour: dict[str, list[int]] = {}
+    existing_days = current or {}
+    half_hour = any(len(slots) == 48 for slots in existing_days.values())
+    days: dict[str, list[int]] = {}
     for idx in range(7):
-        start = idx * 24
-        hourly = validated[start : start + 24]
+        hourly = validated[idx * 24 : (idx + 1) * 24]
+        if not half_hour:
+            days[str(idx)] = hourly
+            continue
+        existing = existing_days.get(str(idx))
         slots: list[int] = []
-        for value in hourly:
-            slots.extend([value, value])
-        half_hour[str(idx)] = slots
+        for hour, value in enumerate(hourly):
+            pair = existing[hour * 2 : hour * 2 + 2] if existing else []
+            if len(pair) == 2 and max(pair) == value:
+                slots.extend(pair)
+            else:
+                slots.extend([value, value])
+        days[str(idx)] = slots
 
-    return {"prog": half_hour}
+    return {"prog": days}
 
 
 def encode_extra_options_command(command: SetExtraOptions) -> dict[str, Any]:
