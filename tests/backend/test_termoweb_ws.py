@@ -2,7 +2,7 @@
 
 The production ``TermoWebWSClient`` is built by the real backend factory on a
 real ``RESTClient``, ``StateCoordinator`` and ``Inventory``. The only fakes are
-the aiohttp session/socket (``tests.fakes.termoweb_ws``) and the clock
+the aiohttp session/socket (``tests.fakes.ws_harness``) and the clock
 inside the websocket module, so reconnect backoffs pass instantly.
 """
 
@@ -13,7 +13,6 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 import json
 import logging
-import time
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -39,9 +38,10 @@ from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from custom_components.termoweb.runtime import EntryRuntime
 from tests.fakes.rest import LatchedResponse, MockResponse
 from tests.fakes.runtime import build_entry_runtime
-from tests.fakes.termoweb_ws import (
-    FakeWebSocket,
-    HandshakeResponse,
+from tests.fakes.ws_harness import (
+    FakeResponse,
+    FakeWS,
+    OffsetClock,
     SleepController,
     WSFakeSession,
     token_response,
@@ -81,18 +81,6 @@ def rtc_ok() -> MockResponse:
     )
 
 
-class Clock:
-    """Wall clock for the websocket module: real time plus a test offset."""
-
-    def __init__(self) -> None:
-        """Start without an offset."""
-        self.offset = 0.0
-
-    def time(self) -> float:
-        """Return the shifted wall-clock time."""
-        return time.time() + self.offset
-
-
 @dataclass
 class Harness:
     """Everything a TermoWeb websocket test touches."""
@@ -104,7 +92,7 @@ class Harness:
     runtime: EntryRuntime
     client: termoweb_ws.TermoWebWSClient
     sleeps: SleepController
-    clock: Clock
+    clock: OffsetClock
     statuses: list[dict[str, Any]] = field(default_factory=list)
 
     def start(self) -> asyncio.Task[None]:
@@ -113,7 +101,7 @@ class Harness:
         self.sleeps.runner = task
         return task
 
-    async def connected(self, count: int = 1) -> FakeWebSocket:
+    async def connected(self, count: int = 1) -> FakeWS:
         """Wait until socket ``count`` finished its join and subscriptions."""
         await until(lambda: len(self.session.sockets) >= count)
         ws = self.session.sockets[count - 1]
@@ -140,7 +128,7 @@ async def build_harness(
     """Build the production client graph on the fake transport."""
     sleeps = SleepController()
     sleeps.install(monkeypatch, termoweb_ws, limiter_module=ws_client)
-    clock = Clock()
+    clock = OffsetClock()
     monkeypatch.setattr(termoweb_ws, "time", SimpleNamespace(time=clock.time))
     monkeypatch.setattr(
         termoweb_ws, "random", SimpleNamespace(uniform=lambda _a, _b: 1.0)
@@ -359,9 +347,7 @@ async def test_handshake_rejections_refresh_the_token_and_back_off(
     tw: Harness, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A 401 handshake forces a new token; retries are rate limited and spaced."""
-    tw.session.handshakes.extend(
-        HandshakeResponse(401, "unauthorized") for _ in range(6)
-    )
+    tw.session.handshakes.extend(FakeResponse(401, "unauthorized") for _ in range(6))
     caplog.set_level(logging.WARNING, logger=termoweb_ws.__name__)
     tw.start()
 
@@ -384,9 +370,9 @@ async def test_handshake_rejections_refresh_the_token_and_back_off(
 @pytest.mark.parametrize(
     "failure",
     [
-        pytest.param(HandshakeResponse(503, "busy"), id="http-error"),
-        pytest.param(HandshakeResponse(200, "garbage"), id="no-fields"),
-        pytest.param(HandshakeResponse(200, "sid:abc:60:websocket"), id="bad-timeout"),
+        pytest.param(FakeResponse(503, "busy"), id="http-error"),
+        pytest.param(FakeResponse(200, "garbage"), id="no-fields"),
+        pytest.param(FakeResponse(200, "sid:abc:60:websocket"), id="bad-timeout"),
         pytest.param(aiohttp.ClientConnectionError("refused"), id="client-error"),
         pytest.param(TimeoutError(), id="timeout"),
     ],
@@ -431,7 +417,7 @@ async def test_websocket_upgrade_is_bounded(
     """A hanging upgrade times out and is retried instead of blocking forever."""
     monkeypatch.setattr(ws_client, "_WS_CONNECT_TIMEOUT", 0.01)
 
-    async def _hang(url: str, **kwargs: Any) -> FakeWebSocket:
+    async def _hang(url: str, **kwargs: Any) -> FakeWS:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
@@ -446,7 +432,7 @@ async def test_cancelling_the_runner_propagates(tw: Harness) -> None:
     """Cancelling the client task leaves it cancelled and reports stopped."""
     started = asyncio.Event()
 
-    class _HangingHandshake(HandshakeResponse):
+    class _HangingHandshake(FakeResponse):
         async def text(self) -> str:
             started.set()
             await asyncio.Event().wait()
@@ -704,8 +690,7 @@ async def test_idle_session_is_restarted(tw: Harness) -> None:
     tw.sleeps.release(IDLE_CHECK)
 
     await tw.connected(2)
-    assert ws.close_calls[0]["code"] == aiohttp.WSCloseCode.GOING_AWAY
-    assert ws.close_calls[0]["message"] == b"idle restart"
+    assert ws.close_calls[0] == (aiohttp.WSCloseCode.GOING_AWAY, b"idle restart")
 
 
 @pytest.mark.parametrize(("idle_for", "restarts"), [(30.0, False), (300.0, True)])

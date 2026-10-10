@@ -1,31 +1,54 @@
-"""Virtual clock and fake aiohttp transport for websocket protocol scenarios.
+"""The websocket test harness: clocks, a fake aiohttp transport and REST doubles.
 
-The websocket clients are driven through their real entry points
-(``start``/``stop``) against a scripted aiohttp session. Time is virtual: the
-clock replaces ``time`` and ``asyncio.sleep``/``timeout``/``wait_for`` inside
-the websocket modules only, so reconnect backoff, heartbeats, idle windows and
-handshake timeouts run instantly and deterministically while Home Assistant
-keeps its real event loop and clock.
+The websocket clients are driven through their real entry points against a
+scripted aiohttp session (:class:`WSFakeSession`) that hands out scriptable
+sockets (:class:`FakeWS`). Two ways to control time:
+
+* :class:`VirtualClock` (via :func:`install_clock`) replaces ``time`` and
+  ``asyncio.sleep``/``timeout``/``wait_for`` inside the websocket modules, so
+  backoffs, heartbeats, idle windows and handshake timeouts run instantly and
+  deterministically on ``advance`` while Home Assistant keeps its real loop.
+* :class:`SleepController` returns reconnect backoffs at once and parks every
+  other sleep until the test releases it; :class:`OffsetClock` shifts the
+  module's wall clock.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable
+from collections import deque
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 import contextlib
+import copy
 import heapq
 import itertools
 import json
 import time
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, Self
+from unittest.mock import AsyncMock
 
 import aiohttp
+from homeassistant.core import HomeAssistant
 import pytest
 
 from custom_components.termoweb.backend import ws_client, ws_health
+from custom_components.termoweb.coordinator import StateCoordinator
+from custom_components.termoweb.inventory import Inventory, build_node_inventory
+from custom_components.termoweb.runtime import EntryRuntime
+from tests.fakes.rest import FakeSession, MockResponse
+from tests.fakes.runtime import build_entry_runtime
 
 _real_sleep = asyncio.sleep
+_END = object()
+
+ENTRY_ID = "entry"
+DEV_ID = "device"
+
+
+# ---------------------------------------------------------------------------
+# Time
+# ---------------------------------------------------------------------------
 
 
 class VirtualClock:
@@ -98,14 +121,13 @@ class VirtualClock:
 
 
 class _AsyncioProxy(ModuleType):
-    """``asyncio`` stand-in routing sleeps and timeouts to the virtual clock."""
+    """``asyncio`` stand-in routing the given functions to a fake clock."""
 
-    def __init__(self, clock: VirtualClock) -> None:
-        """Bind the virtual sleep, timeout and wait_for."""
+    def __init__(self, **overrides: Callable[..., Any]) -> None:
+        """Bind the replacement ``sleep`` (and optionally ``timeout``/``wait_for``)."""
         super().__init__("asyncio")
-        self.sleep = clock.sleep
-        self.timeout = clock.timeout
-        self.wait_for = clock.wait_for
+        for name, func in overrides.items():
+            setattr(self, name, func)
 
     def __getattr__(self, name: str) -> Any:
         """Delegate everything else to the real asyncio."""
@@ -118,12 +140,101 @@ def install_clock(
     """Give ``modules`` (plus the shared ws helpers) a virtual clock."""
     clock = VirtualClock()
     fake_time = SimpleNamespace(time=clock.time, monotonic=clock.monotonic)
-    proxy = _AsyncioProxy(clock)
+    proxy = _AsyncioProxy(
+        sleep=clock.sleep, timeout=clock.timeout, wait_for=clock.wait_for
+    )
     for module in (ws_client, ws_health, *modules):
         monkeypatch.setattr(module, "time", fake_time)
         if hasattr(module, "asyncio"):
             monkeypatch.setattr(module, "asyncio", proxy)
     return clock
+
+
+class OffsetClock:
+    """Wall clock for a websocket module: real time plus a test offset."""
+
+    def __init__(self) -> None:
+        """Start without an offset."""
+        self.offset = 0.0
+
+    def time(self) -> float:
+        """Return the shifted wall-clock time."""
+        return time.time() + self.offset
+
+
+class SleepController:
+    """Fake ``asyncio.sleep`` for the websocket modules.
+
+    Sleeps issued by the ``runner`` task (reconnect backoff) are recorded in
+    :attr:`backoffs` and return at once; connection rate-limiter waits (from
+    the module passed as ``limiter_module``) go to :attr:`throttled`. All
+    other sleeps (heartbeat, keep-alive and idle-monitor loops) park until
+    :meth:`release` resolves them or their task is cancelled.
+    """
+
+    def __init__(self) -> None:
+        """Start with nothing recorded."""
+        self.runner: asyncio.Task[Any] | None = None
+        self.backoffs: list[float] = []
+        self.throttled: list[float] = []
+        self.parked: list[tuple[float, asyncio.Future[None]]] = []
+        self.on_backoff: Callable[[float], None] | None = None
+
+    def install(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *modules: ModuleType,
+        limiter_module: ModuleType | None = None,
+    ) -> None:
+        """Replace ``asyncio`` in ``modules`` (and the limiter's) with proxies.
+
+        Install before building the client: the rate limiter binds its sleep
+        when it is created.
+        """
+        proxy = _AsyncioProxy(sleep=self.sleep)
+        for module in modules:
+            monkeypatch.setattr(module, "asyncio", proxy)
+        if limiter_module is not None:
+            monkeypatch.setattr(
+                limiter_module, "asyncio", _AsyncioProxy(sleep=self._throttle)
+            )
+
+    async def _throttle(self, delay: float, result: Any = None) -> Any:
+        """Record a rate-limiter wait and return at once."""
+        if delay > 0:
+            self.throttled.append(delay)
+        await _real_sleep(0)
+        return result
+
+    async def sleep(self, delay: float, result: Any = None) -> Any:
+        """Record ``delay``; return now for the runner, park otherwise."""
+        if delay <= 0:
+            await _real_sleep(0)
+            return result
+        if self.runner is not None and asyncio.current_task() is self.runner:
+            self.backoffs.append(delay)
+            if self.on_backoff is not None:
+                self.on_backoff(delay)
+            await _real_sleep(0)
+            return result
+        future = asyncio.get_running_loop().create_future()
+        self.parked.append((delay, future))
+        await future
+        return result
+
+    def parked_delays(self) -> list[float]:
+        """Return the delays of the sleeps still parked."""
+        return [delay for delay, future in self.parked if not future.done()]
+
+    def release(self, delay: float) -> int:
+        """Wake every parked sleep of ``delay`` seconds; return how many."""
+        woken = 0
+        for parked_delay, future in self.parked:
+            if parked_delay == delay and not future.done():
+                future.set_result(None)
+                woken += 1
+        self.parked = [item for item in self.parked if not item[1].done()]
+        return woken
 
 
 async def settle(rounds: int = 30) -> None:
@@ -132,53 +243,81 @@ async def settle(rounds: int = 30) -> None:
         await _real_sleep(0)
 
 
-async def until(predicate: Callable[[], bool], what: str = "condition") -> None:
+async def until(
+    predicate: Callable[[], bool], what: str = "condition", *, timeout: float = 5
+) -> None:
     """Yield to the loop until ``predicate`` holds (bounded in real time)."""
     try:
-        async with asyncio.timeout(5):
+        async with asyncio.timeout(timeout):
             while not predicate():
                 await _real_sleep(0.001)
     except TimeoutError:
         raise AssertionError(f"timed out waiting for {what}") from None
 
 
-def _msg(kind: aiohttp.WSMsgType, data: Any = None) -> SimpleNamespace:
-    """Build an aiohttp-like websocket message."""
-    return SimpleNamespace(type=kind, data=data, extra=None)
+def leaked_tasks(prefix: str) -> list[asyncio.Task[Any]]:
+    """Return unfinished tasks whose coroutine belongs to ``prefix``."""
+    return [
+        task
+        for task in asyncio.all_tasks()
+        if not task.done()
+        and getattr(task.get_coro(), "__qualname__", "").startswith(prefix)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Transport
+# ---------------------------------------------------------------------------
 
 
 class FakeWS:
-    """Scriptable aiohttp websocket mirroring ``ClientWebSocketResponse``."""
+    """Scriptable ``aiohttp.ClientWebSocketResponse``.
 
-    def __init__(self, url: str) -> None:
-        """Create an open socket with an empty inbound queue."""
+    Server frames are queued with :meth:`feed` (or :meth:`feed_message`).
+    :meth:`end`, :meth:`drop` and a client :meth:`close` end the stream for
+    good: ``receive`` then returns CLOSED and ``async for`` stops.
+    """
+
+    def __init__(self, url: str = "", frames: Iterable[str] = ()) -> None:
+        """Create an open socket with ``frames`` queued as TEXT messages."""
         self.url = url
         self.sent: list[str] = []
         self.closed = False
         self.close_code: int | None = None
         self.close_calls: list[tuple[int | None, bytes | None]] = []
-        self._inbox: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
+        self.error: BaseException | None = None
+        self._inbox: asyncio.Queue[Any] = asyncio.Queue()
+        self.feed(*frames)
 
-    def feed(self, *frames: str) -> None:
-        """Queue server TEXT frames."""
+    def feed(self, *frames: str | bytes) -> None:
+        """Queue server TEXT (str) or BINARY (bytes) frames."""
         for frame in frames:
-            self._inbox.put_nowait(_msg(aiohttp.WSMsgType.TEXT, frame))
+            kind = (
+                aiohttp.WSMsgType.BINARY
+                if isinstance(frame, bytes)
+                else aiohttp.WSMsgType.TEXT
+            )
+            self.feed_message(kind, frame)
 
-    def feed_binary(self, data: bytes) -> None:
-        """Queue a server BINARY frame."""
-        self._inbox.put_nowait(_msg(aiohttp.WSMsgType.BINARY, data))
+    def feed_message(self, kind: aiohttp.WSMsgType, data: Any = None) -> None:
+        """Queue a raw message of ``kind``."""
+        self._inbox.put_nowait(aiohttp.WSMessage(kind, data, None))
+
+    def end(self) -> None:
+        """End the stream once the queued frames are consumed."""
+        self._inbox.put_nowait(_END)
 
     def server_close(self, code: int = 1000) -> None:
         """Simulate the server closing the connection."""
         self.closed = True
         self.close_code = code
-        self._inbox.put_nowait(_msg(aiohttp.WSMsgType.CLOSE, code))
+        self.feed_message(aiohttp.WSMsgType.CLOSE, code)
 
     def drop(self) -> None:
         """Simulate the transport dying without a close handshake."""
         self.closed = True
         self.close_code = 1006
-        self._inbox.put_nowait(_msg(aiohttp.WSMsgType.CLOSED))
+        self.end()
 
     async def send_str(self, data: str) -> None:
         """Record a client frame; fail like aiohttp once closed."""
@@ -196,21 +335,25 @@ class FakeWS:
         if not self.closed:
             self.closed = True
             self.close_code = code
-            self._inbox.put_nowait(_msg(aiohttp.WSMsgType.CLOSED))
+            self.end()
         return True
 
     def exception(self) -> BaseException | None:
-        """Return no transport error."""
-        return None
+        """Return the transport error reported with an ERROR message."""
+        return self.error
 
-    async def receive(self) -> SimpleNamespace:
-        """Return the next inbound message."""
-        return await self._inbox.get()
+    async def receive(self, timeout: float | None = None) -> aiohttp.WSMessage:
+        """Return the next message; CLOSED once the stream ended."""
+        item = await self._inbox.get()
+        if item is _END:
+            self._inbox.put_nowait(_END)  # stay ended
+            return aiohttp.WSMessage(aiohttp.WSMsgType.CLOSED, None, None)
+        return item
 
-    async def receive_str(self) -> str:
-        """Return the next TEXT frame like aiohttp does."""
+    async def receive_str(self, timeout: float | None = None) -> str:
+        """Return the next TEXT frame like aiohttp does (else raise TypeError)."""
         msg = await self.receive()
-        if msg.type != aiohttp.WSMsgType.TEXT:
+        if msg.type is not aiohttp.WSMsgType.TEXT:
             raise TypeError(f"Received message {msg.type} is not str")
         return msg.data
 
@@ -218,7 +361,7 @@ class FakeWS:
         """Iterate inbound messages like aiohttp."""
         return self
 
-    async def __anext__(self) -> SimpleNamespace:
+    async def __anext__(self) -> aiohttp.WSMessage:
         """Stop iterating on close, like aiohttp."""
         msg = await self.receive()
         if msg.type in (
@@ -231,13 +374,13 @@ class FakeWS:
 
 
 class FakeResponse:
-    """Async context manager standing in for an aiohttp response."""
+    """Async context manager standing in for an aiohttp handshake response."""
 
     def __init__(
         self,
-        *,
         status: int = 200,
         body: bytes | str = b"",
+        *,
         error: BaseException | None = None,
         hang: bool = False,
     ) -> None:
@@ -247,7 +390,7 @@ class FakeResponse:
         self._error = error
         self._hang = hang
 
-    async def __aenter__(self) -> FakeResponse:  # noqa: PYI034
+    async def __aenter__(self) -> Self:
         """Enter the response, or raise the scripted transport error."""
         if self._error is not None:
             raise self._error
@@ -270,53 +413,86 @@ class FakeResponse:
         return await self._payload()
 
 
-class FakeSession:
-    """aiohttp.ClientSession stand-in serving scripted HTTP and websockets.
+class WSFakeSession(FakeSession):
+    """REST session double that also serves websocket handshakes and upgrades.
 
-    ``responses`` maps ``"GET"``/``"POST"`` to callables building the next
-    response from the request URL; every websocket opened is kept in
-    ``sockets`` and pre-loaded with the frames returned by ``ws_frames``.
+    ``get`` pops scripted responses (or exceptions) from :attr:`handshakes`,
+    else calls :attr:`default_get` (default: a healthy Socket.IO 0.9
+    handshake with a fresh sid). A POST to a ``/socket.io/`` URL is an
+    Engine.IO polling POST answered by :attr:`polling_post` (default: 200);
+    other POSTs are REST. ``ws_connect`` builds a socket with
+    :attr:`ws_factory`, queues ``ws_frames(index)`` (or :attr:`greeting`) on it
+    and keeps it in :attr:`sockets`, unless :attr:`connect` replaces it.
+    :attr:`calls` logs every handshake GET, polling POST and upgrade in order.
     """
-
-    closed = False
 
     def __init__(
         self,
         *,
-        get: Callable[[str], FakeResponse],
+        get: Callable[[str], FakeResponse] | None = None,
         post: Callable[[str], FakeResponse] | None = None,
         ws_frames: Callable[[int], Iterable[str]] | None = None,
         ws_factory: Callable[[str], FakeWS] | None = None,
     ) -> None:
-        """Store the request handlers."""
-        self._get = get
-        self._post = post
-        self._ws_frames = ws_frames
-        self._ws_factory = ws_factory or FakeWS
-        self.requests: list[tuple[str, str]] = []
+        """Store the request handlers; nothing is scripted by default."""
+        super().__init__()
+        self.handshakes: deque[Any] = deque()
+        self.default_get = get or self._socketio_handshake
+        self.polling_post = post or (lambda _url: FakeResponse(200, b"ok"))
+        self.ws_frames = ws_frames
+        self.ws_factory = ws_factory or FakeWS
+        self.greeting: tuple[str, ...] = ()
+        self.connect: Callable[..., Awaitable[Any]] | None = None
+        self.calls: list[tuple[str, str]] = []
+        self.get_calls: list[tuple[str, dict[str, Any]]] = []
+        self.connect_calls: list[tuple[str, dict[str, Any]]] = []
         self.sockets: list[FakeWS] = []
 
-    def get(self, url: str, **_kwargs: Any) -> FakeResponse:
-        """Serve a GET."""
-        self.requests.append(("GET", url))
-        return self._get(url)
+    def _socketio_handshake(self, _url: str) -> FakeResponse:
+        """Answer a Socket.IO 0.9 handshake with a fresh sid."""
+        return FakeResponse(200, f"sid{len(self.get_calls)}:60:60:websocket")
 
-    def post(self, url: str, **_kwargs: Any) -> FakeResponse:
-        """Serve a POST."""
-        self.requests.append(("POST", url))
-        assert self._post is not None
-        return self._post(url)
+    def push_request(self, *responses: Any) -> None:
+        """Queue responses for ``request`` ahead of those already queued."""
+        self._request_queue[0:0] = responses
 
-    async def ws_connect(self, url: str, **_kwargs: Any) -> FakeWS:
-        """Open a scripted websocket."""
-        ws = self._ws_factory(url)
-        if self._ws_frames is not None:
-            ws.feed(*self._ws_frames(len(self.sockets)))
+    def get(self, url: str, **kwargs: Any) -> FakeResponse:
+        """Record a handshake GET and return the next scripted response."""
+        self.calls.append(("GET", url))
+        self.get_calls.append((url, copy.deepcopy(kwargs)))
+        if self.handshakes:
+            result = self.handshakes.popleft()
+            if isinstance(result, BaseException):
+                raise result
+            return result
+        return self.default_get(url)
+
+    def post(self, url: str, *, data: Any = None, **kwargs: Any) -> Any:
+        """Answer Engine.IO polling POSTs; delegate REST POSTs."""
+        if "/socket.io/" in url:
+            self.calls.append(("POST", url))
+            return self.polling_post(url)
+        return super().post(url, data=data, **kwargs)
+
+    async def ws_connect(self, url: str, **kwargs: Any) -> FakeWS:
+        """Record the upgrade and return a scripted socket."""
+        self.calls.append(("WS", url))
+        self.connect_calls.append((url, kwargs))
+        if self.connect is not None:
+            return await self.connect(url, **kwargs)
+        ws = self.ws_factory(url)
+        frames = self.ws_frames(len(self.sockets)) if self.ws_frames else self.greeting
+        ws.feed(*frames)
         self.sockets.append(ws)
         return ws
 
 
-def eio_polling_body(*packets: str) -> bytes:
+# ---------------------------------------------------------------------------
+# Wire encoders
+# ---------------------------------------------------------------------------
+
+
+def polling_body(*packets: str) -> bytes:
     """Encode Engine.IO v3 binary polling packets."""
     out = b""
     for pkt in packets:
@@ -336,11 +512,77 @@ def sio_event(namespace: str, name: str, *args: Any) -> str:
     return f"42{namespace}," + json.dumps([name, *args], separators=(",", ":"))
 
 
-def leaked_tasks(prefix: str) -> list[asyncio.Task[Any]]:
-    """Return unfinished tasks whose coroutine belongs to ``prefix``."""
-    return [
-        task
-        for task in asyncio.all_tasks()
-        if not task.done()
-        and getattr(task.get_coro(), "__qualname__", "").startswith(prefix)
-    ]
+# ---------------------------------------------------------------------------
+# REST and runtime doubles
+# ---------------------------------------------------------------------------
+
+
+def token_response(token: str = "tok") -> MockResponse:
+    """Return a successful OAuth token response."""
+    return MockResponse(
+        200,
+        {"access_token": token, "expires_in": 3600},
+        headers={"Content-Type": "application/json"},
+    )
+
+
+class DummyREST:
+    """The parts of ``RESTClient`` a websocket client uses."""
+
+    def __init__(
+        self,
+        *,
+        api_base: str | None = "https://api.termoweb",
+        authed_headers: dict[str, str] | None = None,
+        session: Any = None,
+    ) -> None:
+        """Record the configured token headers and session."""
+        self._session = session if session is not None else SimpleNamespace()
+        self._headers = authed_headers or {"Authorization": "Bearer token"}
+        self._ensure_token = AsyncMock()
+        self._access_token: str | None = "token"
+        self.api_base = api_base
+        self.user_agent = "agent"
+        self.requested_with = "requested"
+
+    async def authed_headers(self) -> dict[str, str]:
+        """Return the bearer headers."""
+        return self._headers
+
+    def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:
+        """Return the nodes unchanged (codec pass-through)."""
+        return nodes
+
+    async def refresh_token(self) -> None:
+        """Drop the cached token and fetch a new one."""
+        self._access_token = None
+        await self._ensure_token()
+
+
+def make_inventory(
+    nodes: Iterable[Mapping[str, Any]] = ({"type": "htr", "addr": "1"},),
+    dev_id: str = DEV_ID,
+) -> Inventory:
+    """Return an inventory with ``nodes``."""
+    return Inventory(dev_id, build_node_inventory({"nodes": list(nodes)}))
+
+
+def make_runtime(
+    hass: HomeAssistant,
+    inventory: Inventory | None = None,
+    *,
+    energy_coordinator: Any | None = None,
+) -> EntryRuntime:
+    """Attach a runtime with a real ``StateCoordinator`` to a config entry."""
+    inventory = inventory or make_inventory()
+    coordinator = StateCoordinator(
+        hass, DummyREST(), 30, DEV_ID, {"name": "Home"}, inventory
+    )
+    return build_entry_runtime(
+        hass=hass,
+        entry_id=ENTRY_ID,
+        dev_id=DEV_ID,
+        inventory=inventory,
+        coordinator=coordinator,
+        energy_coordinator=energy_coordinator,
+    )

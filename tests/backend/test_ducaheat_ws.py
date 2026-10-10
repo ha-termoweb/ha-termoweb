@@ -34,27 +34,45 @@ from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from custom_components.termoweb.runtime import EntryRuntime
 from tests.fakes.rest import LatchedResponse
 from tests.fakes.runtime import build_entry_runtime
-from tests.fakes.termoweb_ws import (
-    FakeWebSocket,
-    HandshakeResponse,
-    SleepController,
-    WSFakeSession,
-    token_response,
-    until,
-)
-from tests.fakes.ws import (
+from tests.fakes.ws_harness import (
     DEV_ID,
     ENTRY_ID,
     DummyREST,
-    QueueWebSocket,
-    StubSession,
-    StubWebSocket,
+    FakeResponse,
+    FakeWS,
+    OffsetClock,
+    SleepController,
+    WSFakeSession,
     make_inventory,
     make_runtime,
     polling_body,
+    token_response,
+    until,
 )
 
 NS = ducaheat_ws.WS_NAMESPACE
+OPEN_PACKET = '0{"sid":"abc","pingInterval":25000,"pingTimeout":60000}'
+
+
+class EngineIOSession(WSFakeSession):
+    """Session answering each Engine.IO polling handshake step, then ``ws``."""
+
+    def __init__(self, ws: FakeWS) -> None:
+        """Serve ``ws`` on upgrade; every step answers 200 by default."""
+        super().__init__(
+            get=self._answer_get,
+            post=lambda _url: FakeResponse(self.status["post"]),
+            ws_factory=lambda _url: self.ws,
+        )
+        self.ws = ws
+        self.open_body = polling_body(OPEN_PACKET)
+        self.status = {"open": 200, "post": 200, "drain": 200}
+
+    def _answer_get(self, url: str) -> FakeResponse:
+        """Answer the open GET (no sid) and the drain GET (with sid)."""
+        if "sid=" not in url:
+            return FakeResponse(self.status["open"], self.open_body)
+        return FakeResponse(self.status["drain"], b"6:40[]")
 
 
 @pytest.fixture(autouse=True)
@@ -78,7 +96,7 @@ async def client(hass: HomeAssistant, runtime: EntryRuntime) -> DucaheatWSClient
         dev_id=DEV_ID,
         api_client=DummyREST(authed_headers={"Authorization": "Bearer rest-token"}),
         coordinator=runtime.coordinator,
-        session=StubSession(StubWebSocket()),
+        session=EngineIOSession(FakeWS(frames=["3probe"])),
         inventory=runtime.inventory,
     )
     yield ws_client
@@ -98,9 +116,16 @@ def _statuses(monkeypatch: pytest.MonkeyPatch, client: DucaheatWSClient) -> list
     return statuses
 
 
-async def _read(client: DucaheatWSClient, *messages: Any) -> QueueWebSocket:
-    """Run the read loop over ``messages`` until the socket closes."""
-    ws = QueueWebSocket(messages)
+def _replay(*frames: str) -> FakeWS:
+    """Return a socket that replays ``frames`` and then ends the stream."""
+    ws = FakeWS(frames=frames)
+    ws.end()
+    return ws
+
+
+async def _read(client: DucaheatWSClient, *frames: str) -> FakeWS:
+    """Run the read loop over ``frames`` until the socket closes."""
+    ws = _replay(*frames)
     client._ws = ws
     if client._status == "stopped":
         client._status = "connected"
@@ -136,7 +161,7 @@ async def test_connect_once_performs_full_handshake(
 
     await client._disconnect("test")
     assert ws.closed
-    assert ws.close_args == (aiohttp.WSCloseCode.GOING_AWAY, b"test")
+    assert ws.close_calls == [(aiohttp.WSCloseCode.GOING_AWAY, b"test")]
     assert client._ws is None
     assert client._pending_dev_data is False
     assert client._keepalive_task is None
@@ -153,7 +178,7 @@ async def test_probe_tolerates_interleaved_frames(
     client: DucaheatWSClient, frames: list[str], sent: list[str]
 ) -> None:
     """Pings are answered and unknown frames ignored until the probe ack."""
-    client._session.ws = StubWebSocket(frames)
+    client._session.ws = FakeWS(frames=frames)
 
     await client._connect_once()
 
@@ -164,7 +189,7 @@ async def test_probe_timeout_raises(
     client: DucaheatWSClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A missing probe ack fails the handshake."""
-    client._session.ws = StubWebSocket(["2"])
+    client._session.ws = FakeWS(frames=["2"])
     monkeypatch.setattr(ducaheat_ws, "_PROBE_ACK_TIMEOUT", 0.05)
 
     with pytest.raises(HandshakeError) as err:
@@ -271,7 +296,7 @@ def test_decode_polling_packets_rejects_malformed_bodies(body: bytes) -> None:
 
 async def test_emit_sio_frames_namespaced_events(client: DucaheatWSClient) -> None:
     """Events are sent as namespaced Socket.IO ``42`` frames."""
-    client._ws = StubWebSocket()
+    client._ws = FakeWS()
 
     await client._emit_sio("subscribe", "/htr/1/status")
     await client._emit_sio("sample", {"x": 1})
@@ -285,7 +310,7 @@ async def test_emit_sio_frames_namespaced_events(client: DucaheatWSClient) -> No
 async def test_sends_are_serialised(client: DucaheatWSClient) -> None:
     """Concurrent emits never interleave on the socket."""
 
-    class ConcurrencyWebSocket(StubWebSocket):
+    class ConcurrencyWebSocket(FakeWS):
         sending = False
 
         async def send_str(self, payload: str) -> None:
@@ -309,9 +334,9 @@ async def test_send_requires_the_current_open_socket(
     client._ws = None
     with pytest.raises(RuntimeError):
         await client._emit_sio("evt")
-    client._ws = StubWebSocket()
+    client._ws = FakeWS()
     with pytest.raises(RuntimeError):
-        await client._send_str("payload", context="stale", ws=StubWebSocket())
+        await client._send_str("payload", context="stale", ws=FakeWS())
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +361,7 @@ async def test_dev_data_marks_healthy_and_seeds_the_store(
 ) -> None:
     """A dev_data snapshot marks the socket healthy and replaces node state."""
     monkeypatch.setattr(ducaheat_ws.time, "time", lambda: 1_234.0)
-    client._ws = QueueWebSocket([])  # subscriptions are emitted on this socket
+    client._ws = FakeWS()  # subscriptions are emitted on this socket
 
     ws = await _read(
         client,
@@ -491,18 +516,13 @@ async def test_engineio_ping_and_namespace_open_request_dev_data(
     assert any(call.args == ("dev_data",) for call in emit.await_args_list)
 
 
-@pytest.mark.parametrize(
-    "message",
-    [
-        SimpleNamespace(type=aiohttp.WSMsgType.ERROR, data=None),
-        SimpleNamespace(type=aiohttp.WSMsgType.CLOSE, data=None),
-    ],
-)
+@pytest.mark.parametrize("kind", [aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSE])
 async def test_read_loop_raises_on_error_or_close(
-    client: DucaheatWSClient, message: Any
+    client: DucaheatWSClient, kind: aiohttp.WSMsgType
 ) -> None:
     """Transport errors and close frames end the read loop with an error."""
-    client._ws = QueueWebSocket([message])
+    client._ws = FakeWS()
+    client._ws.feed_message(kind)
     client._status = "connected"
     with pytest.raises(RuntimeError):
         await client._read_loop_ws()
@@ -627,7 +647,7 @@ async def test_subscribe_telemetry_tracks_success_and_failure(
     client: DucaheatWSClient, runtime: EntryRuntime, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Subscription attempts count successes and failures in the ws state."""
-    client._ws = StubWebSocket()
+    client._ws = FakeWS()
     client._inventory = None
     emit = AsyncMock()
     monkeypatch.setattr(client, "_emit_sio", emit)
@@ -657,7 +677,7 @@ async def test_failed_subscription_lengthens_backoff(
     client: DucaheatWSClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A subscription attempt that subscribes nothing backs off further."""
-    client._ws = StubWebSocket()
+    client._ws = FakeWS()
     client._status = "connected"
     client._pending_subscribe = True
     client._last_subscribe_attempt_ts = 10.0
@@ -713,7 +733,7 @@ async def test_keepalive_stops_when_the_socket_is_swapped_or_fails(
     """A replaced socket or a failing send ends the keepalive loop."""
     real_sleep = asyncio.sleep
 
-    class FailingWS(StubWebSocket):
+    class FailingWS(FakeWS):
         fail = False
 
         async def send_str(self, payload: str) -> None:
@@ -751,7 +771,7 @@ async def test_keepalive_stops_when_the_socket_is_swapped_or_fails(
 
 def _healthy(client: DucaheatWSClient, *, last_payload_at: float) -> None:
     """Put the client in a healthy, subscribed state with a payload timestamp."""
-    client._ws = StubWebSocket()
+    client._ws = FakeWS()
     client._status = "healthy"
     client._pending_dev_data = False
     tracker = client._ws_health
@@ -817,7 +837,7 @@ async def test_idle_check_triggers_soft_recovery(
     client: DucaheatWSClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An idle socket re-requests a snapshot, replays and resubscribes."""
-    client._ws = StubWebSocket()
+    client._ws = FakeWS()
     client._status = "healthy"
     client._pending_dev_data = False
     client._last_event_at = 0.0
@@ -884,7 +904,7 @@ async def test_idle_monitor_task_lifecycle(
         await asyncio.Event().wait()
 
     monkeypatch.setattr(client, "_idle_monitor", _monitor)
-    client._ws = StubWebSocket()
+    client._ws = FakeWS()
     client._start_idle_monitor()
     await asyncio.wait_for(started.wait(), 1.0)
     task = client._idle_monitor_task
@@ -1048,7 +1068,7 @@ async def test_idle_monitor_exits_when_the_check_says_so(
     client: DucaheatWSClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The monitor loop ends (and forgets its task) once a check returns True."""
-    client._ws = StubWebSocket()
+    client._ws = FakeWS()
     check = AsyncMock(return_value=True)
     monkeypatch.setattr(client, "_handle_idle_check", check)
     monkeypatch.setattr(client, "_idle_monitor_interval", lambda: 0.0)
@@ -1066,28 +1086,10 @@ NODES = {"nodes": [{"type": "htr", "addr": "1", "name": "Living room"}]}
 SID = "Sx1"
 
 
-def polling(packet: str) -> bytes:
-    """Encode one Engine.IO v3 binary polling packet."""
-    data = packet.encode()
-    return bytes([0]) + bytes(int(d) for d in str(len(data))) + b"\xff" + data
-
-
 def update(stemp: str) -> str:
     """Return a Socket.IO status update frame for heater 1."""
     body = {"path": "/htr/1/status", "body": {"stemp": stemp}}
     return f"42{NS},{json.dumps(['update', body])}"
-
-
-class Clock:
-    """Wall clock for the websocket module: real time plus a test offset."""
-
-    def __init__(self) -> None:
-        """Start without an offset."""
-        self.offset = 0.0
-
-    def time(self) -> float:
-        """Return the shifted wall-clock time."""
-        return time.time() + self.offset
 
 
 @dataclass
@@ -1099,7 +1101,7 @@ class Harness:
     runtime: EntryRuntime
     client: ducaheat_ws.DucaheatWSClient
     sleeps: SleepController
-    clock: Clock
+    clock: OffsetClock
     statuses: list[dict[str, Any]] = field(default_factory=list)
 
     def start(self) -> asyncio.Task[None]:
@@ -1108,7 +1110,7 @@ class Harness:
         self.sleeps.runner = task
         return task
 
-    async def connected(self, count: int = 1) -> FakeWebSocket:
+    async def connected(self, count: int = 1) -> FakeWS:
         """Wait until socket ``count`` opened the namespace and asked for data."""
         await until(lambda: len(self.session.sockets) >= count)
         ws = self.session.sockets[count - 1]
@@ -1136,7 +1138,7 @@ async def dh(
     """Return a Ducaheat websocket harness; the client is stopped afterwards."""
     sleeps = SleepController()
     sleeps.install(monkeypatch, ducaheat_ws, limiter_module=ws_client)
-    clock = Clock()
+    clock = OffsetClock()
     monkeypatch.setattr(
         ducaheat_ws,
         "time",
@@ -1148,11 +1150,11 @@ async def dh(
 
     session = WSFakeSession()
     session.queue_post(LatchedResponse(token_response(TOKEN)))
-    session.default_get = lambda url: HandshakeResponse(
+    session.default_get = lambda url: FakeResponse(
         200,
         b"ok"
         if "sid=" in url
-        else polling(
+        else polling_body(
             "0" + json.dumps({"sid": SID, "pingInterval": 25000, "pingTimeout": 60000})
         ),
     )
@@ -1200,7 +1202,7 @@ async def dh(
     unsub()
 
 
-async def healthy(h: Harness) -> FakeWebSocket:
+async def healthy(h: Harness) -> FakeWS:
     """Start the client and wait for a session that delivered data."""
     h.start()
     ws = await h.connected()
@@ -1354,7 +1356,7 @@ async def test_cancelling_the_runner_propagates(dh: Harness) -> None:
     """Cancelling the client task leaves it cancelled and reports stopped."""
     started = asyncio.Event()
 
-    class _HangingOpen(HandshakeResponse):
+    class _HangingOpen(FakeResponse):
         async def read(self) -> bytes:
             started.set()
             await asyncio.Event().wait()
@@ -1378,7 +1380,7 @@ async def test_websocket_upgrade_is_bounded_and_sid_stays_out_of_info_logs(
     """A hanging upgrade times out and is retried; the sid is never logged at INFO."""
     monkeypatch.setattr(ws_client, "_WS_CONNECT_TIMEOUT", 0.01)
 
-    async def _hang(url: str, **kwargs: Any) -> FakeWebSocket:
+    async def _hang(url: str, **kwargs: Any) -> FakeWS:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
