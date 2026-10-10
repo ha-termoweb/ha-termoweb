@@ -284,13 +284,12 @@ def test_merge_state_heater_fallback() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_store_reset_nodes_filters_non_node_id() -> None:
-    """reset_nodes should skip non-NodeId entries (line 399)."""
+def test_store_init_filters_non_node_id() -> None:
+    """The store only admits NodeId entries."""
 
     from custom_components.termoweb.domain.state import DomainStateStore
 
-    store = DomainStateStore([NodeId(NodeType.HEATER, "1")])
-    store.reset_nodes(["not-a-node-id", NodeId(NodeType.HEATER, "1")])  # type: ignore[list-item]
+    store = DomainStateStore(["not-a-node-id", NodeId(NodeType.HEATER, "1")])  # type: ignore[list-item]
     assert store.addresses_by_type == {"htr": ("1",)}
 
 

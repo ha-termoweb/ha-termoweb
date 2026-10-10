@@ -24,7 +24,6 @@ async def test_handle_instant_power_update_records_ws(
         base_interval=30,
         dev_id="dev",
         device=build_device_metadata_payload("dev"),
-        nodes=None,
         inventory=inventory,
     )
 
@@ -60,7 +59,6 @@ async def test_handle_instant_power_update_rejects_invalid(
         base_interval=30,
         dev_id="dev",
         device=build_device_metadata_payload("dev"),
-        nodes=None,
         inventory=inventory,
     )
 
@@ -85,7 +83,6 @@ async def test_rest_updates_respect_ws_priority(
         base_interval=30,
         dev_id="dev",
         device=build_device_metadata_payload("dev"),
-        nodes=None,
         inventory=inventory,
     )
 
@@ -135,7 +132,6 @@ async def test_should_skip_rest_power(monkeypatch, inventory_builder) -> None:
         base_interval=30,
         dev_id="dev",
         device=build_device_metadata_payload("dev"),
-        nodes=None,
         inventory=inventory,
     )
 

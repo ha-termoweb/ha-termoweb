@@ -25,11 +25,6 @@ class DomainStateView:
         self._dev_id = str(dev_id)
         self._store = store
 
-    def update_store(self, store: DomainStateStore | None) -> None:
-        """Refresh the backing domain store reference."""
-
-        self._store = store
-
     def _build_state(self, node_type: str | NodeType, addr: str) -> DomainState | None:
         """Return a domain state object using the store."""
 

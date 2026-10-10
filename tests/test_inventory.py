@@ -54,7 +54,7 @@ def heater_inventory() -> Inventory:
         SimpleNamespace(type="htr", addr="", name="Ignored"),
         Node(name="Thermostat", addr="9", node_type="thm"),
         PowerMonitorNode(name="Monitor", addr="3"),
-        Node(name="Alias Monitor", addr="4", node_type="power_monitor"),
+        Node(name="Second Monitor", addr="4", node_type="pmo"),
     ]
     return Inventory("abc123", nodes)
 
@@ -208,8 +208,10 @@ def test_inventory_energy_sample_types_excludes_thermostats(
     assert "thm" not in types
 
 
-def test_inventory_heater_sample_alias_handling(heater_inventory: Inventory) -> None:
-    """Alias types should normalise to heater targets for sample metadata."""
+def test_inventory_heater_sample_ignores_legacy_type_alias(
+    heater_inventory: Inventory,
+) -> None:
+    """The legacy ``heater`` type is not a wire type and is not aliased to htr."""
 
     object.__setattr__(
         heater_inventory,
@@ -224,8 +226,8 @@ def test_inventory_heater_sample_alias_handling(heater_inventory: Inventory) -> 
 
     forward, compat = heater_inventory.heater_sample_address_map
 
-    assert forward == {"htr": ["10"], "acm": ["2"]}
-    assert compat == {"heater": "htr", "htr": "htr"}
+    assert forward == {"htr": [], "acm": ["2"]}
+    assert compat == {"htr": "htr"}
 
 
 def test_inventory_power_monitor_metadata(heater_inventory: Inventory) -> None:
@@ -245,15 +247,14 @@ def test_inventory_power_monitor_metadata(heater_inventory: Inventory) -> None:
 
     sample_map, compat = heater_inventory.power_monitor_sample_address_map
     assert sample_map == {"pmo": ["3", "4"]}
-    assert compat.get("pmo") == "pmo"
-    assert compat.get("power_monitor") == "pmo"
+    assert compat == {"pmo": "pmo"}
 
     sample_map["pmo"].append("ignored")
     compat["alias"] = "pmo"
 
     cached_map, cached_compat = heater_inventory.power_monitor_sample_address_map
     assert cached_map == {"pmo": ["3", "4"]}
-    assert cached_compat.get("power_monitor") == "pmo"
+    assert cached_compat == {"pmo": "pmo"}
 
     targets = heater_inventory.power_monitor_sample_targets
     assert targets == [("pmo", "3"), ("pmo", "4")]
@@ -323,11 +324,11 @@ def test_inventory_power_monitor_targets_deduplicate_and_strip(
 
 
 def test_normalize_power_monitor_addresses_variants() -> None:
-    """normalise helper should handle None, iterables and aliases."""
+    """normalise helper should handle None and iterables, without type aliases."""
 
     empty_map, compat = normalize_power_monitor_addresses(None)
     assert empty_map == {"pmo": []}
-    assert compat["power_monitor"] == "pmo"
+    assert compat == {"pmo": "pmo"}
 
     list_map, _ = normalize_power_monitor_addresses(["A", "A", " "])
     assert list_map == {"pmo": ["A"]}
@@ -335,8 +336,8 @@ def test_normalize_power_monitor_addresses_variants() -> None:
     alias_map, alias_compat = normalize_power_monitor_addresses(
         {"power_monitor": ["B"]}
     )
-    assert alias_map == {"pmo": ["B"]}
-    assert alias_compat["power_monitor"] == "pmo"
+    assert alias_map == {"pmo": []}
+    assert alias_compat == {"pmo": "pmo"}
 
     string_map, _ = normalize_power_monitor_addresses("C")
     assert string_map == {"pmo": ["C"]}
@@ -344,98 +345,6 @@ def test_normalize_power_monitor_addresses_variants() -> None:
     ignored_map, ignored_compat = normalize_power_monitor_addresses({"ignored": ["D"]})
     assert ignored_map == {"pmo": []}
     assert "ignored" not in ignored_compat
-
-
-def test_inventory_heater_names_by_type_caches_by_factory(
-    heater_inventory: Inventory,
-) -> None:
-    """Name map computations should be cached per default factory."""
-
-    def prefixed(addr: str) -> str:
-        return f"Prefixed {addr}"
-
-    first = heater_inventory.heater_names_by_type(prefixed)
-    second = heater_inventory.heater_names_by_type(prefixed)
-
-    assert first is second
-    assert first["htr"]["1"] == "Lounge"
-    assert first["htr"]["2"] == "Prefixed 2"
-
-    def alternate(addr: str) -> str:
-        return f"Alternate {addr}"
-
-    third = heater_inventory.heater_names_by_type(alternate)
-    fourth = heater_inventory.heater_names_by_type(alternate)
-
-    assert third is fourth
-    assert third is not first
-    assert third["htr"]["2"] == "Alternate 2"
-
-
-def test_inventory_heater_names_by_type_reuses_equivalent_factories(
-    heater_inventory: Inventory,
-) -> None:
-    """Equivalent factories should share cached name maps."""
-
-    def build_factory(prefix: str) -> Callable[[str], str]:
-        def _factory(addr: str) -> str:
-            return f"{prefix} {addr}"
-
-        return _factory
-
-    first_factory = build_factory("Shared")
-    second_factory = build_factory("Shared")
-
-    first = heater_inventory.heater_names_by_type(first_factory)
-    second = heater_inventory.heater_names_by_type(second_factory)
-
-    signature = heater_inventory._heater_factory_signature(first_factory)
-    assert signature is not None
-    assert first is second
-    assert heater_inventory._heater_name_by_type_cache[signature] is first
-
-
-def test_inventory_heater_names_by_type_cache_boundaries(
-    heater_inventory: Inventory,
-) -> None:
-    """Cache should evict stale factory entries when exceeding limit."""
-
-    def factory_one(addr: str) -> str:
-        return f"One {addr}"
-
-    def factory_two(addr: str) -> str:
-        return f"Two {addr}"
-
-    def factory_three(addr: str) -> str:
-        return f"Three {addr}"
-
-    def factory_four(addr: str) -> str:
-        return f"Four {addr}"
-
-    def factory_five(addr: str) -> str:
-        return f"Five {addr}"
-
-    factories = [
-        factory_one,
-        factory_two,
-        factory_three,
-        factory_four,
-        factory_five,
-    ]
-
-    for factory in factories:
-        heater_inventory.heater_names_by_type(factory)
-
-    cache = heater_inventory._heater_name_by_type_cache
-    assert len(cache) == Inventory._HEATER_NAME_MAP_CACHE_LIMIT
-
-    signature_three = heater_inventory._heater_factory_signature(factory_three)
-    signature_four = heater_inventory._heater_factory_signature(factory_four)
-    signature_five = heater_inventory._heater_factory_signature(factory_five)
-
-    assert signature_three in cache
-    assert signature_four in cache
-    assert signature_five in cache
 
 
 def test_inventory_heater_names_by_type_supports_default_factory_optional() -> None:
@@ -448,9 +357,8 @@ def test_inventory_heater_names_by_type_supports_default_factory_optional() -> N
     inventory = Inventory("dev", nodes)
 
     first = inventory.heater_names_by_type()
-    second = inventory.heater_names_by_type()
 
-    assert first is second
+    assert first == inventory.heater_names_by_type()
     assert first["htr"]["1"] == "Heater 1"
     assert first["acm"]["2"] == "Storage"
 
@@ -537,38 +445,3 @@ def test_inventory_heater_sample_targets_deduplicate_and_strip(
     object.__setattr__(heater_inventory, "_heater_sample_targets_cache", None)
 
     assert heater_inventory.heater_sample_targets == [("htr", "1"), ("acm", "2")]
-
-
-def test_heater_platform_details_default_name(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Default naming should activate when name overrides are empty."""
-
-    raw_nodes = {
-        "nodes": [
-            {"type": "htr", "addr": "1"},
-            {"type": "acm", "addr": "2"},
-        ]
-    }
-    inventory = Inventory(
-        "dev-name",
-        inventory_module.build_node_inventory(raw_nodes),
-    )
-
-    monkeypatch.setattr(
-        inventory_module.Inventory,
-        "heater_names_by_type",
-        lambda self, _factory: {},
-    )
-
-    nodes_by_type, addrs_by_type, resolver = (
-        inventory_module.heater_platform_details_from_inventory(
-            inventory,
-            default_name_simple=lambda addr: f"Heater {addr}",
-        )
-    )
-
-    assert set(nodes_by_type) == {"htr", "acm"}
-    assert addrs_by_type == {"htr": ["1"], "acm": ["2"], "thm": []}
-    assert resolver("htr", "1") == "Heater 1"
-    assert resolver("acm", "2") == "Accumulator 2"

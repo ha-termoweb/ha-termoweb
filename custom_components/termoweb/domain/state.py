@@ -402,29 +402,11 @@ class DomainStateStore:
         self._addresses_by_type: dict[NodeType, set[str]] = {}
         self._gateway_connection = GatewayConnectionState()
         self._energy_snapshot: EnergySnapshot | None = None
-        self.reset_nodes(nodes)
-
-    def reset_nodes(self, nodes: Iterable[NodeId]) -> None:
-        """Reset the allowed node list and prune any stale state."""
-
-        allowed: dict[NodeId, NodeId] = {}
-        addresses: dict[NodeType, set[str]] = {}
         for node in nodes:
             if not isinstance(node, NodeId):
                 continue
-            allowed[node] = node
-            bucket = addresses.setdefault(node.node_type, set())
-            bucket.add(node.addr)
-
-        self._allowed = allowed
-        self._addresses_by_type = addresses
-        self._states = {
-            node_id: state
-            for node_id, state in self._states.items()
-            if node_id in allowed
-        }
-        if self._energy_snapshot is not None:
-            self._energy_snapshot = self._prune_energy_snapshot(self._energy_snapshot)
+            self._allowed[node] = node
+            self._addresses_by_type.setdefault(node.node_type, set()).add(node.addr)
 
     def _prune_energy_snapshot(self, snapshot: EnergySnapshot) -> EnergySnapshot:
         """Return ``snapshot`` with metrics restricted to allowed nodes."""

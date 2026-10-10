@@ -54,7 +54,7 @@ def test_forward_ws_sample_updates_ignores_non_mapping_sections() -> None:
         entry_id,
         "dev",
         {
-            "heater": {
+            "htr": {
                 "samples": {"1": {"temp": 23}},
                 "lease_seconds": 15,
             },
@@ -68,7 +68,7 @@ def test_forward_ws_sample_updates_ignores_non_mapping_sections() -> None:
     assert coordinator.calls == [
         (
             "dev",
-            {"heater": {"1": {"temp": 23}}},
+            {"htr": {"1": {"temp": 23}}},
             15.0,
         )
     ]

@@ -109,7 +109,6 @@ def _state_coordinator_from_nodes(
         base_interval,
         dev_id,
         metadata,
-        nodes,
         inventory=inventory,
     )
 
@@ -133,15 +132,11 @@ def test_update_nodes_accepts_inventory_container(
         30,
         "dev",
         build_device_metadata_payload("dev", name="Device"),
-        nodes=None,
         inventory=container,
     )
 
     assert coord._inventory is container
     assert coord._inventory.nodes == tuple(nodes_list)
-
-    coord.update_nodes(inventory=container)
-    assert coord._inventory is container
 
 
 def test_domain_view_energy_metrics_prune() -> None:
@@ -239,7 +234,6 @@ def test_energy_coordinator_writes_snapshot_to_state_view(
             30,
             "dev",
             build_device_metadata_payload("dev"),
-            nodes=None,
             inventory=inventory,
         )
         energy = EnergyStateCoordinator(
@@ -287,7 +281,6 @@ def test_coordinator_success_resets_backoff() -> None:
             30,
             "dev",
             build_device_metadata_payload("dev", name="Device"),
-            nodes=None,
             inventory=inventory,
         )
         coord._backoff = 120
@@ -343,7 +336,6 @@ def test_state_coordinator_round_robin_mixed_types() -> None:
             30,
             "dev",
             build_device_metadata_payload("dev", name="Device"),
-            nodes,
             inventory=inventory,
         )
 
@@ -397,7 +389,6 @@ def test_state_coordinator_ignores_non_dict_payloads() -> None:
             30,
             "dev",
             build_device_metadata_payload("dev", name="Device"),
-            nodes,
             inventory=inventory,
         )
 
@@ -436,7 +427,6 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
             30,
             "dev",
             build_device_metadata_payload("dev", name=" Device "),
-            nodes,
             inventory=inventory,
         )
 
@@ -457,7 +447,7 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
                 "inventory": inventory,
             }
         }
-        await coord.async_refresh_heater("")
+        await coord.async_refresh_heater(("htr", ""))
         client.get_node_settings.assert_not_called()
         assert updates == []
 
@@ -467,7 +457,7 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
                 "inventory": inventory,
             }
         }
-        await coord.async_refresh_heater("A")
+        await coord.async_refresh_heater(("htr", "A"))
         client.get_node_settings.assert_called_once_with("dev", ("htr", "A"))
         assert updates == []
 
@@ -644,7 +634,7 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         )
 
         coord.data = None
-        await coord.async_refresh_heater("A")
+        await coord.async_refresh_heater(("htr", "A"))
         client.get_node_settings.assert_called_with("dev", ("htr", "A"))
         assert len(updates) == 1
         first = updates[-1]
@@ -658,7 +648,7 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         assert isinstance(dev.get("inventory"), coord_module.Inventory)
         assert dev["inventory"].addresses_by_type["htr"] == ["A", "B"]
 
-        await coord.async_refresh_heater("B")
+        await coord.async_refresh_heater(("htr", "B"))
         assert client.get_node_settings.await_args_list[-1].args == (
             "dev",
             ("htr", "B"),
@@ -692,10 +682,9 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
             30,
             "dev",
             build_device_metadata_payload("dev", name="Device"),
-            nodes=None,
             inventory=inventory_container,
         )
-        store = coord._state_store or coord._ensure_state_store(inventory_container)
+        store = coord._state_store
         assert store is not None
         store.apply_full_snapshot("acm", "3", {"prev": True})
 
@@ -748,11 +737,10 @@ def test_async_refresh_heater_adds_missing_type() -> None:
             30,
             "dev",
             build_device_metadata_payload("dev", name="Device"),
-            nodes=None,
             inventory=inventory,
         )
 
-        store = coord._state_store or coord._ensure_state_store(inventory)
+        store = coord._state_store
         assert store is not None
         store.apply_full_snapshot("htr", "A", {"mode": "manual"})
 
@@ -798,7 +786,7 @@ def test_refresh_heater_populates_missing_metadata() -> None:
             payload_stale_after=None,
             idle_restart_pending=None,
         )
-        inventory = coord._ensure_inventory()
+        inventory = coord._inventory
 
         updates: list[dict[str, dict[str, Any]]] = []
 
@@ -811,11 +799,11 @@ def test_refresh_heater_populates_missing_metadata() -> None:
             coord,
         )
 
-        store = coord._state_store or coord._ensure_state_store(inventory)
+        store = coord._state_store
         assert store is not None
         coord.data = coord._device_record()  # type: ignore[attr-defined]
 
-        await coord.async_refresh_heater("A")
+        await coord.async_refresh_heater(("htr", "A"))
 
         assert updates, "Expected async_set_updated_data to be called"
         result = updates[-1]["dev"]
@@ -857,7 +845,7 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
             build_device_metadata_payload("dev", name="Device"),
             nodes,
         )
-        inventory = coord._ensure_inventory()
+        inventory = coord._inventory
 
         updates: list[dict[str, dict[str, Any]]] = []
 
@@ -876,7 +864,7 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
                 "inventory": inventory,
             }
         }
-        await coord.async_refresh_heater("A")
+        await coord.async_refresh_heater(("htr", "A"))
         assert updates == []
         assert client.get_node_settings.await_args_list[-1].args == (
             "dev",
@@ -885,12 +873,12 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
 
         caplog.clear()
         with caplog.at_level("ERROR"):
-            await coord.async_refresh_heater("A")
+            await coord.async_refresh_heater(("htr", "A"))
         assert "Timeout refreshing heater settings" in caplog.text
 
         caplog.clear()
         with caplog.at_level("ERROR"):
-            await coord.async_refresh_heater("A")
+            await coord.async_refresh_heater(("htr", "A"))
         assert "Failed to refresh heater settings" in caplog.text
         assert updates == []
 
@@ -914,17 +902,15 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
             30,
             "dev",
             build_device_metadata_payload("dev", name=" Device "),
-            nodes=None,
             inventory=inventory,
         )
 
-        coord.update_nodes(nodes, inventory=inventory)
         coord.data = {
             "dev": {
                 "inventory": inventory,
             }
         }
-        store = coord._state_store or coord._ensure_state_store(inventory)
+        store = coord._state_store
         assert store is not None
         store.apply_full_snapshot("acm", "7", {"prev": True})
         store.apply_full_snapshot("htr", "legacy", {"mode": "auto"})
@@ -956,13 +942,11 @@ def test_async_refresh_heater_updates_cache() -> None:
             30,
             "dev",
             {"name": " Device "},
-            nodes=None,
             inventory=inventory,
         )
 
-        coord.update_nodes(nodes, inventory=inventory)
 
-        await coord.async_refresh_heater("A")
+        await coord.async_refresh_heater(("htr", "A"))
 
         dev_data = coord.data["dev"]
         assert _state_payload(coord, "htr", "A") == {"mode": "heat"}
@@ -988,8 +972,8 @@ def test_async_update_data_skips_non_dict_sections() -> None:
             nodes,
         )
 
-        inventory = coord._ensure_inventory()
-        store = coord._state_store or coord._ensure_state_store(inventory)
+        inventory = coord._inventory
+        store = coord._state_store
         assert store is not None
         store.apply_full_snapshot("acm", "B", {"mode": "auto"})
         coord.data = coord._device_record()  # type: ignore[attr-defined]
@@ -1601,37 +1585,6 @@ def test_energy_coordinator_handles_rate_limit_per_node(
     asyncio.run(_run())
 
 
-def test_state_coordinator_update_nodes_uses_provided_inventory(
-    inventory_builder: Callable[
-        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
-    ],
-) -> None:
-    """Inventory rebinding after setup should be rejected."""
-
-    hass = HomeAssistant()
-    client = types.SimpleNamespace()
-    nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
-    provided_nodes = [Node(name="Heater", addr="A", node_type="htr")]
-    provided_inventory = coord_module.Inventory("dev", provided_nodes)
-
-    inventory = inventory_builder("dev", {})
-    coord = StateCoordinator(
-        hass,
-        client,
-        30,
-        "dev",
-        build_device_metadata_payload("dev", name="Device"),
-        nodes=None,
-        inventory=inventory,
-    )
-
-    with pytest.raises(ValueError, match="Inventory rebinding"):
-        coord.update_nodes(nodes, inventory=provided_inventory)
-
-    inventory = coord._inventory
-    assert inventory is not provided_inventory
-
-
 def test_energy_state_coordinator_requires_inventory(
     inventory_from_map: Callable[
         [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
@@ -1642,25 +1595,12 @@ def test_energy_state_coordinator_requires_inventory(
     inventory = inventory_from_map({"htr": ["A"], "acm": ["B"], "pmo": ["M"]})
     coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
-    resolved = coord._resolve_inventory()
-    targets = list(coord._iter_energy_targets(resolved))
+    targets = list(coord._iter_energy_targets(coord._inventory))
     assert targets == [("htr", "A"), ("acm", "B"), ("pmo", "M")]
-    assert resolved.sample_alias_map(
+    assert coord._inventory.sample_alias_map(
         include_types=coord_module.ENERGY_NODE_TYPES,
         restrict_to=coord_module.ENERGY_NODE_TYPES,
-    ) == {
-        "htr": "htr",
-        "acm": "acm",
-        "pmo": "pmo",
-        "power_monitor": "pmo",
-        "power_monitors": "pmo",
-    }
-
-    with pytest.raises(TypeError):
-        coord.update_addresses(None)
-
-    with pytest.raises(TypeError):
-        coord.update_addresses(object())  # type: ignore[arg-type]
+    ) == {"htr": "htr", "acm": "acm", "pmo": "pmo"}
 
 
 def test_energy_state_coordinator_rejects_missing_inventory() -> None:
@@ -1867,42 +1807,6 @@ def test_heater_energy_timeout(
             await coord.async_refresh()
 
     asyncio.run(_run())
-
-
-# ---------------------------------------------------------------------------
-# EnergyStateCoordinator._resolve_inventory edge cases (lines 1258-1264)
-# ---------------------------------------------------------------------------
-
-
-def test_resolve_inventory_rejects_non_inventory(
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-) -> None:
-    """_resolve_inventory should raise TypeError for non-Inventory candidate."""
-
-    hass = HomeAssistant()
-    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
-    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
-
-    with pytest.raises(TypeError, match="unavailable"):
-        coord._resolve_inventory("not-an-inventory")  # type: ignore[arg-type]
-
-
-def test_resolve_inventory_no_cached_inventory(
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-) -> None:
-    """_resolve_inventory should raise TypeError when both are None."""
-
-    hass = HomeAssistant()
-    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
-    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
-    coord._inventory = None
-
-    with pytest.raises(TypeError, match="unavailable"):
-        coord._resolve_inventory(None)
 
 
 # ---------------------------------------------------------------------------
@@ -2147,23 +2051,6 @@ def test_handle_ws_samples_wrong_dev_id(
     coord.handle_ws_samples("other", {"htr": {"A": {"t": 100, "counter": 1000}}})
 
 
-def test_handle_ws_samples_no_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-) -> None:
-    """handle_ws_samples should return when inventory resolve fails."""
-
-    hass = HomeAssistant()
-    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
-    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
-
-    monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
-    coord._inventory = None
-    coord.handle_ws_samples("dev", {"htr": {"A": {"t": 100, "counter": 1000}}})
-
-
 def test_handle_ws_samples_untracked_type(
     monkeypatch: pytest.MonkeyPatch,
     inventory_from_map: Callable[
@@ -2239,25 +2126,6 @@ def test_merge_samples_wrong_dev_id(
         coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
         monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
         await coord.merge_samples_for_window("other", {})
-
-    asyncio.run(_run())
-
-
-def test_merge_samples_no_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-) -> None:
-    """merge_samples_for_window should return when inventory resolve fails."""
-
-    async def _run() -> None:
-        hass = HomeAssistant()
-        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
-        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
-        coord._inventory = None
-        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
-        await coord.merge_samples_for_window("dev", {})
 
     asyncio.run(_run())
 

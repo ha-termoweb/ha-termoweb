@@ -76,7 +76,7 @@ def test_forward_ws_sample_updates_uses_alias_fallback_and_max_lease() -> None:
                 "samples": {"7": {"power": 180}},
                 "lease_seconds": 45,
             },
-            "power_monitor": {
+            "meter": {
                 "samples": {"8": {"power": 200}},
                 "lease_seconds": 120,
             },

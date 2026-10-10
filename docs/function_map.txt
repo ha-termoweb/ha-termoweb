@@ -986,14 +986,8 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._apply_boost_metad
     Apply boost metadata derivation to every settings payload.
 custom_components/termoweb/coordinator.py :: StateCoordinator._should_defer_pending_setting
     Return True when a pending write should defer payload merging.
-custom_components/termoweb/coordinator.py :: StateCoordinator.update_nodes
-    Update cached inventory metadata when first configured.
-custom_components/termoweb/coordinator.py :: StateCoordinator._ensure_inventory
-    Ensure cached inventory metadata is available.
 custom_components/termoweb/coordinator.py :: StateCoordinator._node_ids_from_inventory
     Return domain node identifiers derived from ``inventory``.
-custom_components/termoweb/coordinator.py :: StateCoordinator._ensure_state_store
-    Ensure a domain state store exists when applicable.
 custom_components/termoweb/coordinator.py :: StateCoordinator.handle_ws_deltas
     Merge websocket-delivered deltas into the domain state store.
 custom_components/termoweb/coordinator.py :: StateCoordinator.apply_entity_patch
@@ -1008,8 +1002,6 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._publish_to_
     Update the canonical state store with ``snapshot``.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.async_set_updated_data
     Store ``data`` in the domain state before notifying listeners.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._resolve_inventory
-    Return the active inventory, preferring ``candidate`` when provided.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._node_id_for
     Return a canonical node identifier for energy tracking.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._iter_energy_targets
@@ -1024,8 +1016,6 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.metrics_by_t
     Return metrics mapping keyed by address for ``node_type``.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._poll_recent_samples
     Fetch recent energy samples for every tracked node.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.update_addresses
-    Replace the tracked nodes using immutable inventory metadata.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._process_energy_sample
     Update cached energy and derived power for ``addr``.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._async_update_data
@@ -1096,8 +1086,6 @@ custom_components/termoweb/domain/state.py :: _merge_state
     Merge ``payload`` fields into ``state`` without altering the type.
 custom_components/termoweb/domain/state.py :: DomainStateStore.__init__
     Initialise the store for a set of allowable nodes.
-custom_components/termoweb/domain/state.py :: DomainStateStore.reset_nodes
-    Reset the allowed node list and prune any stale state.
 custom_components/termoweb/domain/state.py :: DomainStateStore._prune_energy_snapshot
     Return ``snapshot`` with metrics restricted to allowed nodes.
 custom_components/termoweb/domain/state.py :: DomainStateStore._resolve_node_id
@@ -1144,8 +1132,6 @@ custom_components/termoweb/domain/state.py :: apply_payload_to_state
     Apply a mapping payload onto ``state`` when possible.
 custom_components/termoweb/domain/view.py :: DomainStateView.__init__
     Initialise the view for ``dev_id`` using ``store`` when available.
-custom_components/termoweb/domain/view.py :: DomainStateView.update_store
-    Refresh the backing domain store reference.
 custom_components/termoweb/domain/view.py :: DomainStateView._build_state
     Return a domain state object using the store.
 custom_components/termoweb/domain/view.py :: DomainStateView.get_heater_state
@@ -1741,27 +1727,17 @@ custom_components/termoweb/inventory.py :: Inventory.sample_alias_map
 custom_components/termoweb/inventory.py :: Inventory.sample_alias_map._merge_alias
     Insert a normalised alias pair into ``alias_map``.
 custom_components/termoweb/inventory.py :: Inventory.heater_names_by_type
-    Return cached heater names by type for ``default_factory``.
-custom_components/termoweb/inventory.py :: Inventory.heater_names_by_type._node_value
-    Return attribute ``key`` for ``candidate`` regardless of type.
-custom_components/termoweb/inventory.py :: Inventory.heater_names_by_type._evict_stale_cache
-    Drop the oldest cached factory when exceeding the size limit.
-custom_components/termoweb/inventory.py :: Inventory._heater_factory_signature
-    Return a stable cache key for ``factory`` when possible.
+    Return heater names by type, using ``default_factory`` for unnamed nodes.
 custom_components/termoweb/inventory.py :: _normalize_node_identifier
     Return ``value`` as a normalised node identifier string.
 custom_components/termoweb/inventory.py :: normalize_node_type
     Return ``value`` as a normalised node type string.
 custom_components/termoweb/inventory.py :: normalize_node_addr
-    Return ``value`` as a normalised node address string.
+    Return ``value`` as a normalised node address string; ``None`` is invalid.
 custom_components/termoweb/inventory.py :: addresses_by_node_type
     Return mapping of node type to address list, tracking unknown types.
 custom_components/termoweb/inventory.py :: build_heater_address_map
     Return mapping of heater node types to addresses and reverse lookup.
-custom_components/termoweb/inventory.py :: heater_platform_details_from_inventory
-    Return heater platform metadata derived from ``inventory``.
-custom_components/termoweb/inventory.py :: heater_platform_details_from_inventory.resolve_name
-    Resolve friendly names for heater nodes.
 custom_components/termoweb/inventory.py :: boostable_accumulator_details_for_entry
     Return boostable accumulator metadata for a config entry.
 custom_components/termoweb/inventory.py :: normalize_heater_addresses
@@ -1788,32 +1764,16 @@ custom_components/termoweb/inventory.py :: AccumulatorNode.supports_boost
     Return whether the accumulator exposes boost/runback.
 custom_components/termoweb/inventory.py :: PowerMonitorNode.__init__
     Initialise a power monitor node.
-custom_components/termoweb/inventory.py :: PowerMonitorNode.power_level
-    Return the reported power level (stub).
 custom_components/termoweb/inventory.py :: PowerMonitorNode.default_name
     Return the fallback friendly name for the power monitor.
 custom_components/termoweb/inventory.py :: PowerMonitorNode.sample_target
     Return the canonical ``(node_type, addr)`` sample target.
 custom_components/termoweb/inventory.py :: ThermostatNode.__init__
     Initialise a thermostat node.
-custom_components/termoweb/inventory.py :: ThermostatNode.capabilities
-    Return thermostat capabilities (stub).
-custom_components/termoweb/inventory.py :: _existing_nodes_map
-    Return a mapping of node type sections extracted from ``source``.
-custom_components/termoweb/inventory.py :: _iter_snapshot_sections
-    Yield node payloads derived from snapshot-style ``sections``.
-custom_components/termoweb/inventory.py :: _iter_snapshot_section
-    Yield node dictionaries for a single node type section.
-custom_components/termoweb/inventory.py :: _collect_snapshot_addresses
-    Return mapping of addresses to candidate payloads from ``section``.
-custom_components/termoweb/inventory.py :: _extract_snapshot_name
-    Return best candidate name extracted from ``payloads``.
 custom_components/termoweb/inventory.py :: _iter_node_payload
-    Yield node dictionaries from a payload returned by the API.
+    Yield node dictionaries from a ``{"nodes": [...]}`` payload or a node list.
 custom_components/termoweb/inventory.py :: _resolve_node_class
     Return the most appropriate node class for ``node_type``.
-custom_components/termoweb/inventory.py :: _normalise_with_fallback
-    Return the first non-empty normalised value from ``candidates``.
 custom_components/termoweb/inventory.py :: build_node_inventory
     Return a list of :class:`Node` instances for the provided payload.
 custom_components/termoweb/planner/ducaheat_planner.py :: plan_command
