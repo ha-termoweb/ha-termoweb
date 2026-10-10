@@ -15,7 +15,6 @@ from custom_components.termoweb.backend.ducaheat import (
     DucaheatRESTClient,
 )
 from custom_components.termoweb.backend.sanitize import (
-    build_acm_boost_payload,
     mask_identifier,
     redact_text,
     redact_token_fragment,
@@ -562,45 +561,6 @@ def test_validate_boost_minutes_accepts_valid_inputs(
 def test_validate_boost_minutes_rejects_invalid_inputs(value: object) -> None:
     with pytest.raises(ValueError):
         validate_boost_minutes(value)  # type: ignore[arg-type]
-
-
-def test_build_acm_boost_payload_normalises_optional_fields() -> None:
-    payload = build_acm_boost_payload(
-        True,
-        "180",
-        stemp=" 21.5 ",
-        units="f",
-    )
-
-    assert payload == {
-        "boost": True,
-        "boost_time": 180,
-        "stemp": "21.5",
-        "units": "F",
-    }
-
-
-def test_build_acm_boost_payload_rejects_empty_stemp() -> None:
-    baseline = build_acm_boost_payload(True, 120, stemp="20", units="C")
-
-    with pytest.raises(ValueError):
-        build_acm_boost_payload(False, 60, stemp="   ")
-
-    assert baseline == {
-        "boost": True,
-        "boost_time": 120,
-        "stemp": "20",
-        "units": "C",
-    }
-
-
-def test_build_acm_boost_payload_rejects_invalid_units() -> None:
-    baseline = build_acm_boost_payload(True, 60)
-
-    with pytest.raises(ValueError):
-        build_acm_boost_payload(True, 120, stemp="21", units="kelvin")
-
-    assert baseline == {"boost": True, "boost_time": 60}
 
 
 def test_ducaheat_log_segmented_post_noop_when_not_debug(

@@ -148,15 +148,9 @@ async def test_set_node_settings_mode_segment_plan(
                 parent.f_locals["status_includes_mode"] = False
         return "C" if units is not None else "C"
 
-    def fake_ensure_temperature(value: Any) -> str:
-        """Return a deterministic temperature string."""
-
-        return "19.0"
-
     monkeypatch.setattr(client, "authed_headers", fake_headers)
     monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
     monkeypatch.setattr(client, "_ensure_units", fake_ensure_units)
-    monkeypatch.setattr(client, "_ensure_temperature", fake_ensure_temperature)
 
     responses = await client.set_node_settings(
         "dev", ("htr", 2), mode="auto", stemp=18, units="C"

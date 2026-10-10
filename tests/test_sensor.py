@@ -426,7 +426,7 @@ def test_heater_temperature_sensor_missing_mtemp(thermostat_inventory):
 
 
 def test_thermostat_battery_coerce_level_bool():
-    """Boolean True should coerce to 1, giving 20%."""
+    """Booleans are not battery levels (shared ``as_int`` contract)."""
     coordinator = _make_coordinator(
         Inventory("dev-thm", build_node_inventory({"nodes": [{"type": "thm", "addr": "T1"}]})),
         payload={"thm": {"T1": {"batt_level": True}}},
@@ -441,36 +441,26 @@ def test_thermostat_battery_coerce_level_bool():
         node_type="thm",
         inventory=coordinator.inventory,
     )
-    assert sensor.native_value == 20  # True -> 1 -> 1*20
+    assert sensor.native_value is None
 
 
-def test_thermostat_battery_coerce_level_string_numeric():
-    """String numeric values that fail initial float() should try str().strip()."""
-    # We test with a stringifiable non-string type that fails float()
-    assert ThermostatBatterySensor._coerce_level(float("nan")) is None
-
-
-def test_thermostat_battery_coerce_level_string_fallback():
-    """Coerce level should try str(value).strip() as fallback."""
-    # An object whose str representation is a number
-    class Tricky:
-        def __float__(self):
-            raise TypeError("nope")
-        def __str__(self):
-            return " 3 "
-
-    assert ThermostatBatterySensor._coerce_level(Tricky()) == 3
-
-
-def test_thermostat_battery_coerce_level_string_fallback_fails():
-    """Coerce level should return None when all conversions fail."""
-    class Unconvertible:
-        def __float__(self):
-            raise TypeError("nope")
-        def __str__(self):
-            return "not-a-number"
-
-    assert ThermostatBatterySensor._coerce_level(Unconvertible()) is None
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (float("nan"), None),
+        (float("inf"), None),
+        ("inf", None),
+        (" 3 ", 3),
+        ("4.7", 4),
+        (9, 5),
+        (-1, 0),
+        ("not-a-number", None),
+        (object(), None),
+    ],
+)
+def test_thermostat_battery_coerce_level(value, expected):
+    """Battery level uses ``as_int`` (truncating) clamped to 0..5; inf no longer crashes."""
+    assert ThermostatBatterySensor._coerce_level(value) == expected
 
 
 def test_thermostat_battery_sensor_no_device_name():

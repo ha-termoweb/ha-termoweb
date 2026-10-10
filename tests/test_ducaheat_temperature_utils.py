@@ -19,33 +19,6 @@ def ducaheat_client() -> DucaheatRESTClient:
 @pytest.mark.parametrize(
     "value, expected",
     [
-        (21.567, "21.6"),
-        ("19.2", "19.2"),
-        ("19", "19.0"),
-        (18, "18.0"),
-    ],
-)
-def test_ensure_temperature_accepts_numeric_values(
-    ducaheat_client: DucaheatRESTClient, value: float | str, expected: str
-) -> None:
-    """_ensure_temperature should normalise float-able values to one decimal string."""
-
-    assert ducaheat_client._ensure_temperature(value) == expected
-
-
-@pytest.mark.parametrize("value", [None, "abc", object(), ""])
-def test_ensure_temperature_rejects_invalid_values(
-    ducaheat_client: DucaheatRESTClient, value: object
-) -> None:
-    """_ensure_temperature should raise ``ValueError`` for bad temperature input."""
-
-    with pytest.raises(ValueError):
-        ducaheat_client._ensure_temperature(value)  # type: ignore[arg-type]
-
-
-@pytest.mark.parametrize(
-    "value, expected",
-    [
         ("c", "C"),
         ("f", "F"),
         (" C ", "C"),

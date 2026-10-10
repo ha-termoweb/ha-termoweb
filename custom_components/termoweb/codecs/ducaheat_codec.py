@@ -22,7 +22,7 @@ from custom_components.termoweb.domain.commands import (
 )
 from custom_components.termoweb.domain.ids import NodeType
 
-from .common import validate_units
+from .common import validate_prog, validate_units
 from .ducaheat_models import (
     BoostPayload,
     ExtraOptionsPayload,
@@ -151,19 +151,7 @@ def encode_program_command(
     value (``max`` of the pair, as shown on read) is unchanged.
     """
 
-    if not isinstance(command.program, list) or len(command.program) != 168:
-        msg = "prog must be a list of 168 integers (0, 1, or 2)"
-        raise ValueError(msg)
-
-    try:
-        validated = [int(value) for value in command.program]
-    except (TypeError, ValueError) as err:
-        msg = "prog contains non-integer value"
-        raise ValueError(msg) from err
-
-    if any(value not in (0, 1, 2) for value in validated):
-        msg = "prog values must be 0, 1, or 2"
-        raise ValueError(msg)
+    validated = validate_prog(command.program)
 
     existing_days = current or {}
     half_hour = any(len(slots) == 48 for slots in existing_days.values())

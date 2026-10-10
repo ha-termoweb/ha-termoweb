@@ -66,7 +66,14 @@ This map defines responsibilities for each module family in the final design.
   snapshots), and `DomainStateView`.
 - `backend/` — vendor-specific REST/WS clients (including the REST client
   implementation), protocol details, and brand selection.
+- `coerce.py` — the only lenient value coercers (`as_float`, `as_number`,
+  `as_int`, `as_bool`, `as_percentage`); each returns `None` instead of raising
+  and has one documented semantics (see the module docstring).
 - `codecs/` — Pydantic payload models and conversion to/from domain types.
+  `codecs/common.py` holds the shared wire helpers: `format_temperature`
+  (strict), `safe_temperature` (inbound), `validate_units`, `validate_prog`
+  and `validate_ptemp`. Vendor encoders (e.g. acm boost payloads) stay in
+  their vendor codec.
 - `planner/` — vendor-specific write orchestration and validation rules.
 - `entities/` — vendor-agnostic entity implementations (climate, sensor,
   binary_sensor, button, number, etc.) that read via `DomainStateView`.

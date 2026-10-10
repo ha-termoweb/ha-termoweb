@@ -10,138 +10,9 @@ from custom_components.termoweb.codecs.ducaheat_read_models import (
     DucaheatSetupSegment,
     DucaheatStatusSegment,
     DucaheatThermostatSettings,
-    _coerce_bool,
-    _coerce_int,
-    _coerce_number,
-    _coerce_percentage,
     _normalise_prog,
     _normalise_prog_temps,
-    _safe_temperature,
 )
-
-
-# ---------------------------------------------------------------------------
-# _coerce_bool
-# ---------------------------------------------------------------------------
-
-
-class TestCoerceBool:
-    """Tests for the _coerce_bool helper."""
-
-    def test_none_returns_none(self) -> None:
-        assert _coerce_bool(None) is None
-
-    def test_bool_passthrough(self) -> None:
-        assert _coerce_bool(True) is True
-        assert _coerce_bool(False) is False
-
-    def test_int_coercion(self) -> None:
-        assert _coerce_bool(1) is True
-        assert _coerce_bool(0) is False
-
-    def test_float_coercion(self) -> None:
-        assert _coerce_bool(1.0) is True
-        assert _coerce_bool(0.0) is False
-
-    def test_string_truthy(self) -> None:
-        for val in ("1", "true", "yes", "on", " TRUE ", " Yes "):
-            assert _coerce_bool(val) is True
-
-    def test_string_falsy(self) -> None:
-        for val in ("0", "false", "no", "off", " FALSE ", " No "):
-            assert _coerce_bool(val) is False
-
-    def test_unrecognised_string_returns_none(self) -> None:
-        assert _coerce_bool("maybe") is None
-
-    def test_non_string_non_number_returns_none(self) -> None:
-        assert _coerce_bool([1, 2, 3]) is None
-
-
-# ---------------------------------------------------------------------------
-# _coerce_number
-# ---------------------------------------------------------------------------
-
-
-class TestCoerceNumber:
-    def test_int_passthrough(self) -> None:
-        assert _coerce_number(42) == 42
-
-    def test_float_passthrough(self) -> None:
-        assert _coerce_number(3.14) == 3.14
-
-    def test_none_returns_none(self) -> None:
-        assert _coerce_number(None) is None
-
-    def test_string_number(self) -> None:
-        assert _coerce_number("  21.5 ") == 21.5
-
-    def test_invalid_string_returns_none(self) -> None:
-        assert _coerce_number("abc") is None
-
-
-# ---------------------------------------------------------------------------
-# _coerce_percentage
-# ---------------------------------------------------------------------------
-
-
-class TestCoercePercentage:
-    def test_valid_percentage(self) -> None:
-        assert _coerce_percentage(50) == 50
-
-    def test_clamps_above_100(self) -> None:
-        assert _coerce_percentage(150) == 100
-
-    def test_clamps_below_0(self) -> None:
-        assert _coerce_percentage(-10) == 0
-
-    def test_none_returns_none(self) -> None:
-        assert _coerce_percentage(None) is None
-
-    def test_invalid_returns_none(self) -> None:
-        assert _coerce_percentage("abc") is None
-
-    def test_float_truncated(self) -> None:
-        assert _coerce_percentage(75.9) == 75
-
-
-# ---------------------------------------------------------------------------
-# _coerce_int
-# ---------------------------------------------------------------------------
-
-
-class TestCoerceInt:
-    def test_valid_int(self) -> None:
-        assert _coerce_int(42) == 42
-
-    def test_string_int(self) -> None:
-        assert _coerce_int("7") == 7
-
-    def test_none_returns_none(self) -> None:
-        assert _coerce_int(None) is None
-
-    def test_invalid_returns_none(self) -> None:
-        assert _coerce_int("abc") is None
-
-
-# ---------------------------------------------------------------------------
-# _safe_temperature
-# ---------------------------------------------------------------------------
-
-
-class TestSafeTemperature:
-    def test_none_returns_none(self) -> None:
-        assert _safe_temperature(None) is None
-
-    def test_valid_number(self) -> None:
-        assert _safe_temperature(21.5) == "21.5"
-
-    def test_invalid_string_returned_cleaned(self) -> None:
-        # Strings that can't be parsed as floats are cleaned and returned
-        assert _safe_temperature("warm") == "warm"
-
-    def test_empty_string_returns_none(self) -> None:
-        assert _safe_temperature("") is None
 
 
 # ---------------------------------------------------------------------------
@@ -725,4 +596,36 @@ class TestMergeAccumulatorChargeMetadata:
         )
         assert "current_charge_per" not in target
 
+    def test_non_finite_percentage_skipped(self) -> None:
+        """inf used to raise OverflowError out of the read model."""
+        target: dict = {}
+        _merge_accumulator_charge_metadata(
+            target, {"current_charge_per": "inf", "target_charge_per": "42.5"}
+        )
+        assert "current_charge_per" not in target
+        assert target["target_charge_per"] == 42
 
+    def test_matches_rest_client_merge(self) -> None:
+        """Read model and REST client merge charge fields with the same coercers."""
+        from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
+
+        source = {"charging": 2, "current_charge_per": "150", "target_charge_per": 7.9}
+        model_target: dict = {}
+        _merge_accumulator_charge_metadata(model_target, source)
+        client_target: dict = {}
+        DucaheatRESTClient._merge_accumulator_charge_metadata(
+            object.__new__(DucaheatRESTClient), client_target, source
+        )
+        assert model_target == client_target == {
+            "current_charge_per": 100,
+            "target_charge_per": 7,
+        }
+
+
+
+
+def test_setup_segment_formats_boost_temp() -> None:
+    """Setup boost_temp uses the shared inbound temperature formatter."""
+
+    assert DucaheatSetupSegment.model_validate({"boost_temp": 21}).boost_temp == "21.0"
+    assert DucaheatSetupSegment.model_validate({"boost_temp": " "}).boost_temp is None

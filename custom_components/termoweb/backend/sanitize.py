@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
-
-from custom_components.termoweb.boost import validate_boost_minutes
 
 _BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]+=*", re.IGNORECASE)
 _TOKEN_QUERY_RE = re.compile(r"(?i)(token|refresh_token|access_token)=([^&\s]+)")
@@ -58,34 +55,7 @@ def mask_identifier(value: str | None) -> str:
     return f"{prefix}...{suffix}"
 
 
-def build_acm_boost_payload(
-    boost: bool,
-    boost_time: int | None,
-    *,
-    stemp: str | None = None,
-    units: str | None = None,
-) -> dict[str, Any]:
-    """Return a validated accumulator boost payload."""
-
-    payload: dict[str, Any] = {"boost": bool(boost)}
-    minutes = validate_boost_minutes(boost_time)
-    if minutes is not None:
-        payload["boost_time"] = minutes
-    if stemp is not None:
-        temp_str = str(stemp).strip()
-        if not temp_str:
-            raise ValueError("stemp must be a non-empty string when provided")
-        payload["stemp"] = temp_str
-    if units is not None:
-        unit = str(units).strip().upper()
-        if unit not in {"C", "F"}:
-            raise ValueError(f"Invalid units: {units!r}")
-        payload["units"] = unit
-    return payload
-
-
 __all__ = [
-    "build_acm_boost_payload",
     "mask_identifier",
     "redact_text",
     "redact_token_fragment",

@@ -24,11 +24,8 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from custom_components.termoweb.boost import (
-    coerce_boost_bool,
-    coerce_boost_minutes,
-    supports_boost,
-)
+from custom_components.termoweb.boost import coerce_boost_minutes, supports_boost
+from custom_components.termoweb.coerce import as_bool, as_float
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.domain import DomainStateView
 from custom_components.termoweb.domain.state import (
@@ -45,10 +42,7 @@ from custom_components.termoweb.inventory import (
     normalize_node_type,
 )
 from custom_components.termoweb.runtime import EntryRuntime, require_runtime
-from custom_components.termoweb.utils import (
-    float_or_none,
-    translate_default_device_name,
-)
+from custom_components.termoweb.utils import translate_default_device_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -231,7 +225,7 @@ def get_boost_temperature(
     if not isinstance(bucket, MutableMapping):
         return None
 
-    return float_or_none(bucket.get(addr_norm))
+    return as_float(bucket.get(addr_norm))
 
 
 def set_boost_runtime_minutes(
@@ -406,9 +400,9 @@ def to_device_temperature(celsius: float, units: str) -> float:
 def resolve_acm_boost_setpoint(state: DomainState | None) -> float | None:
     """Return the device boost temperature, falling back to the setpoint."""
 
-    boost_temp = float_or_none(getattr(state, "boost_temp", None))
+    boost_temp = as_float(getattr(state, "boost_temp", None))
     if boost_temp is None:
-        boost_temp = float_or_none(getattr(state, "stemp", None))
+        boost_temp = as_float(getattr(state, "stemp", None))
     return boost_temp
 
 
@@ -500,7 +494,7 @@ def _derive_boost_state(
 
         return dt_util.parse_datetime(value)
 
-    boost_active = coerce_boost_bool(_get_field("boost_active"))
+    boost_active = as_bool(_get_field("boost_active"))
     if boost_active is None:
         mode = _get_field("mode")
         if isinstance(mode, str):

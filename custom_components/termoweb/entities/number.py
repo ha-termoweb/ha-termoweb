@@ -25,7 +25,8 @@ from ..inventory import (
     normalize_node_type,
 )
 from ..runtime import require_runtime
-from ..utils import build_installation_device_info, float_or_none
+from ..coerce import as_float
+from ..utils import build_installation_device_info
 from .heater import (
     DEFAULT_BOOST_DURATION,
     DEFAULT_BOOST_TEMPERATURE,
@@ -411,7 +412,7 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
                     self._addr,
                 )
             ),
-            last_state_parser=float_or_none,
+            last_state_parser=as_float,
             settings_lookup=self._initial_temperature_from_settings,
             applier=self._apply_temperature,
         )
@@ -481,11 +482,11 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
         """Return the bootstrap value sourced from cached settings."""
 
         state = self.accumulator_state()
-        candidate = float_or_none(
+        candidate = as_float(
             getattr(state, "boost_temp", None) if state is not None else None
         )
         if candidate is None:
-            candidate = float_or_none(
+            candidate = as_float(
                 getattr(state, "stemp", None) if state is not None else None
             )
         if candidate is None:
@@ -511,10 +512,8 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
     def _validate_temperature(self, value: Any) -> float | None:
         """Return a valid boost temperature within supported limits."""
 
-        candidate = float_or_none(value)
+        candidate = as_float(value)
         if candidate is None:
-            return None
-        if not math.isfinite(candidate):
             return None
         if candidate < self.native_min_value or candidate > self.native_max_value:
             return None
