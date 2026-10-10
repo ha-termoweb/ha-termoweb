@@ -176,11 +176,19 @@ Setup your environment:
 uv sync --locked --extra test
 ```
 
-Run tests with coverage (settings are in `pyproject.toml`):
+There are two test suites. Run them one after the other. The second run adds its
+coverage to the first, and the 90% coverage gate applies to the total:
 
 ```bash
-timeout 60s uv run pytest --cov
+# 1. Older tests, using a stub of Home Assistant (folder tests/)
+timeout 60s uv run pytest --cov --cov-fail-under=0 --cov-report=
+# 2. Tests against the real Home Assistant (folder tests_ha/)
+timeout 60s uv run pytest tests_ha -p homeassistant -o asyncio_mode=auto --cov --cov-append
 ```
+
+The two suites must run as separate commands. The stub in `tests/conftest.py`
+replaces Home Assistant for the whole test run, so it cannot share a run with the
+real one. Write new tests in `tests_ha/`. Old tests move there step by step.
 
 See [`docs/developer-notes.md`](docs/developer-notes.md) for backend write semantics and other
 implementation details for contributors.
