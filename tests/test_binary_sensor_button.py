@@ -16,8 +16,7 @@ from homeassistant.core import HomeAssistant
 
 import custom_components.termoweb.binary_sensor as binary_sensor_module
 import custom_components.termoweb.button as button_module
-from custom_components.termoweb.entities import button as entities_button_module
-import custom_components.termoweb.heater as heater_module
+import custom_components.termoweb.entity as entity_module
 from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.inventory import (
@@ -457,8 +456,8 @@ def _make_boost_context(
     return AccumulatorBoostContext.from_inventory(entry_id, inventory, node)
 
 
-def _metadata_for(action: str) -> heater_module.BoostButtonMetadata:
-    for metadata in heater_module.BOOST_BUTTON_METADATA:
+def _metadata_for(action: str) -> entity_module.BoostButtonMetadata:
+    for metadata in entity_module.BOOST_BUTTON_METADATA:
         if metadata.action == action:
             return metadata
     raise AssertionError(f"metadata for action={action!r} not found")
@@ -496,21 +495,21 @@ def test_flash_display_button_device_info_varies_by_node_type() -> None:
     coordinator = types.SimpleNamespace(hass=None, _inventory=Inventory("dev", []))
 
     # Heater node
-    htr_context = entities_button_module.DisplayFlashContext(
+    htr_context = button_module.DisplayFlashContext(
         entry_id="e", dev_id="dev", node_type="htr", addr="1", name="Heater 1",
     )
     htr_button = DisplayFlashButton(coordinator, htr_context)
     assert htr_button.device_info["model"] == "Heater"
 
     # Accumulator node
-    acm_context = entities_button_module.DisplayFlashContext(
+    acm_context = button_module.DisplayFlashContext(
         entry_id="e", dev_id="dev", node_type="acm", addr="2", name="Acc 2",
     )
     acm_button = DisplayFlashButton(coordinator, acm_context)
     assert acm_button.device_info["model"] == "Accumulator"
 
     # Thermostat node (default fallback)
-    thm_context = entities_button_module.DisplayFlashContext(
+    thm_context = button_module.DisplayFlashContext(
         entry_id="e", dev_id="dev", node_type="thm", addr="3", name="Thm 3",
     )
     thm_button = DisplayFlashButton(coordinator, thm_context)
@@ -545,7 +544,7 @@ def test_flash_display_button_handles_press_error(
             inventory=Inventory(dev_id, [HeaterNode(name="Heater", addr="7")]),
         )
 
-        context = entities_button_module.DisplayFlashContext(
+        context = button_module.DisplayFlashContext(
             entry_id=entry.entry_id,
             dev_id=dev_id,
             node_type="htr",
@@ -569,11 +568,11 @@ def test_flash_display_button_skips_press_without_hass(
     """DisplayFlashButton.async_press should do nothing when hass is None."""
 
     require_runtime = MagicMock()
-    monkeypatch.setattr(entities_button_module, "require_runtime", require_runtime)
+    monkeypatch.setattr(button_module, "require_runtime", require_runtime)
 
     async def _run() -> None:
         coordinator = types.SimpleNamespace(hass=None, _inventory=Inventory("dev", []))
-        context = entities_button_module.DisplayFlashContext(
+        context = button_module.DisplayFlashContext(
             entry_id="e", dev_id="dev", node_type="htr", addr="1", name="H",
         )
         button = DisplayFlashButton(coordinator, context)
@@ -591,14 +590,14 @@ def test_flash_display_button_available_depends_on_inventory() -> None:
     inventory = Inventory("dev", [HeaterNode(name="Heater", addr="1")])
     coordinator = types.SimpleNamespace(hass=None, _inventory=inventory)
 
-    context = entities_button_module.DisplayFlashContext(
+    context = button_module.DisplayFlashContext(
         entry_id="e", dev_id="dev", node_type="htr", addr="1", name="Heater",
     )
     button = DisplayFlashButton(coordinator, context)
     assert button.available is True
 
     # Missing node -> not available
-    context_missing = entities_button_module.DisplayFlashContext(
+    context_missing = button_module.DisplayFlashContext(
         entry_id="e", dev_id="dev", node_type="htr", addr="99", name="Missing",
     )
     button_missing = DisplayFlashButton(coordinator, context_missing)
@@ -615,7 +614,7 @@ def test_build_boost_button_raises_for_unknown_action() -> None:
 
     coordinator = types.SimpleNamespace(hass=None, data={})
     context = _make_boost_context("entry", "dev", addr="1", name="Acc")
-    bad_metadata = heater_module.BoostButtonMetadata(
+    bad_metadata = entity_module.BoostButtonMetadata(
         minutes=60,
         unique_suffix="unknown",
         label="Unknown",
@@ -624,7 +623,7 @@ def test_build_boost_button_raises_for_unknown_action() -> None:
     )
 
     with pytest.raises(ValueError, match="Unsupported boost button action"):
-        entities_button_module._build_boost_button(bad_metadata, coordinator, context)
+        button_module._build_boost_button(bad_metadata, coordinator, context)
 
 
 def test_accumulator_boost_base_device_info() -> None:

@@ -508,6 +508,34 @@ def heater_platform_details_for_entry(
     )
 
 
+def boostable_accumulator_details_for_entry(
+    runtime: EntryRuntime,
+    *,
+    default_name_simple: Callable[[str], str],
+    platform_name: str,
+    logger: logging.Logger | None = None,
+    accumulators_only: bool = True,
+) -> tuple[HeaterPlatformDetails, list[tuple[str, str, str]]]:
+    """Return boostable accumulator metadata for a config entry."""
+
+    details = heater_platform_details_for_entry(
+        runtime,
+        default_name_simple=default_name_simple,
+    )
+
+    metadata: list[tuple[str, str, str]] = [
+        (node_type, addr_str, base_name)
+        for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
+            details,
+            accumulators_only=accumulators_only,
+        )
+    ]
+
+    log_skipped_nodes(platform_name, details, logger=logger)
+
+    return details, metadata
+
+
 def build_settings_resolver(
     coordinator: Any,
     dev_id: str,

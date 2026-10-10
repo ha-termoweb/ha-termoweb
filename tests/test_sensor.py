@@ -247,7 +247,7 @@ def test_accumulator_charge_percentage_handles_missing_values(
 # Coverage expansion: _looks_like_integer_string
 # ---------------------------------------------------------------------------
 
-from custom_components.termoweb.entities.sensor import (
+from custom_components.termoweb.sensor import (
     _looks_like_integer_string,
     _normalise_energy_value,
     _power_monitor_display_name,
@@ -275,7 +275,7 @@ from custom_components.termoweb.domain.state import DomainStateStore
 from custom_components.termoweb.domain.energy import EnergyNodeMetrics, EnergySnapshot
 from custom_components.termoweb.domain.view import DomainStateView
 from custom_components.termoweb.const import DOMAIN
-from custom_components.termoweb.entities.heater import HeaterPlatformDetails
+from custom_components.termoweb.entity import HeaterPlatformDetails
 from types import SimpleNamespace
 import math
 import importlib
@@ -847,7 +847,7 @@ def test_power_monitor_energy_sensor_uses_normalise():
 def test_installation_total_energy_sensor_sums_metrics():
     """Installation total should sum energy across all heater types."""
     sensor_module = importlib.import_module("custom_components.termoweb.sensor")
-    heater_entities = importlib.import_module("custom_components.termoweb.entities.heater")
+    heater_entities = importlib.import_module("custom_components.termoweb.entity")
     ids_module = importlib.import_module("custom_components.termoweb.domain.ids")
     energy_module = importlib.import_module("custom_components.termoweb.domain.energy")
     state_module = importlib.import_module("custom_components.termoweb.domain.state")
@@ -912,7 +912,7 @@ def test_installation_total_energy_sensor_no_view():
 def test_installation_total_energy_sensor_no_metrics():
     """Installation total should return None when no metrics match."""
     sensor_module = importlib.import_module("custom_components.termoweb.sensor")
-    heater_entities = importlib.import_module("custom_components.termoweb.entities.heater")
+    heater_entities = importlib.import_module("custom_components.termoweb.entity")
     ids_module = importlib.import_module("custom_components.termoweb.domain.ids")
     state_module = importlib.import_module("custom_components.termoweb.domain.state")
     view_module = importlib.import_module("custom_components.termoweb.domain.view")

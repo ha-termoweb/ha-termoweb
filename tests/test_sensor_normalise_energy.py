@@ -91,9 +91,6 @@ async def test_async_setup_entry_handles_missing_power_monitors(
     """Sensor setup tolerates missing power monitors and skips what the backend lacks."""
 
     module = importlib.import_module("custom_components.termoweb.sensor")
-    entities_sensor_module = importlib.import_module(
-        "custom_components.termoweb.entities.sensor"
-    )
     inventory_module = importlib.import_module("custom_components.termoweb.inventory")
     hass = HomeAssistant()
     hass.data = {DOMAIN: {}}
@@ -127,39 +124,14 @@ async def test_async_setup_entry_handles_missing_power_monitors(
         "heater_platform_details_for_entry",
         lambda _data, **_kwargs: heater_details,
     )
-    monkeypatch.setattr(
-        entities_sensor_module,
-        "heater_platform_details_for_entry",
-        lambda _data, **_kwargs: heater_details,
-    )
     monkeypatch.setattr(module, "iter_boostable_heater_nodes", lambda _details: [])
-    monkeypatch.setattr(
-        entities_sensor_module,
-        "iter_boostable_heater_nodes",
-        lambda _details: [],
-    )
     monkeypatch.setattr(module, "log_skipped_nodes", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        entities_sensor_module,
-        "log_skipped_nodes",
-        lambda *args, **kwargs: None,
-    )
 
     def _unexpected_power_monitor(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("power monitor sensors should not be created")
 
     monkeypatch.setattr(module, "PowerMonitorEnergySensor", _unexpected_power_monitor)
     monkeypatch.setattr(module, "PowerMonitorPowerSensor", _unexpected_power_monitor)
-    monkeypatch.setattr(
-        entities_sensor_module,
-        "PowerMonitorEnergySensor",
-        _unexpected_power_monitor,
-    )
-    monkeypatch.setattr(
-        entities_sensor_module,
-        "PowerMonitorPowerSensor",
-        _unexpected_power_monitor,
-    )
 
     heater_kwargs: list[dict[str, object]] = []
 
@@ -170,15 +142,7 @@ async def test_async_setup_entry_handles_missing_power_monitors(
         return ("temp-sensor", "energy-sensor", "power-sensor")
 
     monkeypatch.setattr(module, "_create_heater_sensors", _create_heater_sensors_stub)
-    monkeypatch.setattr(
-        entities_sensor_module,
-        "_create_heater_sensors",
-        _create_heater_sensors_stub,
-    )
     monkeypatch.setattr(module, "_create_boost_sensors", lambda *a, **k: ())
-    monkeypatch.setattr(
-        entities_sensor_module, "_create_boost_sensors", lambda *a, **k: ()
-    )
 
     class _DummyTotalEnergy:
         """Placeholder installation energy sensor for setup tests."""
@@ -187,9 +151,6 @@ async def test_async_setup_entry_handles_missing_power_monitors(
             return
 
     monkeypatch.setattr(module, "InstallationTotalEnergySensor", _DummyTotalEnergy)
-    monkeypatch.setattr(
-        entities_sensor_module, "InstallationTotalEnergySensor", _DummyTotalEnergy
-    )
 
     energy_coordinator = EnergyStateCoordinator(
         hass,

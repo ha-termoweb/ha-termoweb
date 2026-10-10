@@ -24,8 +24,8 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.termoweb.backend.rest_client import RESTClient
-from custom_components.termoweb.entities import climate as climate_module
-from custom_components.termoweb.entities import heater as heater_module
+from custom_components.termoweb import climate as climate_module
+from custom_components.termoweb import entity as entity_module
 
 from .conftest import FakeCloud
 
@@ -71,7 +71,7 @@ def writes(cloud: FakeCloud) -> Generator[AsyncMock]:
     with (
         patch.object(RESTClient, "set_node_settings", mock),
         patch.object(climate_module, "_WRITE_DEBOUNCE", 0),
-        patch.object(heater_module, "WS_ECHO_FALLBACK_REFRESH", 0),
+        patch.object(entity_module, "WS_ECHO_FALLBACK_REFRESH", 0),
     ):
         yield mock
 

@@ -1,9 +1,239 @@
-"""Home Assistant platform shim for lock entities."""
+"""Lock entities for TermoWeb child lock."""
 
 from __future__ import annotations
 
-from .entities import lock as _lock
-from .entities.lock import *  # noqa: F403
+from collections.abc import Iterable
+import logging
+from typing import Any
 
-_iter_lockable_inventory_nodes = _lock._iter_lockable_inventory_nodes  # noqa: SLF001
-build_settings_resolver = _lock.build_settings_resolver
+from homeassistant.components.lock import LockEntity
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from custom_components.termoweb.coordinator import StateCoordinator
+from custom_components.termoweb.domain.ids import HEATING_NODE_TYPES
+from custom_components.termoweb.domain.state import DomainState
+from custom_components.termoweb.entity import (
+    NodeRefreshFallback,
+    SettingsResolver,
+    async_backend_write,
+    build_settings_resolver,
+    log_skipped_nodes,
+)
+from custom_components.termoweb.identifiers import build_heater_unique_id
+from custom_components.termoweb.inventory import (
+    Inventory,
+    normalize_node_addr,
+    normalize_node_type,
+)
+from custom_components.termoweb.runtime import require_runtime
+from custom_components.termoweb.utils import build_node_device_info
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
+    """Set up child lock entities for heater and accumulator nodes."""
+
+    runtime = require_runtime(hass, entry.entry_id)
+    coord: StateCoordinator = runtime.coordinator
+    dev_id = runtime.dev_id
+
+    inventory = runtime.inventory
+    if not isinstance(inventory, Inventory):
+        _LOGGER.error("TermoWeb lock setup missing inventory for device %s", dev_id)
+        raise TypeError("TermoWeb inventory unavailable for lock platform")
+
+    entities: list[LockEntity] = []
+    for node_type, addr_str, base_name in _iter_lockable_inventory_nodes(inventory):
+        unique_id = build_heater_unique_id(
+            dev_id,
+            node_type,
+            addr_str,
+            suffix=":child_lock",
+        )
+        settings_resolver = build_settings_resolver(
+            coord,
+            dev_id,
+            node_type,
+            addr_str,
+        )
+        entities.append(
+            ChildLockEntity(
+                coord,
+                entry.entry_id,
+                dev_id,
+                node_type,
+                addr_str,
+                unique_id=unique_id,
+                inventory=inventory,
+                settings_resolver=settings_resolver,
+                device_name=base_name,
+            )
+        )
+
+    if entities:
+        _LOGGER.debug("Adding %d TermoWeb child lock entities", len(entities))
+
+    log_skipped_nodes("lock", inventory, logger=_LOGGER)
+    async_add_entities(entities)
+
+
+class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
+    """Lock entity controlling the child lock on a heater or accumulator."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_translation_key = "child_lock"
+    _attr_name = "Child lock"
+
+    def __init__(
+        self,
+        coordinator: StateCoordinator,
+        entry_id: str,
+        dev_id: str,
+        node_type: str,
+        addr: str,
+        unique_id: str,
+        *,
+        inventory: Inventory,
+        settings_resolver: SettingsResolver,
+        device_name: str | None = None,
+    ) -> None:
+        """Initialise the child lock entity."""
+
+        super().__init__(coordinator)
+        canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
+        canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
+        if not canonical_type or not canonical_addr:
+            msg = "node_type and addr must be provided"
+            raise ValueError(msg)
+
+        self._entry_id = entry_id
+        self._dev_id = str(dev_id)
+        self._node_type = canonical_type
+        self._addr = canonical_addr
+        self._attr_unique_id = unique_id
+        self._inventory = inventory
+        self._settings_resolver = settings_resolver
+        self._device_name = device_name if device_name else ""
+        self._refresh_fallback = NodeRefreshFallback(
+            self, canonical_type, canonical_addr
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Cancel a pending fallback refresh when the entity is removed."""
+
+        await super().async_added_to_hass()
+        self.async_on_remove(self._refresh_fallback.cancel)
+
+    @property
+    def is_locked(self) -> bool | None:
+        """Return True when the child lock is engaged."""
+
+        state = self._settings_resolver()
+        if state is None:
+            return None
+        lock_value = getattr(state, "lock", None)
+        if lock_value is None:
+            return None
+        return bool(lock_value)
+
+    @property
+    def icon(self) -> str:
+        """Return a lock icon matching the current child lock state."""
+
+        return "mdi:lock" if self.is_locked else "mdi:lock-open-variant"
+
+    @property
+    def available(self) -> bool:
+        """Return True when the last update succeeded and the node is in inventory."""
+
+        if not super().available:
+            return False
+        forward_map, _ = self._inventory.heater_address_map
+        addresses = forward_map.get(self._node_type, [])
+        return self._addr in addresses
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Expose Home Assistant device metadata for the node."""
+
+        model = "Accumulator" if self._node_type == "acm" else "Heater"
+        return build_node_device_info(
+            self.hass,
+            self._entry_id,
+            self._dev_id,
+            self._addr,
+            name=self._device_name,
+            model=model,
+        )
+
+    async def async_lock(self, **kwargs: Any) -> None:
+        """Enable the child lock."""
+
+        _LOGGER.info(
+            "Setting child lock ON for %s/%s node %s",
+            self._dev_id,
+            self._node_type,
+            self._addr,
+        )
+        runtime = require_runtime(self.hass, self._entry_id)
+        await async_backend_write(
+            "Child lock",
+            runtime.backend.set_node_lock(
+                self._dev_id,
+                (self._node_type, self._addr),
+                lock=True,
+            ),
+        )
+        self._apply_lock(True)
+
+    async def async_unlock(self, **kwargs: Any) -> None:
+        """Disable the child lock."""
+
+        _LOGGER.info(
+            "Setting child lock OFF for %s/%s node %s",
+            self._dev_id,
+            self._node_type,
+            self._addr,
+        )
+        runtime = require_runtime(self.hass, self._entry_id)
+        await async_backend_write(
+            "Child unlock",
+            runtime.backend.set_node_lock(
+                self._dev_id,
+                (self._node_type, self._addr),
+                lock=False,
+            ),
+        )
+        self._apply_lock(False)
+
+    def _apply_lock(self, locked: bool) -> None:
+        """Show the written lock state now; the WebSocket echo confirms it."""
+
+        def _mutate(state: DomainState) -> None:
+            state.lock = locked
+
+        self.coordinator.apply_entity_patch(self._node_type, self._addr, _mutate)
+        self._refresh_fallback.schedule()
+
+
+def _iter_lockable_inventory_nodes(
+    inventory: Inventory,
+) -> Iterable[tuple[str, str, str]]:
+    """Yield htr and acm node metadata from ``inventory``."""
+
+    for metadata in inventory.iter_nodes_metadata(node_types=HEATING_NODE_TYPES):
+        canonical_type = normalize_node_type(
+            metadata.node_type,
+            use_default_when_falsey=True,
+        )
+        canonical_addr = normalize_node_addr(
+            metadata.addr,
+            use_default_when_falsey=True,
+        )
+        if not canonical_type or not canonical_addr:
+            continue
+        yield (canonical_type, canonical_addr, metadata.name)

@@ -83,8 +83,13 @@ This map defines responsibilities for each module family in the final design.
   and `validate_ptemp`. Vendor encoders (e.g. acm boost payloads) stay in
   their vendor codec.
 - `planner/` — vendor-specific write orchestration and validation rules.
-- `entities/` — vendor-agnostic entity implementations (climate, sensor,
-  binary_sensor, button, number, etc.) that read via `DomainStateView`.
+- Platform modules (`climate.py`, `sensor.py`, `binary_sensor.py`,
+  `button.py`, `number.py`, `lock.py`) — vendor-agnostic entity
+  implementations that read via `DomainStateView`; each exposes
+  `async_setup_entry`.
+- `entity.py` — shared entity base classes and helpers used by the platform
+  modules (`HeaterNodeBase`, `HeaterPlatformDetails`, boost helpers, settings
+  resolvers, backend write helpers).
   - Child-lock entities now use the `lock` platform; existing entity IDs may migrate
     from `switch.*_child_lock` to `lock.*_child_lock` based on registry behavior.
 - `services/` — Home Assistant services and rate-limited import flows that rely

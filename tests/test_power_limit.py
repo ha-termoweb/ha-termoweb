@@ -18,7 +18,6 @@ from custom_components.termoweb.backend import termoweb_ws as ws_module
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.const import DOMAIN, BRAND_DUCAHEAT, BRAND_TERMOWEB
 from custom_components.termoweb.coordinator import StateCoordinator
-from custom_components.termoweb.entities import number as entities_number_module
 from custom_components.termoweb.identifiers import build_gateway_entity_unique_id
 from custom_components.termoweb.inventory import Inventory
 from homeassistant.core import HomeAssistant
@@ -26,7 +25,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.termoweb.number as number_module
 
-PowerLimitNumber = entities_number_module.PowerLimitNumber
+PowerLimitNumber = number_module.PowerLimitNumber
 async_setup_entry = number_module.async_setup_entry
 
 
@@ -350,7 +349,7 @@ class TestBrandGating:
 
         # Patch the accumulator details to return empty (no accumulators)
         monkeypatch.setattr(
-            entities_number_module,
+            number_module,
             "boostable_accumulator_details_for_entry",
             lambda *_args, **_kwargs: (
                 SimpleNamespace(
@@ -362,7 +361,7 @@ class TestBrandGating:
             ),
         )
         monkeypatch.setattr(
-            entities_number_module,
+            number_module,
             "heater_platform_details_for_entry",
             lambda *_args, **_kwargs: SimpleNamespace(
                 inventory=None,
@@ -375,7 +374,7 @@ class TestBrandGating:
         def fake_add(entities: list) -> None:
             created.append(entities)
 
-        await entities_number_module.async_setup_entry(
+        await number_module.async_setup_entry(
             hass,
             SimpleNamespace(entry_id=entry_id),
             fake_add,
@@ -406,7 +405,7 @@ class TestBrandGating:
         )
 
         monkeypatch.setattr(
-            entities_number_module,
+            number_module,
             "boostable_accumulator_details_for_entry",
             lambda *_args, **_kwargs: (
                 SimpleNamespace(
@@ -418,7 +417,7 @@ class TestBrandGating:
             ),
         )
         monkeypatch.setattr(
-            entities_number_module,
+            number_module,
             "heater_platform_details_for_entry",
             lambda *_args, **_kwargs: SimpleNamespace(
                 inventory=None,
@@ -431,7 +430,7 @@ class TestBrandGating:
         def fake_add(entities: list) -> None:
             created.append(entities)
 
-        await entities_number_module.async_setup_entry(
+        await number_module.async_setup_entry(
             hass,
             SimpleNamespace(entry_id=entry_id),
             fake_add,

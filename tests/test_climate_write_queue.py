@@ -17,7 +17,7 @@ from conftest import (
 
 _install_stubs()
 
-from custom_components.termoweb.entities import climate as climate_module
+from custom_components.termoweb import climate as climate_module
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from homeassistant.core import HomeAssistant
 

@@ -541,7 +541,7 @@ class TestBuildInstallationEntityUniqueId:
 class TestInstallationTotalEnergySensorDeviceInfo:
     def test_device_info_returns_installation(self) -> None:
         """InstallationTotalEnergySensor.device_info should use installation device info."""
-        from custom_components.termoweb.entities.sensor import (
+        from custom_components.termoweb.sensor import (
             InstallationTotalEnergySensor,
         )
 
@@ -578,7 +578,7 @@ class TestInstallationTotalEnergySensorDeviceInfo:
 class TestInstallationInfoSensor:
     def test_device_info_returns_installation(self) -> None:
         """InstallationInfoSensor.device_info uses installation identifiers."""
-        from custom_components.termoweb.entities.sensor import (
+        from custom_components.termoweb.sensor import (
             InstallationInfoSensor,
         )
 
@@ -597,7 +597,7 @@ class TestInstallationInfoSensor:
 
     def test_unique_id_format(self) -> None:
         """Unique ID follows installation entity pattern."""
-        from custom_components.termoweb.entities.sensor import (
+        from custom_components.termoweb.sensor import (
             InstallationInfoSensor,
         )
 
@@ -613,7 +613,7 @@ class TestInstallationInfoSensor:
 
     def test_geo_data_attrs_when_present(self) -> None:
         """extra_state_attributes includes all geo_data fields."""
-        from custom_components.termoweb.entities.sensor import (
+        from custom_components.termoweb.sensor import (
             InstallationInfoSensor,
         )
 
@@ -658,7 +658,7 @@ class TestInstallationInfoSensor:
 
     def test_native_value_location_summary(self) -> None:
         """native_value returns a comma-separated city, state, country string."""
-        from custom_components.termoweb.entities.sensor import (
+        from custom_components.termoweb.sensor import (
             InstallationInfoSensor,
         )
 
@@ -691,7 +691,7 @@ class TestInstallationInfoSensor:
 
     def test_no_geo_data_attrs_when_absent(self) -> None:
         """extra_state_attributes omits geo_data fields when absent."""
-        from custom_components.termoweb.entities.sensor import (
+        from custom_components.termoweb.sensor import (
             InstallationInfoSensor,
         )
 
@@ -718,7 +718,7 @@ class TestInstallationInfoSensor:
 
     def test_partial_geo_data_only_includes_present(self) -> None:
         """Only non-None geo_data fields appear in attributes."""
-        from custom_components.termoweb.entities.sensor import (
+        from custom_components.termoweb.sensor import (
             InstallationInfoSensor,
         )
 
@@ -757,7 +757,7 @@ class TestInstallationInfoSensor:
 class TestPowerLimitNumberDeviceInfo:
     def test_device_info_returns_installation(self) -> None:
         """PowerLimitNumber.device_info should use installation device info."""
-        from custom_components.termoweb.entities.number import PowerLimitNumber
+        from custom_components.termoweb.number import PowerLimitNumber
 
         hass = HomeAssistant()
         coordinator = FakeCoordinator(

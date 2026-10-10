@@ -39,7 +39,7 @@ def _setup(brand: str) -> tuple[HomeAssistant, Any]:
 async def test_monitor_entry_gets_only_the_frames_sensor() -> None:
     """A listen-only entry has no heater or energy sensors, only frames heard."""
 
-    module = importlib.import_module("custom_components.termoweb.entities.sensor")
+    module = importlib.import_module("custom_components.termoweb.sensor")
     added: list[Any] = []
     hass, entry = _setup("radio_monitor")
     await module.async_setup_entry(hass, entry, added.extend)
@@ -54,7 +54,7 @@ async def test_monitor_entry_gets_only_the_frames_sensor() -> None:
 def test_frames_sensor_follows_the_monitor(monkeypatch: pytest.MonkeyPatch) -> None:
     """The count and last frame time come from the monitor's dispatcher signal."""
 
-    module = importlib.import_module("custom_components.termoweb.entities.sensor")
+    module = importlib.import_module("custom_components.termoweb.sensor")
     hass, entry = _setup("radio_monitor")
     sensor = module.RadioFramesSensor(entry.entry_id, DEV_ID)
     sensor.hass = hass
@@ -95,9 +95,9 @@ def test_frames_sensor_follows_the_monitor(monkeypatch: pytest.MonkeyPatch) -> N
 async def test_no_device_points_via_a_device_that_is_never_created(brand) -> None:
     """Every via_device of an entry's entities names a device the entry creates."""
 
-    sensors = importlib.import_module("custom_components.termoweb.entities.sensor")
+    sensors = importlib.import_module("custom_components.termoweb.sensor")
     binary = importlib.import_module(
-        "custom_components.termoweb.entities.binary_sensor"
+        "custom_components.termoweb.binary_sensor"
     )
     added: list[Any] = []
     hass, entry = _setup(brand)
