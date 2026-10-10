@@ -19,7 +19,6 @@ from custom_components.termoweb.domain.state import (
     _build_thermostat_state,
     _copy_sequence,
     _merge_state,
-    _normalize_node_type,
     _populate_heater_state,
     _populate_power_monitor_state,
     canonicalize_settings_payload,
@@ -457,20 +456,6 @@ def test_replace_state_accumulator_and_thermostat() -> None:
 
     with pytest.raises(TypeError, match="does not match"):
         store.replace_state("acm", "1", HeaterState())
-
-
-# ---------------------------------------------------------------------------
-# _normalize_node_type
-# ---------------------------------------------------------------------------
-
-
-def test_normalize_node_type_case_insensitive() -> None:
-    """_normalize_node_type should handle case-insensitive strings (lines 614-618)."""
-
-    assert _normalize_node_type(NodeType.HEATER) is NodeType.HEATER
-    assert _normalize_node_type("htr") is NodeType.HEATER
-    assert _normalize_node_type("HTR") is NodeType.HEATER
-    assert _normalize_node_type("unknown") is None
 
 
 # ---------------------------------------------------------------------------

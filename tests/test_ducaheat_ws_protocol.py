@@ -610,7 +610,8 @@ def test_nodes_to_deltas_translates_payloads(
             "settings": {"1": {"mode": "auto", "ignored": "value"}},
             "status": {"1": {"stemp": "21.5", "online": True}},
             "samples": {"1": {"temp": 25}},
-        }
+        },
+        "zzz": {"settings": {"1": {"mode": "auto"}}},
     }
 
     deltas = client._nodes_to_deltas(nodes, inventory=inventory)

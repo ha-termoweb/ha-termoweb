@@ -652,7 +652,8 @@ def test_termoweb_nodes_to_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
             "prog": {"1": {"0": 1}},
             "samples": {"1": {"temp": 12}},
             "advanced": {"1": {"misc": "skip"}},
-        }
+        },
+        "zzz": {"settings": {"1": {"mode": "auto"}}},
     }
 
     deltas = client._nodes_to_deltas(nodes_payload, inventory=inventory)

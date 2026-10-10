@@ -12,7 +12,7 @@ from .commands import (
     StartBoost,
     StopBoost,
 )
-from .ids import NodeId, NodeType, normalize_node_type
+from .ids import NodeId, NodeType
 from .state import (
     AccumulatorState,
     DomainState,
@@ -56,6 +56,5 @@ __all__ = [
     "canonicalize_settings_payload",
     "clone_gateway_connection_state",
     "clone_state",
-    "normalize_node_type",
     "state_to_dict",
 ]

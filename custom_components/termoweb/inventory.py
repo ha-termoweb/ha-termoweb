@@ -9,6 +9,8 @@ import logging
 import typing
 from typing import TYPE_CHECKING, Any, cast
 
+from .domain.ids import HEATER_NODE_TYPES
+
 PrebuiltNode = Any
 
 
@@ -44,9 +46,6 @@ __all__ = [
 
 
 _LOGGER = logging.getLogger(__name__)
-
-
-HEATER_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "thm"})
 
 
 if TYPE_CHECKING:

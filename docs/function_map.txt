@@ -1016,8 +1016,8 @@ custom_components/termoweb/domain/energy.py :: build_empty_snapshot
     Return an empty snapshot placeholder for ``dev_id``.
 custom_components/termoweb/domain/energy.py :: coerce_snapshot
     Return ``candidate`` when it behaves like an :class:`EnergySnapshot`.
-custom_components/termoweb/domain/ids.py :: normalize_node_type
-    Normalize assorted node type inputs to ``NodeType``.
+custom_components/termoweb/domain/ids.py :: NodeType.coerce
+    Return the NodeType for ``value`` (case-insensitive, stripped) or None.
 custom_components/termoweb/domain/ids.py :: NodeId.__post_init__
     Normalise the node address to a non-empty string.
 custom_components/termoweb/domain/state.py :: _copy_sequence
@@ -1084,8 +1084,6 @@ custom_components/termoweb/domain/state.py :: DomainStateStore.get_gateway_conne
     Return a defensive copy of the gateway connection state.
 custom_components/termoweb/domain/state.py :: DomainStateStore.replace_state
     Replace the stored state for ``(node_type, addr)`` when valid.
-custom_components/termoweb/domain/state.py :: _normalize_node_type
-    Return a canonical ``NodeType`` when possible.
 custom_components/termoweb/domain/state.py :: _copy_state_field_value
     Return a shallow copy for mappings and sequences.
 custom_components/termoweb/domain/state.py :: state_to_dict

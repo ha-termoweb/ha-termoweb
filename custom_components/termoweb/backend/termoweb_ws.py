@@ -471,9 +471,8 @@ class TermoWebWSClient(_WSCommon):
         for raw_type, sections in nodes.items():
             if not isinstance(raw_type, str) or not isinstance(sections, Mapping):
                 continue
-            try:
-                node_type = DomainNodeType(str(raw_type).lower())
-            except ValueError:
+            node_type = DomainNodeType.coerce(raw_type)
+            if node_type is None:
                 continue
 
             per_addr: dict[str, dict[str, Any]] = {}
