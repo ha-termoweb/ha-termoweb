@@ -395,7 +395,7 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
 class ThermostatBatterySensor(HeaterNodeBase, SensorEntity):
     """Battery level sensor for battery-powered thermostat nodes."""
 
-    _attr_device_class = getattr(SensorDeviceClass, "BATTERY", None)
+    _attr_device_class = SensorDeviceClass.BATTERY
     _attr_native_unit_of_measurement = "%"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -663,7 +663,7 @@ class HeaterPowerSensor(HeaterEnergyBase):
 class HeaterBoostMinutesRemainingSensor(HeaterNodeBase, SensorEntity):
     """Sensor exposing the remaining minutes for the active boost."""
 
-    _attr_device_class = getattr(SensorDeviceClass, "DURATION", "duration")
+    _attr_device_class = SensorDeviceClass.DURATION
     _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTime.MINUTES
@@ -721,7 +721,7 @@ class HeaterBoostMinutesRemainingSensor(HeaterNodeBase, SensorEntity):
 class HeaterBoostEndSensor(HeaterNodeBase, SensorEntity):
     """Sensor exposing the expected end timestamp for the active boost."""
 
-    _attr_device_class = getattr(SensorDeviceClass, "TIMESTAMP", "timestamp")
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_has_entity_name = True
     _attr_translation_key = "boost_end"
 

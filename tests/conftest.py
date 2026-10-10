@@ -1915,6 +1915,8 @@ def _install_stubs() -> None:
             return value
 
     class SensorDeviceClass:
+        BATTERY = "battery"
+        DURATION = "duration"
         ENERGY = "energy"
         POWER = "power"
         TEMPERATURE = "temperature"
@@ -1943,6 +1945,7 @@ def _install_stubs() -> None:
 
     class BinarySensorDeviceClass:
         CONNECTIVITY = "connectivity"
+        HEAT = "heat"
 
     binary_sensor_mod.BinarySensorEntity = BinarySensorEntity
     binary_sensor_mod.BinarySensorDeviceClass = BinarySensorDeviceClass

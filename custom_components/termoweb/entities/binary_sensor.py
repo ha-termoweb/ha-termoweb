@@ -157,7 +157,7 @@ class HeaterBoostActiveBinarySensor(
 ):
     """Binary sensor indicating whether a heater boost is active."""
 
-    _attr_device_class = getattr(BinarySensorDeviceClass, "HEAT", "heat")
+    _attr_device_class = BinarySensorDeviceClass.HEAT
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_translation_key = "boost_active"

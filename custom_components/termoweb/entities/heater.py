@@ -530,16 +530,7 @@ def _derive_boost_state(
     def _parse_iso_timestamp(value: str) -> datetime | None:
         """Parse an ISO timestamp string defensively."""
 
-        parser = getattr(dt_util, "parse_datetime", None)
-        parsed = (
-            parser(value) if callable(parser) else None
-        )  # pragma: no cover - best-effort
-        if parsed is not None:
-            return parsed
-        try:
-            return datetime.fromisoformat(value)
-        except ValueError:
-            return None
+        return dt_util.parse_datetime(value)
 
     boost_active = coerce_boost_bool(_get_field("boost_active"))
     if boost_active is None:
