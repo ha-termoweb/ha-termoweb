@@ -27,6 +27,9 @@ TXERR_BAD_HEX = "TXERR empty or bad hex"
 
 CONNECT_TIMEOUT_S = 5.0
 TX_CONFIRM_TIMEOUT_S = 3.0
+# A gateway that loses power leaves a half-open socket the OS may only notice
+# after ~15 minutes; this many missed TX confirmations in a row drop it sooner.
+MAX_MISSED_TX_CONFIRMS = 3
 TXERR_RETRY_WAIT_S = 0.05
 MIN_COMMAND_GAP_S = 0.04
 RETRY_COUNT = 3
@@ -165,6 +168,7 @@ class RadioLink:
         self._sleep = sleep
         self._open_connection = open_connection
         self._on_disconnect = on_disconnect
+        self._missed_confirms = 0
         self._reader: Any = None
         self._writer: Any = None
         self._read_task: asyncio.Task[None] | None = None
@@ -381,7 +385,9 @@ class RadioLink:
                 raise
             line = await self._wait(confirm, TX_CONFIRM_TIMEOUT_S)
             if line is None:
+                await self._note_missed_confirm()
                 raise RadioLinkError("no TX confirmation from the gateway")
+            self._missed_confirms = 0
             if line.startswith("TX "):
                 parts = line.split()
                 return _int_or_none(parts[1]) if len(parts) > 1 else None, written
@@ -390,6 +396,18 @@ class RadioLink:
             _LOGGER.debug("Gateway reported '%s'; resending once", line)
             await self._sleep(TXERR_RETRY_WAIT_S)
         raise AssertionError("unreachable")  # pragma: no cover
+
+    async def _note_missed_confirm(self) -> None:
+        """Count a missed TX confirmation; drop a gateway that stopped answering."""
+        self._missed_confirms += 1
+        if self._missed_confirms < MAX_MISSED_TX_CONFIRMS:
+            return
+        _LOGGER.error(
+            "Radio gateway missed %d TX confirmations; dropping the connection",
+            self._missed_confirms,
+        )
+        self._missed_confirms = 0
+        await self._close_writer()  # the reader sees EOF and reports the loss
 
     async def _send_command(self, command: str) -> None:
         """Write one command line, keeping at least MIN_COMMAND_GAP_S between commands."""

@@ -519,3 +519,42 @@ async def test_close_fails_pending_request() -> None:
     await link.close()
     with pytest.raises(RadioLinkError, match="connection closed"):
         await task
+
+
+@pytest.mark.asyncio
+async def test_silent_gateway_is_dropped_after_missed_confirmations(caplog) -> None:
+    """A gateway that stops confirming transmits is treated as lost (reconnect)."""
+    lost: list[bool] = []
+    gw, ft, link = await connected(on_disconnect=lambda: lost.append(True))
+    air = build_frame(DIALECT_B, 1, HEATER, b"\xb8", network_id=NET)
+    gw.responder = heater(DIALECT_B, HEATER)
+    assert (await link.send_frame(HEATER, air)).ok
+    gw.silent = True
+    with caplog.at_level(logging.ERROR):
+        for _ in range(link_mod.MAX_MISSED_TX_CONFIRMS - 1):
+            with pytest.raises(RadioLinkError, match="no TX confirmation"):
+                await link.send_frame(HEATER, air)
+        assert link.connected and lost == []
+        with pytest.raises(RadioLinkError, match="no TX confirmation"):
+            await link.send_frame(HEATER, air)
+        for _ in range(20):
+            await asyncio.sleep(0)
+    assert lost == [True] and not link.connected
+    assert "missed 3 TX confirmations" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_confirmation_resets_the_missed_count() -> None:
+    """Occasional missed confirmations do not drop a working gateway."""
+    lost: list[bool] = []
+    gw, ft, link = await connected(on_disconnect=lambda: lost.append(True))
+    air = build_frame(DIALECT_B, 1, HEATER, b"\xb8", network_id=NET)
+    for _ in range(3):
+        gw.silent = True
+        for _ in range(link_mod.MAX_MISSED_TX_CONFIRMS - 1):
+            with pytest.raises(RadioLinkError):
+                await link.send_frame(HEATER, air)
+        gw.silent = False
+        await link.send_frame(HEATER, air, wait_ack=False)
+    assert lost == [] and link.connected
+    await link.close()

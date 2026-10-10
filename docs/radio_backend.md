@@ -195,6 +195,10 @@ websocket clients (`_WSStatusMixin`):
   disconnect callback), `coordinator.update_gateway_connection(connected=False)`;
 - reconnect with backoff 5, 10, 30, 120, 300 s; the backoff resets after a
   successful connect;
+- a gateway that loses power leaves a half-open socket that the operating
+  system may only notice after about 15 minutes, so the link drops the
+  connection itself after 3 transmit confirmations in a row go missing (about
+  9 s), which starts the reconnect above;
 - payload window: 3 × refresh interval (360 s).
 
 Coordinator polling: **off while the listener is healthy and fresh, on as a
