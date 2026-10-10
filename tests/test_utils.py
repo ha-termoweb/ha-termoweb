@@ -17,7 +17,9 @@ from custom_components.termoweb.utils import (
     translate_default_device_name,
 )
 from tests.fakes.cloud import DEV_ID, VERSION, FakeCloud
+from tests.fakes.radio_link import MAC
 from tests.fakes.runtime import build_entry_runtime
+from tests.fakes.sensors import fake_radio_links, radio_entry, setup_entry
 from tests.fakes.setup import state_coordinator
 
 PORTAL = "https://control.termoweb.net"
@@ -270,3 +272,18 @@ async def test_location_sensor_summarises_geo_data(
         if key not in ("friendly_name", "icon")
     }
     assert extra == attributes
+
+
+async def test_radio_heater_device_reports_the_radio_brand(hass: HomeAssistant) -> None:
+    """A heater behind the radio gateway is not labelled as TermoWeb hardware."""
+    entry = radio_entry("radio", [{"type": "htr", "addr": "6", "name": "Heater 6"}])
+    dev_id = MAC.replace(":", "").lower()
+    with fake_radio_links():
+        await setup_entry(hass, entry)
+        heater = dr.async_get(hass).async_get_device_by_identifier(
+            (DOMAIN, dev_id, "6"), entry.entry_id
+        )
+        assert heater is not None
+        assert heater.manufacturer == "Radio"
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()

@@ -218,7 +218,8 @@ def build_node_device_info(
         model=model,
     )
     _link_via_device(info, hass, entry_id, (DOMAIN, str(dev_id)))
-    return translate_default_device_name(info, str(addr))
+    translate_default_device_name(info, str(addr))
+    return apply_entry_device_overrides(info, _entry_gateway_record(hass, entry_id))
 
 
 # English default node names; keys match the ``device`` section of strings.json.
