@@ -144,7 +144,11 @@ See instructions in custom_components/termoweb/assets, to install the card and c
 - Add these sensors in **Settings → Dashboards → Energy** to include them in Home Assistant’s Energy Dashboard.
 - Live energy samples now arrive via the websocket connection, with the hourly
   REST poll remaining as a fallback if the push feed is unavailable.
-- Use the `termoweb.import_energy_history` service (Developer Tools → Services) to backfill past consumption after installing the integration. The service always refreshes every configured TermoWeb node and reconciles all samples through the current minute with any existing statistics.
+- Use the `termoweb.import_energy_history` action (Developer Tools → Actions) to add past consumption after installing the integration:
+  1. Set **Max history days** to how far back you want (default 7 days).
+  2. Run the action. It asks the cloud for one day per request, at most 2 requests per second, so a year for 3 heaters takes about 10 minutes.
+  3. If it stops with an error, run it again later. It continues where it stopped.
+  4. To get more days later, run it again with a bigger number. Only the missing older days are fetched.
 - No extra configuration is required beyond selecting the sensors in the Energy Dashboard.
 
 ---

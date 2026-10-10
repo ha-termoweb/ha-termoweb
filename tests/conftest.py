@@ -1015,63 +1015,31 @@ def _install_stubs() -> None:
 
         setup_mod.async_when_setup = async_when_setup
 
-    if not hasattr(recorder_stats_mod, "async_get_statistics_during_period"):
+    # Import-time names only; the energy import is exercised in tests_ha/
+    # against the real recorder.
+    recorder_models_mod = types.ModuleType("homeassistant.components.recorder.models")
+    recorder_models_mod.StatisticMeanType = enum.IntEnum(
+        "StatisticMeanType", {"NONE": 0, "ARITHMETIC": 1, "CIRCULAR": 2}
+    )
+    recorder_mod.models = recorder_models_mod
+    recorder_mod.get_instance = lambda _hass: None
+    recorder_stats_mod.async_import_statistics = lambda *_args: None
+    recorder_stats_mod.statistics_during_period = lambda *_args: {}
+    storage_mod = types.ModuleType("homeassistant.helpers.storage")
 
-        async def async_get_statistics_during_period(
-            _hass: Any,
-            _start_time: dt.datetime,
-            _end_time: dt.datetime,
-            statistic_ids: Iterable[str],
-            *_args: Any,
-            **_kwargs: Any,
-        ) -> dict[str, list[Any]]:
-            """Return empty statistics buckets for test runs."""
+    class Store:
+        """Minimal stand-in for ``homeassistant.helpers.storage.Store``."""
 
-            return {stat_id: [] for stat_id in statistic_ids}
+        def __init__(self, hass: Any, version: int, key: str) -> None:
+            self.hass, self.version, self.key = hass, version, key
 
-        recorder_stats_mod.async_get_statistics_during_period = (
-            async_get_statistics_during_period
-        )
+        async def async_remove(self) -> None:
+            """Nothing is persisted in the stubbed suite."""
 
-    if not hasattr(recorder_stats_mod, "async_get_last_statistics"):
-
-        async def async_get_last_statistics(
-            _hass: Any,
-            _number_of_stats: int,
-            statistic_ids: Iterable[str],
-            *_args: Any,
-            **_kwargs: Any,
-        ) -> dict[str, list[Any]]:
-            """Return empty statistics for test runs."""
-
-            return {stat_id: [] for stat_id in statistic_ids}
-
-        recorder_stats_mod.async_get_last_statistics = async_get_last_statistics
-
-    if not hasattr(recorder_stats_mod, "async_delete_statistics"):
-
-        async def async_delete_statistics(
-            _hass: Any,
-            _statistic_ids: Iterable[str],
-            *_args: Any,
-            **_kwargs: Any,
-        ) -> None:
-            """No-op statistics deletion for tests."""
-
-            return None
-
-        recorder_stats_mod.async_delete_statistics = async_delete_statistics
-
-    if not hasattr(recorder_stats_mod, "async_import_statistics"):
-
-        async def async_import_statistics(
-            _hass: Any, _metadata: dict[str, Any], _stats: list[dict[str, Any]]
-        ) -> None:
-            """No-op statistics import for tests."""
-
-            return None
-
-        recorder_stats_mod.async_import_statistics = async_import_statistics
+    storage_mod.Store = Store
+    helpers_mod.storage = storage_mod
+    sys.modules["homeassistant.helpers.storage"] = storage_mod
+    sys.modules["homeassistant.components.recorder.models"] = recorder_models_mod
 
     sys.modules["homeassistant"] = homeassistant_pkg
     sys.modules["homeassistant.config_entries"] = config_entries_mod

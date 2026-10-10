@@ -47,21 +47,19 @@ This guide shows a non-technical end‑user how to capture **startup and runtime
 
 The integration exposes the `termoweb.import_energy_history` service to backfill hourly energy statistics. The service supports the following fields:
 
-- `reset_progress` *(bool, optional)* — clear the internal per-node cursor and re-import everything. Statistics are not removed.
-- `max_history_retrieval` *(int, optional)* — clamp the lookback window (in days). When omitted, the integration falls back to the entry option or the default (7 days).
-- `node_types` *(list[str], optional)* — restrict the import to canonical node types such as `"htr"`, `"acm"`, or `"pmo"`. Invalid values are rejected immediately.
-- `addresses` *(list[str], optional)* — restrict the import to specific node addresses. Addresses that are not part of the Inventory are ignored with a warning.
-- `day_chunk_hours` *(int, optional, default=24)* — split the 24-hour windows into sub-chunks for oversized devices. The importer still enforces the same rate limiter across all chunks.
+- `max_history_retrieval` *(int, 1-3650, default 7)* — how many days back to import. If a node was already imported for fewer days, only the older days are fetched.
+- `reset_progress` *(bool, default false)* — forget the saved progress and import the whole period again. Existing statistics are overwritten in place, never deleted.
 
 ### Internal rules
 
-- Inventory drives the target selection. Filters are applied *after* expanding the Inventory and before de-duplication.
-- Sample timestamps always use seconds-since-epoch normalization performed by the REST adapter.
-- Imports request history through the current minute to ensure today’s samples are merged with existing statistics.
-- The importer clears overlapping statistics whenever recorder helpers are available; otherwise it logs a one-time INFO message and continues safely.
-- Device resets are detected when the cumulative counter drops by more than **0.2 kWh**. The integration starts a new accumulation segment without breaking the monotonic sum expected by Home Assistant.
-- Duplicate timestamps are discarded to avoid redundant statistics writes.
-- A per-node summary and a final run summary are logged at INFO level. The most recent summary is also exposed in diagnostics (`energy_import.last_run`).
+- Requests go through the shared samples limiter: at most **2 queries per second**, one request per node per day of history.
+- A sample's counter is the cumulative total at `t`, so consumption between the samples at T and T+1h is stored in the statistic that starts at T.
+- Each day's statistics are written and committed by the recorder *before* the progress is saved (in `.storage/termoweb.energy_import.<entry_id>`). If a request fails (login, rate limit, network), the import stops with an error and keeps the progress of the last written day; run the service again to resume.
+- Sums continue from the statistic before the import window. After a node finishes, every later statistic (hourly and 5-minute) is shifted by the difference, so the Energy dashboard shows no jump.
+- Counter drops of **0.2 kWh** or more are counted as device resets; the drop is not subtracted from the sum.
+- Only one import runs at a time. A second call while one is running fails with "already running".
+- A per-node summary is logged at INFO level and the latest run is exposed in diagnostics (`energy_import.last_run`).
+- Older versions kept progress in the entry options (`energy_history_progress`, `energy_history_imported`, `max_history_retrieved`). The first import moves a completed import's progress to storage and removes those options; an unfinished old import starts again.
 
 ---
 

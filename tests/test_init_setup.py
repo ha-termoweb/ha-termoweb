@@ -318,8 +318,6 @@ def test_async_setup_entry_happy_path(
         return await orig_list_devices(client)
 
     monkeypatch.setattr(termoweb_init, "async_list_devices", fake_async_list)
-    import_mock = AsyncMock()
-    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
 
     entry = ConfigEntry("happy", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
@@ -357,7 +355,6 @@ def test_async_setup_entry_happy_path(
     assert stub_hass.services.has_service(termoweb_init.DOMAIN, "import_energy_history")
     assert not stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_survey")
     assert not stub_hass.services.has_service(termoweb_init.DOMAIN, "radio_pair")
-    assert import_mock.await_count == 0
 
 
 def test_async_setup_entry_sets_supports_diagnostics(
@@ -886,8 +883,6 @@ def test_async_setup_entry_skips_devices_without_identifier(
             return {"nodes": []}
 
     monkeypatch.setattr(backend_factory, "RESTClient", PartialClient)
-    import_mock = AsyncMock()
-    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
 
     entry = ConfigEntry("partial", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
@@ -963,8 +958,6 @@ def test_async_setup_entry_supports_mapping_devices_payload(
             return {}
 
     monkeypatch.setattr(backend_factory, "RESTClient", MappingClient)
-    import_mock = AsyncMock()
-    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
 
     entry = ConfigEntry("mapping", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
@@ -1025,8 +1018,6 @@ def test_async_setup_entry_defers_until_started(
             return {"nodes": [{"addr": "A", "type": "htr"}]}
 
     monkeypatch.setattr(backend_factory, "RESTClient", HappyClient)
-    import_mock = AsyncMock()
-    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
 
     entry = ConfigEntry("startup", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
@@ -1035,84 +1026,9 @@ def test_async_setup_entry_defers_until_started(
     async def _run() -> None:
         await termoweb_init.async_setup_entry(stub_hass, entry)
         await _drain_tasks(stub_hass)
-        assert import_mock.await_count == 0
         assert all(
             event != EVENT_HOMEASSISTANT_STARTED for event, _ in stub_hass.bus.listeners
         )
-
-    asyncio.run(_run())
-
-
-def test_import_energy_history_service_invocation(
-    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    registry = StubEntityRegistry()
-    energy_module = importlib.import_module("custom_components.termoweb.energy")
-    monkeypatch.setattr(
-        energy_module.er, "async_get", lambda hass: registry, raising=False
-    )
-    monkeypatch.setattr(
-        entity_registry_mod, "async_get", lambda hass: registry, raising=False
-    )
-
-    class HappyClient(BaseFakeClient):
-        async def list_devices(self) -> list[dict[str, Any]]:
-            return [{"dev_id": "dev-1"}]
-
-        async def get_nodes(self, dev_id: str) -> dict[str, Any]:
-            return {
-                "nodes": [
-                    {"addr": "A", "type": "htr"},
-                    {"addr": "B", "type": "acm"},
-                ]
-            }
-
-    monkeypatch.setattr(backend_factory, "RESTClient", HappyClient)
-    import_mock = AsyncMock()
-    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
-
-    entry = ConfigEntry("service", data={"username": "user", "password": "pw"})
-    stub_hass.config_entries.add(entry)
-
-    async def _run() -> None:
-        assert await termoweb_init.async_setup_entry(stub_hass, entry)
-        await _drain_tasks(stub_hass)
-        import_mock.reset_mock()
-
-        service = stub_hass.services.get(termoweb_init.DOMAIN, "import_energy_history")
-
-        registry.add(
-            "sensor.dev_a_energy",
-            unique_id=build_heater_energy_unique_id("dev-1", "htr", "A"),
-            platform=termoweb_init.DOMAIN,
-            config_entry_id=entry.entry_id,
-        )
-        registry.add(
-            "sensor.dev_b_energy",
-            unique_id=build_heater_energy_unique_id("dev-1", "acm", "B"),
-            platform=termoweb_init.DOMAIN,
-            config_entry_id=entry.entry_id,
-        )
-
-        call = SimpleNamespace(
-            data={
-                "reset_progress": True,
-                "max_history_retrieval": 10,
-            }
-        )
-        await service(call)
-        assert import_mock.await_count == 1
-        args, kwargs = import_mock.await_args
-        assert args == (stub_hass, entry)
-        assert kwargs == {"reset_progress": True, "max_days": 10}
-
-        import_mock.reset_mock()
-        call_all = SimpleNamespace(data={"max_history_retrieval": 3})
-        await service(call_all)
-        assert import_mock.await_count == 1
-        args, kwargs = import_mock.await_args
-        assert args == (stub_hass, entry)
-        assert kwargs == {"reset_progress": False, "max_days": 3}
 
     asyncio.run(_run())
 
@@ -1528,203 +1444,6 @@ def test_coordinator_listener_starts_new_ws(
         for event in start_events:
             event.set()
         await asyncio.gather(*record.ws_tasks.values(), return_exceptions=True)
-
-    asyncio.run(_run())
-
-
-def test_import_energy_history_service_error_logging(
-    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    registry = StubEntityRegistry()
-    energy_module = importlib.import_module("custom_components.termoweb.energy")
-    monkeypatch.setattr(
-        energy_module.er, "async_get", lambda hass: registry, raising=False
-    )
-    monkeypatch.setattr(
-        entity_registry_mod, "async_get", lambda hass: registry, raising=False
-    )
-
-    class ServiceClient(BaseFakeClient):
-        async def list_devices(self) -> list[dict[str, Any]]:
-            return [{"dev_id": "dev-1"}]
-
-    async def failing_import(*args: Any, **kwargs: Any) -> None:
-        raise RuntimeError("boom")
-
-    log_calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-
-    def capture_exception(msg: str, *args: Any, **kwargs: Any) -> None:
-        log_calls.append((msg, args, kwargs))
-
-    monkeypatch.setattr(backend_factory, "RESTClient", ServiceClient)
-    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", failing_import)
-    monkeypatch.setattr(termoweb_init._LOGGER, "exception", capture_exception)
-
-    entry1 = ConfigEntry("svc1", data={"username": "user", "password": "pw"})
-    entry2 = ConfigEntry("svc2", data={"username": "user", "password": "pw"})
-    stub_hass.config_entries.add(entry1)
-    stub_hass.config_entries.add(entry2)
-
-    async def _run() -> None:
-        assert await termoweb_init.async_setup_entry(stub_hass, entry1)
-        await _drain_tasks(stub_hass)
-        service = stub_hass.services.get(termoweb_init.DOMAIN, "import_energy_history")
-        assert service is not None
-
-        assert stub_hass.services.has_service(
-            termoweb_init.DOMAIN, "import_energy_history"
-        )
-        assert await termoweb_init.async_setup_entry(stub_hass, entry2)
-        await _drain_tasks(stub_hass)
-        assert (
-            stub_hass.services.get(termoweb_init.DOMAIN, "import_energy_history")
-            is service
-        )
-
-        registry.add(
-            "sensor.svc1_energy",
-            unique_id=build_heater_energy_unique_id("dev-1", "htr", "A"),
-            platform=termoweb_init.DOMAIN,
-            config_entry_id=entry1.entry_id,
-        )
-        registry.add(
-            "sensor.svc2_energy",
-            unique_id=build_heater_energy_unique_id("dev-1", "htr", "B"),
-            platform=termoweb_init.DOMAIN,
-            config_entry_id=entry2.entry_id,
-        )
-
-        call = SimpleNamespace(data={})
-        await service(call)
-        assert len(log_calls) == 2
-
-
-def test_import_energy_history_service_logs_global_task_errors(
-    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    class ServiceClient(BaseFakeClient):
-        async def list_devices(self) -> list[dict[str, Any]]:
-            return [{"dev_id": "dev-1"}]
-
-    async def failing_import(*args: Any, **kwargs: Any) -> None:
-        raise RuntimeError("task boom")
-
-    log_calls: list[str] = []
-
-    def capture_exception(msg: str, *args: Any, **kwargs: Any) -> None:
-        log_calls.append(msg % args if args else msg)
-
-    monkeypatch.setattr(backend_factory, "RESTClient", ServiceClient)
-    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", failing_import)
-    energy_mod = importlib.import_module("custom_components.termoweb.energy")
-    monkeypatch.setattr(energy_mod._LOGGER, "exception", capture_exception)
-
-    entry = ConfigEntry("svc-global", data={"username": "user", "password": "pw"})
-    stub_hass.config_entries.add(entry)
-
-    async def _run() -> None:
-        assert await termoweb_init.async_setup_entry(stub_hass, entry)
-        await _drain_tasks(stub_hass)
-
-        service = stub_hass.services.get(termoweb_init.DOMAIN, "import_energy_history")
-        assert service is not None
-
-        await service(SimpleNamespace(data={}))
-
-    asyncio.run(_run())
-
-    assert any("task failed" in msg for msg in log_calls)
-
-
-def test_import_energy_history_service_logs_entry_task_exception(
-    termoweb_init: Any,
-    stub_hass: HomeAssistant,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    class ServiceClient(BaseFakeClient):
-        async def list_devices(self) -> list[dict[str, Any]]:
-            return [{"dev_id": "dev-1"}]
-
-    async def failing_import(*args: Any, **kwargs: Any) -> None:
-        raise RuntimeError("entry task boom")
-
-    monkeypatch.setattr(backend_factory, "RESTClient", ServiceClient)
-    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", failing_import)
-
-    entry = ConfigEntry("svc-entry", data={"username": "user", "password": "pw"})
-    stub_hass.config_entries.add(entry)
-
-    caplog.set_level(logging.ERROR, logger=termoweb_init.__name__)
-
-    async def _run() -> None:
-        assert await termoweb_init.async_setup_entry(stub_hass, entry)
-        await _drain_tasks(stub_hass)
-
-        service = stub_hass.services.get(termoweb_init.DOMAIN, "import_energy_history")
-        assert service is not None
-
-        await service(SimpleNamespace(data={}))
-
-    asyncio.run(_run())
-
-    assert "import_energy_history task failed" in caplog.text
-
-
-def test_import_energy_history_service_handles_string_ids_and_cancelled(
-    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    registry = StubEntityRegistry()
-    energy_module = importlib.import_module("custom_components.termoweb.energy")
-    monkeypatch.setattr(
-        energy_module.er, "async_get", lambda hass: registry, raising=False
-    )
-    monkeypatch.setattr(
-        entity_registry_mod, "async_get", lambda hass: registry, raising=False
-    )
-
-    class ServiceClient(BaseFakeClient):
-        async def list_devices(self) -> list[dict[str, Any]]:
-            return [{"dev_id": "dev-1"}]
-
-        async def get_nodes(self, dev_id: str) -> dict[str, Any]:
-            return {"nodes": [{"addr": "A", "type": "htr"}]}
-
-    cancel_import = AsyncMock(side_effect=asyncio.CancelledError())
-    monkeypatch.setattr(backend_factory, "RESTClient", ServiceClient)
-    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", cancel_import)
-
-    entry = ConfigEntry("svc", data={"username": "user", "password": "pw"})
-    stub_hass.config_entries.add(entry)
-
-    async def _run() -> None:
-        assert await termoweb_init.async_setup_entry(stub_hass, entry)
-        await _drain_tasks(stub_hass)
-        cancel_import.reset_mock()
-        service = stub_hass.services.get(termoweb_init.DOMAIN, "import_energy_history")
-        assert service is not None
-
-        registry.add(
-            "sensor.invalid",
-            unique_id=build_heater_energy_unique_id("dev-1", "htr", "A"),
-            platform="other",
-            config_entry_id=entry.entry_id,
-        )
-        registry.add(
-            "sensor.valid",
-            unique_id=build_heater_energy_unique_id("dev-1", "htr", "A"),
-            platform=termoweb_init.DOMAIN,
-            config_entry_id=entry.entry_id,
-        )
-
-        with pytest.raises(asyncio.CancelledError):
-            await service(SimpleNamespace(data={}))
-        assert cancel_import.await_count == 1
-        cancel_import.reset_mock()
-
-        with pytest.raises(asyncio.CancelledError):
-            await service(SimpleNamespace(data={}))
-        assert cancel_import.await_count == 1
 
     asyncio.run(_run())
 

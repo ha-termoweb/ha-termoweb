@@ -2,8 +2,6 @@
 
 custom_components/termoweb/__init__.py :: _platforms_for_brand
     Return entity platforms enabled for the configured brand.
-custom_components/termoweb/__init__.py :: _async_import_energy_history
-    Delegate to the energy helper with shared rate limiting and filters.
 custom_components/termoweb/__init__.py :: _log_unknown_node_types
     Log node types the integration does not support yet.
 custom_components/termoweb/__init__.py :: async_list_devices
@@ -38,6 +36,8 @@ custom_components/termoweb/__init__.py :: _async_shutdown_entry
     Cancel websocket tasks and listeners for an integration record.
 custom_components/termoweb/__init__.py :: async_unload_entry
     Unload a config entry for TermoWeb.
+custom_components/termoweb/__init__.py :: async_remove_entry
+    Delete the entry's stored energy import progress.
 custom_components/termoweb/__init__.py :: async_migrate_entry
     Migrate a config entry; no migrations are needed yet.
 custom_components/termoweb/backend/base.py :: HttpClientProto.list_devices
@@ -1074,24 +1074,28 @@ custom_components/termoweb/domain/view.py :: DomainStateView.get_energy_metric
     Return metrics for ``(node_type, addr)`` when available.
 custom_components/termoweb/domain/view.py :: DomainStateView.get_energy_metrics_for_type
     Return metrics keyed by address for ``node_type``.
-custom_components/termoweb/energy.py :: _iso_date
-    Convert unix timestamp to ISO date.
-custom_components/termoweb/energy.py :: _clear_statistics
-    Delete statistics using recorder statistics helpers.
-custom_components/termoweb/energy.py :: _statistics_during_period
-    Return recorder statistics rows for the provided period.
-custom_components/termoweb/energy.py :: _get_last_statistics
-    Return the most recent recorder statistics row for ``statistic_id``.
-custom_components/termoweb/energy.py :: _store_statistics
-    Insert entity statistics using the recorder import helper.
-custom_components/termoweb/energy.py :: _statistics_row_get
-    Read a field from a statistics row regardless of its container type.
-custom_components/termoweb/energy.py :: _collect_statistics
-    Return statistics rows for a single statistic id.
-custom_components/termoweb/energy.py :: _enforce_monotonic_sum
-    Clamp entity statistics so sums never decrease near import seams.
+custom_components/termoweb/energy.py :: energy_import_store
+    Return the Store that holds import progress for ``entry_id``.
+custom_components/termoweb/energy.py :: _floor_hour
+    Return ``ts`` rounded down to the hour.
+custom_components/termoweb/energy.py :: _utc
+    Return a UTC datetime for a unix timestamp.
+custom_components/termoweb/energy.py :: _async_load_progress
+    Load node progress, moving legacy ``entry.options`` keys into the Store.
+custom_components/termoweb/energy.py :: _async_read_sums
+    Return ``(start_ts, sum)`` for every hourly statistic starting before ``end``.
+custom_components/termoweb/energy.py :: _hour_rows
+    Advance ``window`` over one chunk and return its hourly statistic rows.
+custom_components/termoweb/energy.py :: _async_fetch
+    Fetch one chunk of samples through the shared samples rate limiter.
+custom_components/termoweb/energy.py :: _async_import_window
+    Import the node's pending window chunk by chunk, then fix later sums.
+custom_components/termoweb/energy.py :: _async_import_node
+    Resume or start the node's import until ``requested_start`` is covered.
+custom_components/termoweb/energy.py :: _log_summary
+    Log one node's import summary.
 custom_components/termoweb/energy.py :: async_import_energy_history
-    Fetch historical hourly samples and insert statistics with filters.
+    Import up to ``max_days`` of hourly energy history for one entry.
 custom_components/termoweb/entities/binary_sensor.py :: async_setup_entry
     Set up connectivity and boost binary sensors for a config entry.
 custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySensor.__init__
@@ -1752,12 +1756,10 @@ custom_components/termoweb/radio_rehome.py :: rehome_summary
     Return a plain-English summary of a finished network move.
 custom_components/termoweb/runtime.py :: require_runtime
     Return the runtime container stored for ``entry_id``.
-custom_components/termoweb/services/energy_history.py :: async_import_energy_history_with_rate_limit
-    Run energy history import with rate limiting and filter defaults.
 custom_components/termoweb/services/energy_history.py :: async_register_import_energy_history_service
     Register the import_energy_history service if it is missing.
 custom_components/termoweb/services/energy_history.py :: async_register_import_energy_history_service._service_import_energy_history
-    Handle the import_energy_history service call.
+    Import energy history for every loaded entry whose backend supports it.
 custom_components/termoweb/services/radio_capture.py :: dialects_listened
     Return the dialects the capture heard: both on a listen-only ESP32 entry.
 custom_components/termoweb/services/radio_capture.py :: capture_payload

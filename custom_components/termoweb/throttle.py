@@ -45,7 +45,7 @@ class MonotonicRateLimiter:
 
 
 _SAMPLES_RATE_LIMITER: MonotonicRateLimiter | None = None
-_SAMPLES_INTERVAL = 1.0
+_SAMPLES_INTERVAL = 0.5  # 2 queries per second (backend fair use)
 
 
 def default_samples_rate_limit_state() -> MonotonicRateLimiter:

@@ -151,10 +151,15 @@ See `radio_protocol.md` section 10.
 
 - REST requests must be rate-limited and treated as a fallback when WebSocket
   updates are unavailable.
-- The `import_energy_history` service must throttle to **1 query per second**.
-- Energy history cleanup uses whichever recorder statistics delete helper is
-  available in the running Home Assistant version; missing helpers are logged
-  and deletion is skipped.
+- The `import_energy_history` service must throttle to **2 queries per second**
+  (the shared samples limiter in `throttle.py`).
+- Energy history import (`energy.py`) never deletes statistics. It walks each
+  node's window forward one day per request, upserts the hourly rows with
+  `async_import_statistics`, waits for the recorder commit, then records the
+  day as done in a `helpers.storage.Store` (`termoweb.energy_import.<entry_id>`),
+  so an interrupted or failed import resumes where it stopped. Sums continue
+  from the statistic before the window; afterwards later statistics are shifted
+  with `async_adjust_statistics` so the series has no step at the seam.
 - Inventory-driven assumptions (node list, addresses, and types) are immutable
   for the life of the entry; if hardware changes, the user must reload the
   integration.
