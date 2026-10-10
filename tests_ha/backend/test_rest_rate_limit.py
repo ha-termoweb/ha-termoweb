@@ -10,7 +10,7 @@ import pytest
 
 import custom_components.termoweb.backend.rest_client as api
 from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
-from tests.test_api import FakeSession, MockResponse
+from tests_ha.fakes.rest import FakeSession, MockResponse
 
 JSON = {"Content-Type": "application/json"}
 

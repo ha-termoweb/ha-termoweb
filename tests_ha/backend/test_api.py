@@ -25,6 +25,7 @@ from custom_components.termoweb.const import (
     get_brand_user_agent,
 )
 from custom_components.termoweb.inventory import AccumulatorNode
+from tests_ha.fakes.rest import FakeSession, LatchedResponse, MockResponse
 
 RESTClient = api.RESTClient
 
@@ -68,121 +69,6 @@ def _set_token_expiry_seconds(client: RESTClient, seconds: float) -> None:
     now_mono = api.time_mod()
     client._token_expiry_monotonic = now_mono + seconds
 
-
-class MockResponse:
-    def __init__(
-        self,
-        status: int,
-        json_data: Any,
-        *,
-        headers: dict[str, str] | None = None,
-        text_data: str | Callable[[], str] | None = "",
-        text_exc: Exception | Callable[[], Exception] | None = None,
-        json_exc: Exception | Callable[[], Exception] | None = None,
-    ) -> None:
-        self.status = status
-        self._json = json_data
-        self._text = text_data
-        self._text_exc = text_exc
-        self._json_exc = json_exc
-        self.headers = headers or {}
-        self.request_info = None
-        self.history = ()
-        self.text_calls = 0
-        self.json_calls = 0
-
-    async def __aenter__(self) -> MockResponse:
-        return self
-
-    async def __aexit__(
-        self, exc_type, exc, tb
-    ) -> None:  # pragma: no cover - no special handling
-        return None
-
-    async def text(self) -> str:
-        self.text_calls += 1
-        if self._text_exc is not None:
-            exc = self._text_exc() if callable(self._text_exc) else self._text_exc
-            raise exc
-        value = self._text() if callable(self._text) else self._text
-        if value is None:
-            return ""
-        return value
-
-    async def json(
-        self, content_type: str | None = None
-    ) -> Any:  # pragma: no cover - simple pass-through
-        self.json_calls += 1
-        if self._json_exc is not None:
-            exc = self._json_exc() if callable(self._json_exc) else self._json_exc
-            raise exc
-        return self._json() if callable(self._json) else self._json
-
-
-class LatchedResponse:
-    def __init__(self, value: Any) -> None:
-        self._value = value
-
-    def get(self) -> Any:
-        return self._value
-
-
-class _StubRequestInfo:
-    def __init__(self, method: str, url: str) -> None:
-        self.method = method
-        self._url = url
-
-    @property
-    def real_url(self) -> str:
-        return self._url
-
-
-class FakeSession:
-    def __init__(self) -> None:
-        self._request_queue: list[Any] = []
-        self._post_queue: list[Any] = []
-        self.request_calls: list[tuple[str, str, dict[str, Any]]] = []
-        self.post_calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-
-    def queue_request(self, *responses: Any) -> None:
-        self._request_queue.extend(responses)
-
-    def queue_post(self, *responses: Any) -> None:
-        self._post_queue.extend(responses)
-
-    def clear_calls(self) -> None:
-        self.request_calls.clear()
-        self.post_calls.clear()
-
-    def _resolve(self, queue: list[Any], label: str) -> Any:
-        if not queue:
-            raise AssertionError(f"Unexpected {label} call with no queued response")
-        item = queue[0]
-        if isinstance(item, LatchedResponse):
-            result = item.get()
-        else:
-            result = queue.pop(0)
-        if callable(result):
-            result = result()
-        return result
-
-    def request(self, method: str, url: str, *args: Any, **kwargs: Any) -> Any:
-        self.request_calls.append((method, url, copy.deepcopy(kwargs)))
-        result = self._resolve(self._request_queue, "request")
-        if isinstance(result, Exception):
-            raise result
-        if hasattr(result, "request_info") and result.request_info is None:
-            result.request_info = _StubRequestInfo(method, url)
-        return result
-
-    def post(self, url: str, *args: Any, **kwargs: Any) -> Any:
-        self.post_calls.append((url, args, copy.deepcopy(kwargs)))
-        result = self._resolve(self._post_queue, "post")
-        if isinstance(result, Exception):
-            raise result
-        if hasattr(result, "request_info") and result.request_info is None:
-            result.request_info = _StubRequestInfo("POST", url)
-        return result
 
 
 def test_token_refresh(monkeypatch) -> None:

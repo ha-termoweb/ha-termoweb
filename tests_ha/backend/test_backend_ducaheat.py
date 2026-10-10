@@ -1,19 +1,19 @@
 import asyncio
-import logging
 from collections.abc import Iterable, Mapping
+import logging
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from aiohttp import ClientResponseError
 
-from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.backend.base import BoostContext
 from custom_components.termoweb.backend.ducaheat import (
     DucaheatBackend,
     DucaheatRESTClient,
 )
+from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient
+from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_text,
@@ -21,7 +21,7 @@ from custom_components.termoweb.backend.sanitize import (
 )
 from custom_components.termoweb.boost import validate_boost_minutes
 from custom_components.termoweb.const import WS_NAMESPACE
-from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient
+from tests_ha.fakes.runtime import build_entry_runtime
 
 
 class DummyClient:
@@ -79,9 +79,9 @@ def ducaheat_rest_client(monkeypatch: pytest.MonkeyPatch) -> DucaheatRESTClient:
 
 
 @pytest.mark.asyncio
-async def test_ducaheat_backend_creates_ws_client() -> None:
+async def test_ducaheat_backend_creates_ws_client(hass) -> None:
     backend = DucaheatBackend(brand="ducaheat", client=DummyClient())
-    hass = SimpleNamespace(loop=asyncio.get_running_loop(), data={})
+    build_entry_runtime(hass=hass, entry_id="entry", dev_id="dev")
     inventory = object()
     ws_client = backend.create_ws_client(
         hass,

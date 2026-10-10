@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from fake_radio_link import build_ack
+from tests_ha.fakes.radio_link import build_ack
 
 import asyncio
 import logging
 
 import pytest
-from radio_fakes import (
+from tests_ha.fakes.radio_gateway import (
     BANNER,
     NET,
     Q_LINE_NANOCUL,
@@ -710,3 +710,4 @@ async def test_set_network_id_sends_n_and_frames_use_the_new_id() -> None:
     with pytest.raises(ValueError, match="two bytes"):
         await link.set_network_id(b"\x01")
     assert link.network_id == bytes.fromhex("ABCD")
+    await link.close()

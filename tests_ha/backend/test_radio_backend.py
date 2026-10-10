@@ -7,7 +7,7 @@ import importlib
 from types import SimpleNamespace
 
 import pytest
-from fake_radio_link import NET, FakeRadioLink
+from tests_ha.fakes.radio_link import NET, FakeRadioLink
 
 from custom_components.termoweb.const import BRAND_RADIO
 from custom_components.termoweb.inventory import Inventory, build_node_inventory

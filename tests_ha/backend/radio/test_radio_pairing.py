@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from fake_radio_link import build_ack
+from tests_ha.fakes.radio_link import build_ack
 
 import hashlib
 
 import pytest
-from radio_fakes import NET, FakeGateway, FakeTime, rx_line
+from tests_ha.fakes.radio_gateway import NET, FakeGateway, FakeTime, rx_line
 
 from custom_components.termoweb.backend.radio import pairing as pr
 from custom_components.termoweb.backend.radio.dialect import (
@@ -97,6 +97,17 @@ class PairingHeater:
         return lines
 
 
+_OPEN_LINKS: list[RadioLink] = []
+
+
+@pytest.fixture(autouse=True)
+async def _close_links():
+    """Close every link a test opened, so no read loop outlives the test."""
+    yield
+    while _OPEN_LINKS:
+        await _OPEN_LINKS.pop().close()
+
+
 class Air:
     """Fake time plus scheduled air traffic, fed to the gateway while sleeping."""
 
@@ -110,7 +121,7 @@ class Air:
         gw = FakeGateway(dialect)
         gw.responder = self.responders.get(dialect.name)
         self.gateways.append(gw)
-        return RadioLink(
+        link = RadioLink(
             host,
             port,
             dialect,
@@ -119,6 +130,8 @@ class Air:
             open_connection=gw.open_connection,
             **kwargs,
         )
+        _OPEN_LINKS.append(link)
+        return link
 
     async def link_sleep(self, seconds: float) -> None:
         """Link waits: replies are already queued, so time barely moves."""

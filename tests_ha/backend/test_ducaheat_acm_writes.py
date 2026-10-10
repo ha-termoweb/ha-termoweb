@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Callable
 from unittest.mock import AsyncMock
@@ -13,6 +15,123 @@ from custom_components.termoweb.backend.ducaheat import (
     DucaheatRequestError,
 )
 from custom_components.termoweb.const import BRAND_DUCAHEAT, get_brand_user_agent
+
+
+
+@dataclass
+class DucaheatClientHarness:
+    """Container for a fake Ducaheat REST client and its call history."""
+
+    client: "DucaheatRESTClient"
+    requests: list[tuple[str, str, dict[str, Any]]]
+    segmented_calls: list[dict[str, Any]]
+    rtc_calls: list[str]
+
+
+@pytest.fixture
+def ducaheat_rest_harness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[..., DucaheatClientHarness]:
+    """Provide a factory that builds a fake Ducaheat REST client harness."""
+
+    def factory(
+        *,
+        responses: Iterable[dict[str, Any] | None] | None = None,
+        segmented_side_effects: Mapping[str, Exception] | None = None,
+        headers: Mapping[str, str] | None = None,
+        rtc_payload: Mapping[str, int] | None = None,
+    ) -> DucaheatClientHarness:
+        """Create a Ducaheat REST client with predictable helpers for tests."""
+
+        client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+        request_calls: list[tuple[str, str, dict[str, Any]]] = []
+        segmented_calls: list[dict[str, Any]] = []
+        rtc_calls: list[str] = []
+        pending_responses = list(responses or [])
+        segmented_effects = dict(segmented_side_effects or {})
+        base_headers = {
+            "Authorization": "Bearer token",
+            "X-SerialId": "15",
+            "User-Agent": get_brand_user_agent(BRAND_DUCAHEAT),
+        }
+        if headers is not None:
+            base_headers = dict(headers)
+        rtc_template = dict(
+            rtc_payload or {"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0}
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            """Return static authentication headers for the fake client."""
+
+            return dict(base_headers)
+
+        async def fake_request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+            """Record REST requests and return queued responses."""
+
+            request_calls.append((method, path, kwargs))
+            if pending_responses:
+                response = pending_responses.pop(0)
+                return dict(response or {})
+            return {}
+
+        async def fake_post_segmented(
+            path: str,
+            *,
+            headers: dict[str, str],
+            payload: Mapping[str, Any],
+            dev_id: str,
+            addr: str,
+            node_type: str,
+            ignore_statuses: tuple[int, ...] | None = None,
+        ) -> dict[str, Any]:
+            """Record segmented POST calls and replay optional side effects."""
+
+            payload_copy = dict(payload)
+
+            record = {
+                "path": path,
+                "payload": payload_copy,
+                "dev_id": dev_id,
+                "addr": addr,
+                "node_type": node_type,
+                "ignore_statuses": tuple(ignore_statuses or ()),
+                "headers": dict(headers),
+            }
+            segmented_calls.append(record)
+            request_calls.append(
+                (
+                    "POST",
+                    path,
+                    {
+                        "headers": dict(headers),
+                        "json": payload_copy,
+                    },
+                )
+            )
+            effect = segmented_effects.get(path)
+            if effect is not None:
+                raise effect
+            return {"ok": True}
+
+        async def fake_rtc(dev_id: str) -> dict[str, Any]:
+            """Capture RTC lookups and return the configured template."""
+
+            rtc_calls.append(dev_id)
+            return dict(rtc_template)
+
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
+        monkeypatch.setattr(client, "_request", fake_request)
+        monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
+        monkeypatch.setattr(client, "get_rtc_time", fake_rtc)
+
+        return DucaheatClientHarness(
+            client=client,
+            requests=request_calls,
+            segmented_calls=segmented_calls,
+            rtc_calls=rtc_calls,
+        )
+
+    return factory
 
 
 def test_ducaheat_acm_request_error(monkeypatch: pytest.MonkeyPatch) -> None:

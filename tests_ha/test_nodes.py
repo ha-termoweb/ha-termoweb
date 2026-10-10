@@ -7,9 +7,6 @@ from typing import Any
 
 import pytest
 
-from conftest import _install_stubs
-
-_install_stubs()
 
 import custom_components.termoweb.inventory as inventory_module
 from custom_components.termoweb.inventory import (

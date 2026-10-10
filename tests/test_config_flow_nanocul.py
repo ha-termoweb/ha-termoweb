@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 from conftest import _install_stubs
-from fake_radio_link import ProbeLink
+from tests_ha.fakes.radio_link import ProbeLink
 
 _install_stubs()
 

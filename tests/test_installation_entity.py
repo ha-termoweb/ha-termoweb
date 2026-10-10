@@ -202,7 +202,7 @@ class TestBuildDeviceMetadata:
 
 def _prep_client(monkeypatch, fake_request):
     """Build a RESTClient with a monkeypatched _request and valid token."""
-    from tests.test_api import FakeSession
+    from tests_ha.fakes.rest import FakeSession
     import custom_components.termoweb.backend.rest_client as api
 
     session = FakeSession()

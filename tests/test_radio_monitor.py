@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 from conftest import build_entry_runtime
-from fake_radio_link import (
+from tests_ha.fakes.radio_link import (
     HEATER,
     POWER_REQUEST,
     REGISTRATION,
