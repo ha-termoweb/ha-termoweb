@@ -476,6 +476,45 @@ def test_power_record_decodes_heating_voltage_and_duty() -> None:
         assert p.decode_power_record(bad) is None
 
 
+# Dialect-A ``BD`` energy counter replies: synthetic counters, framed with the
+# synthetic network id 12 34 (heater 04 to station 01) through the codec.
+A_COUNTERS = [
+    (bytes.fromhex("BD0001E240"), 123456),
+    (bytes.fromhex("BD0001E2A4"), 123556),
+    (bytes.fromhex("BD0001E2A4"), 123556),  # an idle hour: unchanged
+    (bytes.fromhex("BD0001E2A8"), 123560),
+]
+
+
+def test_energy_counter_decodes_the_dialect_a_reply_on_air() -> None:
+    """``BD`` + u32 big-endian Wh, from a whole frame; a heater's counter only grows."""
+    readings = []
+    for payload, watt_hours in A_COUNTERS:
+        air = build_frame(DIALECT_A, 4, 1, payload, network_id=NET)
+        frame = decode(DIALECT_A, air)
+        assert frame.ok and frame.src == 4 and frame.payload == payload
+        assert p.decode_energy_counter(frame.payload) == watt_hours
+        readings.append(p.decode_energy_counter(frame.payload))
+    assert readings == sorted(readings)
+    assert p.decode_energy_counter(bytes.fromhex("BDFFFFFFFF")) == 0xFFFFFFFF
+    assert p.request_energy() == b"\xbc"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"",
+        bytes.fromhex("BD0001E2"),  # one byte short
+        bytes.fromhex("BC0001E240"),  # the request opcode, not the reply
+        B_ENERGY,  # dialect B's 9-byte power record carries no counter
+        A_E6,  # a status reply arriving in the same window
+    ],
+)
+def test_energy_counter_rejects_other_records(payload) -> None:
+    """Only the 5-byte ``BD`` record is a counter."""
+    assert p.decode_energy_counter(payload) is None
+
+
 def test_factory_reset_is_dialect_b_only() -> None:
     """``C8 01 D0`` resets a dialect-B heater; dialect A has no known reset."""
     assert p.factory_reset(DIALECT_B) == bytes.fromhex("C801D0")

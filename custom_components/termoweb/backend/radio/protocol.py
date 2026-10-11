@@ -168,6 +168,7 @@ SERIAL_HEX_BYTES = 4  # no ASCII serial: the identity's last 4 bytes as 8 hex di
 _SERIAL_RE = re.compile(r"(?=[^0-9]*[0-9])[A-Za-z0-9._-]{4,32}")
 
 ENERGY_MARKER = OP_ENERGY + 1  # BD
+ENERGY_COUNTER_LEN = 5  # dialect A: BD + u32 big-endian Wh counter
 
 POWER_REQUEST_A_LEN = 3
 POWER_REQUEST_B_LEN = 9
@@ -322,7 +323,7 @@ def request_program() -> bytes:
 
 
 def request_energy() -> bytes:
-    """Return the ``BC`` energy counter request."""
+    """Return ``BC``: dialect A's energy counter, dialect B's power record request."""
     return bytes([OP_ENERGY])
 
 
@@ -584,6 +585,17 @@ def decode_power_request(payload: bytes) -> PowerRequest | None:
     if len(payload) == POWER_REQUEST_B_LEN:
         return PowerRequest("B", None, payload)
     return None
+
+
+# --- dialect-A energy counter ------------------------------------------------
+
+
+def decode_energy_counter(payload: bytes) -> int | None:
+    """Decode dialect A's ``BD`` + u32 big-endian cumulative Wh counter, else None."""
+    payload = bytes(payload)
+    if len(payload) != ENERGY_COUNTER_LEN or payload[0] != ENERGY_MARKER:
+        return None
+    return int.from_bytes(payload[1:], "big")
 
 
 # --- dialect-B power record --------------------------------------------------

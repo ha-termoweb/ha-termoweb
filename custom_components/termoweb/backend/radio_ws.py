@@ -323,7 +323,7 @@ class RadioListener(_WSStatusMixin):
         await self._client.async_balance_power()
 
     async def _push_energy(self, node_type: str, addr: str) -> None:
-        """Hand the heater's latest estimated energy counter to the energy sensors."""
+        """Hand the heater's latest energy counter (read or estimated) to the energy sensors."""
 
         samples = await self._client.get_node_samples(
             self.dev_id, (node_type, addr), 0, 0

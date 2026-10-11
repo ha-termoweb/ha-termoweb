@@ -57,6 +57,7 @@ _LOGGER = logging.getLogger(__name__)
 REPLY_TIMEOUT_S = 1.0  # wait for a processed reply after the heater's ack
 PROGRAM_REFRESH_S = 3600.0  # re-read a heater's weekly program at most hourly
 IDENTITY_RETRY_S = 3600.0  # retry an unanswered identity read at most hourly
+ENERGY_COUNTER_REFRESH_S = 600.0  # re-read a dialect-A heater's Wh counter
 STATUS_REPLY_LENS = (
     protocol.STATUS_SHORT_LEN,
     protocol.STATUS_E6_LEN,
@@ -139,6 +140,7 @@ class RadioClient:
     reply_timeout: float = REPLY_TIMEOUT_S
     program_refresh_s: float = PROGRAM_REFRESH_S
     identity_retry_s: float = IDENTITY_RETRY_S
+    energy_counter_refresh_s: float = ENERGY_COUNTER_REFRESH_S
 
     def __init__(
         self,
@@ -195,6 +197,8 @@ class RadioClient:
         self._manual_setpoints: dict[int, float] = {}  # last manual target seen
         self._identities_read: set[int] = set()  # heaters whose 5A reply decoded
         self._identity_failures: dict[int, float] = {}  # last unanswered 5A read
+        self._energy_counters: dict[int, int] = {}  # last dialect-A Wh counter read
+        self._energy_reads: dict[int, float] = {}  # when that counter was last asked
         self.power = power or PowerManager()
         self.energy = EnergyEstimator(self.power.rated_power)
         self.frame_log = FrameLog()  # recent frames for diagnostics
@@ -478,10 +482,12 @@ class RadioClient:
         return self._manual_setpoints.get(addr)
 
     def _forget(self, addr: int) -> None:
-        """Drop what this client remembers about a heater's program and lock."""
+        """Drop what this client remembers about the heater at ``addr``."""
 
         self._programs.pop(addr, None)
         self._locks.pop(addr, None)
+        self._energy_counters.pop(addr, None)
+        self._energy_reads.pop(addr, None)
 
     # --- radio exchanges -----------------------------------------------------
 
@@ -646,6 +652,34 @@ class RadioClient:
             self.power.note_heating(addr, record.heating)
             self.energy.observe(addr, record.heating, record.duty_pct, self._clock())
         return record
+
+    async def read_energy_counter(self, addr: int) -> int | None:
+        """Return a dialect-A heater's own cumulative Wh counter (``BC`` → ``BD`` + u32).
+
+        The counter is re-read at most every ``energy_counter_refresh_s``; a
+        missed read keeps the last value (it only ever grows). None in a
+        dialect without a counter, or before the heater first answered.
+        """
+
+        if not self._dialect.energy_counter:
+            return None
+        now = self._clock()
+        asked = self._energy_reads.get(addr)
+        if asked is None or now - asked >= self.energy_counter_refresh_s:
+            self._energy_reads[addr] = now
+            try:
+                reply = await self._exchange(
+                    addr, protocol.request_energy(), (protocol.ENERGY_COUNTER_LEN,)
+                )
+            except (RadioLinkError, RadioCommandError) as err:
+                _LOGGER.debug(
+                    "Energy counter read from heater %s failed: %s", addr, err
+                )
+            else:
+                counter = protocol.decode_energy_counter(reply.payload)
+                assert counter is not None  # the reply predicate only accepts BD + 4
+                self._energy_counters[addr] = counter
+        return self._energy_counters.get(addr)
 
     async def _program(self, addr: int) -> list[int] | None:
         """Return the heater's ``prog``, re-reading it after ``program_refresh_s``."""
@@ -861,10 +895,16 @@ class RadioClient:
         start: float,
         stop: float,
     ) -> list[dict[str, float]]:
-        """Return the latest estimated Wh counter as one sample (no history)."""
+        """Return the heater's Wh counter as one sample (no history).
+
+        Dialect A: the heater's own counter. Dialect B keeps none: the estimate.
+        """
 
         _node_type, addr = self._resolve_node(node)
-        counter = self.energy.counter_wh(addr)
+        if self._dialect.energy_counter:
+            counter: float | None = await self.read_energy_counter(addr)
+        else:
+            counter = self.energy.counter_wh(addr)
         if counter is None:
             return []
         return [{"t": time.time(), "counter": round(counter, 3)}]

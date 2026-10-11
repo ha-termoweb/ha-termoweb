@@ -123,7 +123,9 @@ def pending_replies() -> list[asyncio.Task[Any]]:
     ]
 
 
-def build(hass: HomeAssistant, nodes: list[dict[str, str]] = NODES) -> Radio:
+def build(
+    hass: HomeAssistant, nodes: list[dict[str, str]] = NODES, dialect: str = "B"
+) -> Radio:
     """Return a listener on a real coordinator and config entry runtime."""
 
     links: list[FakeRadioLink] = []
@@ -140,7 +142,7 @@ def build(hass: HomeAssistant, nodes: list[dict[str, str]] = NODES) -> Radio:
         return link
 
     client = RadioClient(
-        "radio.local", 2323, "B", nodes, network_id=NET, link_factory=factory
+        "radio.local", 2323, dialect, nodes, network_id=NET, link_factory=factory
     )
     client.reply_timeout = 0.01
     inventory = Inventory(DEV_ID, build_node_inventory(nodes))
@@ -359,6 +361,28 @@ async def test_energy_estimate_is_pushed_to_the_energy_coordinator(
     dev_id, updates = handler.call_args.args[:2]
     assert dev_id == DEV_ID
     assert set(updates) == {"htr"} and "counter" in updates["htr"]["6"]
+
+
+async def test_dialect_a_refresh_pushes_the_heaters_own_counter(
+    hass: HomeAssistant,
+) -> None:
+    """A dialect-A refresh reads ``BC`` → ``BD`` + u32 Wh and forwards that counter."""
+
+    radio = build(hass, nodes=NODES[:1], dialect="A")
+    handler = radio.runtime.energy_coordinator.handle_ws_samples
+    try:
+        link = await radio.client.async_connect()
+        link.reply(0xB8, STATUS_E6)  # dialect A answers with the full record
+        link.reply(0xBC, bytes.fromhex("BD0001E240"))  # synthetic 123456 Wh
+        radio.listener.start()
+        await settle(60)
+    finally:
+        await radio.listener.stop()
+
+    assert link.payloads().count(b"\xbc") == 1
+    dev_id, updates = handler.call_args.args[:2]
+    assert dev_id == DEV_ID
+    assert updates["htr"]["6"]["counter"] == 123456
 
 
 async def test_frames_without_usable_content(radio: Radio) -> None:

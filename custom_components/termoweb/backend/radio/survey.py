@@ -551,6 +551,7 @@ class Candidate:
             "    program_write_slots=24,  # unknown\n"
             "    mode_in_preset_write=True,  # unknown\n"
             "    ack_only_opcodes=frozenset(),  # unknown\n"
+            "    energy_counter=False,  # unknown: test BC\n"
             ")"
         )
 

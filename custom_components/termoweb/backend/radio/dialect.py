@@ -73,6 +73,7 @@ class Dialect:
     program_write_slots: int  # slots per day in a ``B2`` program write
     mode_in_preset_write: bool  # True: ``B6`` carries the mode; ``B4`` mode is ignored
     ack_only_opcodes: frozenset[int]  # writes the heater acks without a reply record
+    energy_counter: bool  # True: ``BC`` answers ``BD`` + the heater's u32 Wh counter
 
 
 DIALECT_A = Dialect(
@@ -86,6 +87,7 @@ DIALECT_A = Dialect(
     program_write_slots=48,
     mode_in_preset_write=False,
     ack_only_opcodes=frozenset(),
+    energy_counter=True,
 )
 
 DIALECT_B = Dialect(
@@ -99,6 +101,7 @@ DIALECT_B = Dialect(
     program_write_slots=24,
     mode_in_preset_write=True,
     ack_only_opcodes=frozenset({0x5E, 0xBA}),  # flash display, keypad lock
+    energy_counter=False,  # its ``BD`` reply is the 9-byte power record
 )
 
 DIALECTS: dict[str, Dialect] = {d.name: d for d in (DIALECT_A, DIALECT_B)}

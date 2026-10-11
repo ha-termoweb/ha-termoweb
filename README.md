@@ -199,6 +199,11 @@ See instructions in custom_components/termoweb/assets, to install the card and c
 - Add these sensors in **Settings → Dashboards → Energy** to include them in Home Assistant’s Energy Dashboard.
 - Live energy samples now arrive via the websocket connection, with the hourly
   REST poll remaining as a fallback if the push feed is unavailable.
+- With a local radio (nanoCUL stick or ESP32 gateway), the **Energy** sensor works too. Some heaters
+  (radio type A) keep their own energy meter: the integration reads it every 10 minutes, so the sensor
+  shows the same total as the heater. Other heaters (radio type B) have no meter: the integration
+  estimates their energy from the heater power and heating time. An estimate starts at 0 when
+  Home Assistant starts. Past use cannot be imported over the radio.
 - Use the `termoweb.import_energy_history` action (Developer Tools → Actions) to add past consumption after installing the integration. **Run it once.** Most people never need to run it again.
   1. Set **Max history days** to how far back you want (1 to 3650, default 7).
   2. Run the action. It imports every heater, accumulator and power monitor that has an energy sensor. It asks the cloud for one day per request, at most 2 requests per second, so a year for 3 heaters takes about 10 minutes. Do not start it twice. A second run while one is active stops with "already running".
