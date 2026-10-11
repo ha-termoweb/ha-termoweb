@@ -46,6 +46,8 @@ custom_components/termoweb/__init__.py :: _migrate_to_1_5
     Move entity unique IDs to the one scheme; entity IDs and history stay.
 custom_components/termoweb/__init__.py :: _migrate_to_1_5._migrate
     Return the new unique ID of an older-format entity, or None.
+custom_components/termoweb/__init__.py :: _migrate_to_1_6
+    Drop the manual radio heater power; it is now read from each heater.
 custom_components/termoweb/__init__.py :: async_migrate_entry
     Migrate a config entry to the current version.
 custom_components/termoweb/backend/base.py :: HttpClientProto.list_devices
@@ -255,7 +257,7 @@ custom_components/termoweb/backend/factory.py :: create_radio_client
 custom_components/termoweb/backend/factory.py :: _create_monitor_client
     Return the listen-only radio client of a monitor entry (dialect A to start).
 custom_components/termoweb/backend/factory.py :: _create_gateway_client
-    Return the radio client of a gateway entry; heater power lives in its options.
+    Return the radio client of a gateway entry; power settings live in its options.
 custom_components/termoweb/backend/factory.py :: _create_gateway_client._save_power
     Store the power manager's settings in the entry options.
 custom_components/termoweb/backend/factory.py :: create_entry_client
@@ -490,6 +492,8 @@ custom_components/termoweb/backend/radio/protocol.py :: decode_program
     Decode a ``B1`` program reply (43 or 85 bytes) or a ``56 B1`` program report.
 custom_components/termoweb/backend/radio/protocol.py :: IdentityRecord.ascii_serial
     Return the short form's trailing printable-ASCII run, or None.
+custom_components/termoweb/backend/radio/protocol.py :: IdentityRecord.rated_power_w
+    Return the short form's rated power in watts (byte 10 x 100 W), or None.
 custom_components/termoweb/backend/radio/protocol.py :: decode_identity
     Decode a ``5B 77`` (E0) or ``5B 55`` (short) identity reply.
 custom_components/termoweb/backend/radio/protocol.py :: _deciwatts
@@ -621,7 +625,9 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.async_pair
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_set_network_id
     Move this station to another network id; reconnects keep using it.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_read_identity
-    Return the identity tail of the heater's ``5A`` reply; raise if silent.
+    Return the identity tail of the heater's ``5A`` reply; note its rating.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._learn_rated_power
+    Read a heater's identity once for its rating while its power is unknown.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_factory_reset
     Factory-reset a heater (dialect B ``C8 01 D0``): settings and pairing are wiped.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_restore
@@ -709,9 +715,11 @@ custom_components/termoweb/backend/radio_power.py :: PowerManager.priority
 custom_components/termoweb/backend/radio_power.py :: PowerManager.set_priority
     Set a heater's priority.
 custom_components/termoweb/backend/radio_power.py :: PowerManager.rated_power
-    Return a heater's power: configured, else reported by the heater.
+    Return a heater's power: reported by the heater, else its identity rating.
 custom_components/termoweb/backend/radio_power.py :: PowerManager.note_reported_power
     Remember the full-load power a heater reported itself (dialect A).
+custom_components/termoweb/backend/radio_power.py :: PowerManager.note_identity_power
+    Remember the rated power from a heater's identity record (dialect B).
 custom_components/termoweb/backend/radio_power.py :: PowerManager._store
     Save the settings with ``key`` replaced.
 custom_components/termoweb/backend/radio_power.py :: PowerManager.note_heating
@@ -2069,9 +2077,7 @@ custom_components/termoweb/number.py :: PowerLimitNumber.async_set_native_value
 custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.__init__
     Store the entry being configured.
 custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_init
-    Let the user choose settings, pairing or rehoming.
-custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_settings
-    Show or save the heater power form of a radio entry.
+    Let the user choose pairing or rehoming.
 custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_pair_heaters
     Explain pairing mode; start pairing into this entry's network on submit.
 custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_pair_run

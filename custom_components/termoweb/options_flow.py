@@ -1,4 +1,4 @@
-"""Options flow for radio gateway entries: heater power, pairing, rehoming."""
+"""Options flow for radio gateway entries: pairing and rehoming."""
 
 from __future__ import annotations
 
@@ -12,21 +12,16 @@ import voluptuous as vol
 
 from .backend.radio import RadioLinkError
 from .backend.radio.pairing import IDLE_STOP_S, PAIR_WINDOW_S, PairingError
-from .backend.radio_power import KEY_RATED_POWER
-from .const import CONF_NODES, CONF_RADIO_POWER
+from .const import CONF_NODES
 from .radio_pairing import add_nodes
 from .radio_rehome import RehomeError, async_rehome, rehome_summary
 from .runtime import require_runtime
-from .utils import async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
 
-RATED_POWER_FIELD = "rated_power_"  # + radio address, in the radio options form
-MAX_RATED_POWER_W = 10000
-
 
 class TermoWebOptionsFlow(config_entries.OptionsFlow):
-    """Options flow for radio gateway entries: heater power, pairing, rehoming."""
+    """Options flow for radio gateway entries: pairing and rehoming."""
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Store the entry being configured."""
@@ -39,49 +34,9 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
         self._rehome_summary_shown = False
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
-        """Let the user choose settings, pairing or rehoming."""
+        """Let the user choose pairing or rehoming."""
         return self.async_show_menu(
-            step_id="init", menu_options=["settings", "pair_heaters", "rehome"]
-        )
-
-    async def async_step_settings(self, user_input: dict[str, Any] | None = None):
-        """Show or save the heater power form of a radio entry."""
-        radio_addrs = [
-            str(node.get("addr")) for node in self.entry.data.get(CONF_NODES, [])
-        ]
-        power = dict(self.entry.options.get(CONF_RADIO_POWER) or {})
-        if user_input is not None:
-            # Keep option keys this form does not own (e.g. energy-import progress).
-            data: dict[str, Any] = dict(self.entry.options)
-            if radio_addrs:
-                data[CONF_RADIO_POWER] = {
-                    **power,
-                    KEY_RATED_POWER: {
-                        addr: int(user_input.get(f"{RATED_POWER_FIELD}{addr}", 0))
-                        for addr in radio_addrs
-                    },
-                }
-            return self.async_create_entry(title="", data=data)
-
-        fields: dict[Any, Any] = {}
-        rated = power.get(KEY_RATED_POWER) or {}
-        for addr in radio_addrs:
-            fields[
-                vol.Optional(
-                    f"{RATED_POWER_FIELD}{addr}", default=int(rated.get(addr) or 0)
-                )
-            ] = vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_RATED_POWER_W))
-        ver = await async_get_integration_version(self.hass)
-        heaters = (
-            "Heater power in watts (0 = unknown), used by the power limit: "
-            + ", ".join(f"{RATED_POWER_FIELD}{a} = heater {a}" for a in radio_addrs)
-            if radio_addrs
-            else ""
-        )
-        return self.async_show_form(
-            step_id="settings",
-            data_schema=vol.Schema(fields),
-            description_placeholders={"version": ver, "heaters": heaters},
+            step_id="init", menu_options=["pair_heaters", "rehome"]
         )
 
     async def async_step_pair_heaters(self, user_input: dict[str, Any] | None = None):

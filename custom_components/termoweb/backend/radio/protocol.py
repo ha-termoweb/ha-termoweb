@@ -159,6 +159,9 @@ IDENTITY_SHORT_LEN = 18
 IDENTITY_MARKER = OP_IDENTITY + 1  # 5B
 IDENTITY_E0_FORM = 0x77
 IDENTITY_SHORT_FORM = 0x55
+IDENTITY_RATED_POWER_INDEX = 10  # short form: rated power in 100 W units
+RATED_POWER_UNIT_W = 100
+RATED_POWER_RANGE_W = (100, 4000)  # anything else is not taken as a rating
 
 ENERGY_MARKER = OP_ENERGY + 1  # BD
 
@@ -515,6 +518,15 @@ class IdentityRecord:
         while start > 0 and 0x20 < self.tail[start - 1] < 0x7F:
             start -= 1
         return self.tail[start:end].decode("ascii") if start < end else None
+
+    @property
+    def rated_power_w(self) -> int | None:
+        """Return the short form's rated power in watts (byte 10 x 100 W), or None."""
+        if self.form != "short":
+            return None
+        watts = self.raw[IDENTITY_RATED_POWER_INDEX] * RATED_POWER_UNIT_W
+        low, high = RATED_POWER_RANGE_W
+        return watts if low <= watts <= high else None
 
 
 def decode_identity(payload: bytes) -> IdentityRecord | None:

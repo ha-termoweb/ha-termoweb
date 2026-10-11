@@ -586,6 +586,45 @@ async def test_migration_drops_supports_diagnostics(
     assert entry.minor_version == MINOR_VERSION
 
 
+async def test_migration_drops_the_manual_radio_rated_power(
+    hass: HomeAssistant,
+) -> None:
+    """1.6: the manual rated power is removed; limit, priorities and the rest stay."""
+    power = {
+        "power_limit": 2000,
+        "priority": {"6": 3},
+        "rated_power": {"6": 1500},
+        "shed": {"7": 1},
+    }
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        minor_version=5,
+        unique_id=f"radio:{'0a' * 6}",
+        data={CONF_BRAND: BRAND_RADIO, "host": "h"},
+        options={"radio_power": power, "energy_history_imported": True},
+    )
+    other = MockConfigEntry(
+        domain=DOMAIN,
+        minor_version=5,
+        unique_id=f"radio:{'0b' * 6}",
+        data={CONF_BRAND: BRAND_RADIO, "host": "h"},
+        options={"energy_history_imported": True},
+    )
+    entry.add_to_hass(hass)
+    other.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry)
+    assert await async_migrate_entry(hass, other)
+
+    assert dict(entry.options) == {
+        "radio_power": {"power_limit": 2000, "priority": {"6": 3}, "shed": {"7": 1}},
+        "energy_history_imported": True,
+    }
+    assert dict(other.options) == {"energy_history_imported": True}
+    assert [entry.minor_version, other.minor_version] == [MINOR_VERSION] * 2
+    assert MINOR_VERSION == 6
+
+
 async def test_migration_refuses_newer_version(hass: HomeAssistant) -> None:
     """An entry written by a newer major version is not touched."""
     entry = MockConfigEntry(domain=DOMAIN, version=2, data={CONF_BRAND: BRAND_RADIO})

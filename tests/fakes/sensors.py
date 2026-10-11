@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from typing import Any
 from unittest.mock import patch
@@ -58,8 +58,15 @@ def entity_ids(hass: HomeAssistant, entry: MockConfigEntry, domain: str) -> set[
 
 
 @contextmanager
-def fake_radio_links() -> Generator[list[FakeRadioLink]]:
-    """Build real RadioClients whose gateway connections are ``FakeRadioLink``s."""
+def fake_radio_links(
+    script: Callable[[FakeRadioLink], None] | None = None,
+    clock: Callable[[], float] | None = None,
+) -> Generator[list[FakeRadioLink]]:
+    """Build real RadioClients whose gateway connections are ``FakeRadioLink``s.
+
+    ``script`` scripts each new link's heater replies before it is used;
+    ``clock`` replaces the clients' monotonic clock.
+    """
     links: list[FakeRadioLink] = []
     real_create = factory.create_radio_client
 
@@ -68,10 +75,14 @@ def fake_radio_links() -> Generator[list[FakeRadioLink]]:
 
         def _link(*a: Any, **kw: Any) -> FakeRadioLink:
             links.append(FakeRadioLink(*a, **kw))
+            if script is not None:
+                script(links[-1])
             return links[-1]
 
         client._link_factory = _link
         client.reply_timeout = 0.01  # unanswered polls must not cost real seconds
+        if clock is not None:
+            client._clock = clock
         return client
 
     with patch.object(factory, "create_radio_client", _create):

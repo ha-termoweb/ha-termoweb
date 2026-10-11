@@ -363,7 +363,7 @@ async def _run_options(hass: HomeAssistant, entry_id: str) -> Any:
     """Open the options, pick rehome, submit and return the step after progress."""
     menu = await hass.config_entries.options.async_init(entry_id)
     assert menu["type"] is FlowResultType.MENU
-    assert menu["menu_options"] == ["settings", "pair_heaters", "rehome"]
+    assert menu["menu_options"] == ["pair_heaters", "rehome"]
     form = await hass.config_entries.options.async_configure(
         menu["flow_id"], {"next_step_id": "rehome"}
     )
