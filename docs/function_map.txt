@@ -1508,14 +1508,12 @@ custom_components/termoweb/config_flow_radio.py :: UnknownDialectError.__init__
     Store the report for the flow to save.
 custom_components/termoweb/config_flow_radio.py :: _analyse_inline
     Analyse survey bursts on the calling loop (tests and fallbacks).
-custom_components/termoweb/config_flow_radio.py :: _dialect_field
-    Return the optional radio dialect field (auto by default).
 custom_components/termoweb/config_flow_radio.py :: _advanced
     Return ``fields`` as a collapsed "advanced" form section.
 custom_components/termoweb/config_flow_radio.py :: _flatten
     Return form input with the advanced section's fields moved to the top.
 custom_components/termoweb/config_flow_radio.py :: _radio_schema
-    Build the radio gateway form: the address, port and dialect tucked away.
+    Build the radio gateway form: the address, the port tucked away.
 custom_components/termoweb/config_flow_radio.py :: _reconfigure_radio_schema
     Build the radio reconfigure schema: address plus an optional re-scan.
 custom_components/termoweb/config_flow_radio.py :: _nanocul_schema
@@ -1585,7 +1583,7 @@ custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_na
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._used_serial_ports
     Return the serial ports that TermoWeb entries already use.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._start_nanocul
-    Probe the stick, check its firmware can speak the dialect, discover.
+    Probe the stick, note whether its firmware detects the radio type.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_reconfigure_nanocul
     Change the nanoCUL's port; optionally scan for heaters again.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_reconfigure_radio
