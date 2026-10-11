@@ -39,22 +39,16 @@
       },
       "zeroconf_confirm": {
         "title": "Radio gateway found",
-        "description": "Found a TermoWeb radio gateway at {host}. Set it up?\n\nIn the next step you choose: add the gateway and let it find your heaters, or pair new heaters."
+        "description": "Found a TermoWeb radio gateway at {host}. Set it up?\n\nIn the next step you choose: add the gateway (it finds and pairs your heaters), or only listen."
       },
       "radio_method": {
-        "title": "Find or pair your heaters",
-        "description": "Choose \"Add the gateway and find my heaters\" if your heaters already work with a TermoWeb gateway or app. Setup finishes at once. The integration then listens to your heaters in the background and adds each heater by itself, usually within a few minutes. You get a notification for each heater it finds. Heaters talk when they start heating, so turning one heater's temperature up helps.\n\nChoose \"Pair new heaters\" if your heaters are new, or were reset. You press the pairing button on each heater.\n\nChoose \"Listen only\" to record radio traffic for a test, next to a TermoWeb gateway that still runs. The integration never transmits in this mode and adds no heaters.",
+        "title": "Add your gateway",
+        "description": "Choose \"Add the gateway\" to control your heaters. Setup finishes at once. Then:\n\n- Heaters that already work with a TermoWeb gateway or app are found by themselves, usually within a few minutes. Heaters talk when they start heating, so turning one heater's temperature up helps.\n- New or reset heaters: put each heater into pairing mode within 30 minutes. The heater's manual tells you which buttons to press. Do one heater at a time. Later, press **Pair new heaters** on the gateway device first.\n\nYou get a notification for each heater that is added.\n\nChoose \"Listen only\" to record radio traffic for a test, next to a TermoWeb gateway that still runs. The integration never transmits in this mode and adds no heaters.",
         "menu_options": {
-          "radio_discover": "Add the gateway and find my heaters",
-          "radio_pair": "Pair new heaters",
+          "radio_discover": "Add the gateway",
           "radio_monitor": "Listen only (record radio traffic, never transmit)"
         }
       },
-      "radio_pair": {
-        "title": "Pair new heaters",
-        "description": "1. Press **Submit**. You then have 5 minutes.\n2. Put one heater into pairing mode. The heater's manual tells you which buttons to press.\n3. Wait about 10 seconds. Then put the next heater into pairing mode. Do one heater at a time.\n\nSetup stops 1 minute after the last heater was paired, or after 5 minutes. Keep the gateway close to the heaters."
-      },
-      "radio_pair_run": { "title": "Pairing your heaters" },
       "radio_rescan": { "title": "Scanning for your heaters" },
       "reconfigure_radio": {
         "title": "Change the radio gateway",
@@ -131,8 +125,7 @@
       "no_gateway_mac": "The radio gateway did not report its MAC address. Update the gateway firmware.",
       "no_heaters": "No heater answered. Move the gateway closer to the heaters and try again.",
       "cannot_connect_nanocul": "Cannot open the nanoCUL stick. Check that it is plugged in, that the port is right, and that it runs the termoweb_rx firmware.",
-      "dialect_unsupported_firmware": "This nanoCUL firmware only knows radio dialect A. Choose dialect A or auto, or update the stick's firmware.",
-      "no_heaters_paired": "No heater was paired. Put a heater into pairing mode while the integration waits, move the gateway closer to it, and try again."
+      "dialect_unsupported_firmware": "This nanoCUL firmware only knows radio dialect A. Choose dialect A or auto, or update the stick's firmware."
     },
     "abort": {
       "already_configured": "This gateway is already set up.",
@@ -145,8 +138,7 @@
       "not_ipv4_address": "The radio gateway announced only an IPv6 address. Add it by hand with its IPv4 address."
     },
     "progress": {
-      "radio_rescan": "Checking every heater on your radio network. This takes up to a minute.",
-      "radio_pair": "Waiting for heaters in pairing mode. Put one heater into pairing mode now, then the next one. This stops 1 minute after the last heater was paired, or after 5 minutes."
+      "radio_rescan": "Checking every heater on your radio network. This takes up to a minute."
     }
   },
   "options": {
@@ -353,7 +345,7 @@
     },
     "radio_factory_reset": {
       "name": "Radio factory reset",
-      "description": "DESTRUCTIVE. Reset one radio heater to its factory settings. The heater loses all settings, its clock, its weekly program and its radio pairing, and stops talking to Home Assistant. Its last known settings are saved first. To use the heater again, run \"Radio pair\" with the same heater number and press the pairing button on the heater. Only dialect-B heaters can be reset.",
+      "description": "DESTRUCTIVE. Reset one radio heater to its factory settings. The heater loses all settings, its clock, its weekly program and its radio pairing, and stops talking to Home Assistant. Its last known settings are saved first. To use the heater again, press \"Pair new heaters\" on the gateway device and put the heater into pairing mode. Its saved settings come back when it is recognised. Only dialect-B heaters can be reset.",
       "fields": {
         "entry_id": {
           "name": "Config entry ID",
@@ -363,29 +355,6 @@
         "heater": {
           "name": "Heater number",
           "description": "The heater's radio number (the number in \"Heater 6\")."
-        }
-      }
-    },
-    "radio_pair": {
-      "name": "Radio pair",
-      "description": "Pair one radio heater. Start this action, then press the pairing button on the heater. With a heater number, the heater gets that number back (use this after a factory reset) and its saved settings are restored. Without a heater number, a new heater is added and the integration reloads. Heater control pauses while pairing runs.",
-      "fields": {
-        "entry_id": {
-          "name": "Config entry ID",
-          "description": "The radio gateway or nanoCUL config entry to use.",
-          "example": "abcd1234deadbeef"
-        },
-        "heater": {
-          "name": "Heater number",
-          "description": "Pair the heater back to this number. Leave empty to add a new heater."
-        },
-        "restore": {
-          "name": "Restore settings",
-          "description": "Give the heater back its presets, mode and weekly program after pairing."
-        },
-        "timeout": {
-          "name": "Wait time",
-          "description": "How long to wait for the heater's pairing button."
         }
       }
     },

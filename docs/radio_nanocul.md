@@ -45,14 +45,14 @@ repository.
    list, choose **Enter the port path or URL myself** and type the path,
    for example `/dev/serial/by-id/usb-...`.
 4. Leave **Advanced settings** as they are, and press **Submit**.
-5. Choose one:
-   - **Add the gateway and find my heaters**: setup finishes at once. Turn
-     one heater's temperature up, so that it starts heating. The integration
+5. Choose **Add the gateway**. Setup finishes at once.
+   - Heaters that already work with a TermoWeb gateway or app: turn one
+     heater's temperature up, so that it starts heating. The integration
      listens in the background and adds each heater by itself, usually
      within a few minutes. You get a notification for each heater it finds.
-   - **Pair new heaters**: press **Submit**, then put one heater at a time
+   - New or reset heaters: within 30 minutes, put one heater at a time
      into pairing mode (see the heater's manual). Wait about 10 seconds
-     between heaters. You have 5 minutes.
+     between heaters.
 6. Your heaters appear under **Devices**. A heater that was quiet is added
    later, as soon as it talks.
 

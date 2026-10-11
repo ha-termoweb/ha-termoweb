@@ -1,4 +1,4 @@
-"""Services that factory-reset radio heaters and pair them (again)."""
+"""Services that factory-reset radio heaters and move them to the own network."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 import voluptuous as vol
 
 from custom_components.termoweb.backend.radio import RadioLinkError
-from custom_components.termoweb.backend.radio.pairing import PAIR_WINDOW_S, PairingError
+from custom_components.termoweb.backend.radio.pairing import PAIR_WINDOW_S
 from custom_components.termoweb.backend.radio_client import (
     RadioClient,
     RadioError,
@@ -18,14 +18,7 @@ from custom_components.termoweb.backend.radio_client import (
     radio_addr,
 )
 from custom_components.termoweb.const import CONF_NODES, DOMAIN
-from custom_components.termoweb.radio_pairing import (
-    add_nodes,
-    async_reset_keeping_settings,
-    heater_snapshot,
-    saved_snapshot,
-    store_snapshot,
-    with_manual_target,
-)
+from custom_components.termoweb.radio_pairing import async_reset_keeping_settings
 from custom_components.termoweb.radio_rehome import (
     RehomeError,
     async_rehome,
@@ -36,7 +29,6 @@ from custom_components.termoweb.runtime import EntryRuntime, require_runtime
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_RADIO_FACTORY_RESET = "radio_factory_reset"
-SERVICE_RADIO_PAIR = "radio_pair"
 SERVICE_RADIO_REHOME = "radio_rehome"
 MIN_PAIR_S = 30
 MAX_PAIR_S = 600
@@ -44,18 +36,6 @@ _HEATER = vol.All(vol.Coerce(int), vol.Range(min=1, max=254))
 RADIO_FACTORY_RESET_SCHEMA = vol.Schema(
     {vol.Required("entry_id"): str, vol.Required("heater"): _HEATER}
 )
-RADIO_PAIR_SCHEMA = vol.Schema(
-    {
-        vol.Required("entry_id"): str,
-        vol.Optional("heater"): _HEATER,
-        vol.Optional("restore", default=True): bool,
-        vol.Optional("timeout", default=int(PAIR_WINDOW_S)): vol.All(
-            vol.Coerce(int), vol.Range(min=MIN_PAIR_S, max=MAX_PAIR_S)
-        ),
-    }
-)
-
-
 RADIO_REHOME_SCHEMA = vol.Schema(
     {
         vol.Required("entry_id"): str,
@@ -105,9 +85,9 @@ def _require_node(runtime: EntryRuntime, addr: int) -> None:
 
 
 async def async_register_radio_pairing_services(hass: HomeAssistant) -> None:
-    """Register the radio_factory_reset, radio_pair and radio_rehome services once."""
+    """Register the radio_factory_reset and radio_rehome services once."""
 
-    if hass.services.has_service(DOMAIN, SERVICE_RADIO_PAIR):
+    if hass.services.has_service(DOMAIN, SERVICE_RADIO_REHOME):
         return
 
     async def _async_factory_reset(call: ServiceCall) -> dict[str, Any]:
@@ -123,52 +103,10 @@ async def async_register_radio_pairing_services(hass: HomeAssistant) -> None:
         except (RadioError, RadioLinkError) as err:
             raise HomeAssistantError(
                 f"Factory reset failed: {err}. If the heater did reset, its "
-                "settings are saved: pair it with the Radio pair action."
+                'settings are saved: press "Pair new heaters" on the gateway '
+                "device and put the heater into pairing mode."
             ) from err
         return {"heater": addr, "settings_saved": saved}
-
-    async def _async_pair(call: ServiceCall) -> dict[str, Any]:
-        """Pair one heater: to its old address (and restore it), or as a new heater."""
-
-        entry_id = call.data["entry_id"]
-        timeout = int(call.data.get("timeout", PAIR_WINDOW_S))
-        runtime, client = _radio_runtime(hass, entry_id)
-        entry = runtime.config_entry
-        addr = call.data.get("heater")
-        snapshot = None
-        if addr is not None:
-            addr = int(addr)
-            _require_node(runtime, addr)
-            snapshot = saved_snapshot(entry, addr) or with_manual_target(
-                heater_snapshot(runtime, addr), client, addr
-            )
-        _LOGGER.info("Radio pairing for %s: waiting up to %d s", entry_id, timeout)
-        try:
-            async with runtime.radio_pairing_lock:  # automatic pairing stands by
-                paired = await client.async_pair(timeout, wanted_id=addr, max_heaters=1)
-        except (PairingError, RadioError, RadioLinkError) as err:
-            raise HomeAssistantError(f"Radio pairing failed: {err}") from err
-        if not paired:
-            raise HomeAssistantError(
-                f"No heater was paired within {timeout} s. Put the heater into "
-                "pairing mode and try again."
-            )
-        node_id = paired[0].node_id
-        if addr is None:
-            add_nodes(hass, entry, paired[:1])
-            return {"heater": node_id, "added": True, "restored": False}
-        restored = False
-        if call.data.get("restore", True) and snapshot is not None:
-            try:
-                await client.async_restore(addr, **snapshot)
-            except (RadioError, RadioLinkError, ValueError) as err:
-                raise HomeAssistantError(
-                    f"Heater {addr} is paired, but restoring its settings failed: {err}"
-                ) from err
-            store_snapshot(hass, entry, addr, None)
-            restored = True
-        await runtime.coordinator.async_refresh_heater(("htr", str(addr)))
-        return {"heater": addr, "added": False, "restored": restored}
 
     async def _async_rehome(call: ServiceCall) -> dict[str, Any]:
         """Move every heater onto this installation's own network and restore it."""
@@ -193,12 +131,5 @@ async def async_register_radio_pairing_services(hass: HomeAssistant) -> None:
         SERVICE_RADIO_FACTORY_RESET,
         _async_factory_reset,
         schema=RADIO_FACTORY_RESET_SCHEMA,
-        supports_response=SupportsResponse.OPTIONAL,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_RADIO_PAIR,
-        _async_pair,
-        schema=RADIO_PAIR_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )

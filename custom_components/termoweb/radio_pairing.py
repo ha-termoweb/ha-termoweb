@@ -1,8 +1,8 @@
 """Home Assistant side of radio pairing: settings snapshots and new nodes.
 
 A factory reset wipes a heater's settings. Before the reset, the heater's last
-known settings are saved in the config entry options, so a later re-pairing
-can give them back (``termoweb.radio_pair``). See ``docs/radio_protocol.md``.
+known settings are saved in the config entry options, so the automatic pairing
+gives them back when the heater is paired again. See ``docs/radio_protocol.md``.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from homeassistant.helpers import instance_id
 from .backend.radio.pairing import PairedHeater, site_network_id
 from .backend.radio_client import RadioUnsupportedError
 from .backend.sanitize import mask_identifier
-from .const import CONF_NODES, CONF_RADIO_RESTORE, DOMAIN
+from .const import CONF_RADIO_RESTORE, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -220,29 +220,7 @@ def async_notify_added(
         )
 
 
-def add_nodes(
-    hass: HomeAssistant, entry: ConfigEntry, heaters: Iterable[PairedHeater]
-) -> bool:
-    """Add paired heaters to the entry's nodes and reload it; False if nothing changed."""
-
-    nodes, added, moved = merge_heaters(entry.data.get(CONF_NODES, []), heaters)
-    if not added and not moved:
-        return False
-    hass.config_entries.async_update_entry(
-        entry, data={**entry.data, CONF_NODES: nodes}
-    )
-    _LOGGER.info(
-        "Added %d and moved %d paired heater(s); reloading the entry",
-        len(added),
-        moved,
-    )
-    # The inventory is fixed for the entry's lifetime: a reload picks the nodes up.
-    hass.config_entries.async_schedule_reload(entry.entry_id)
-    return True
-
-
 __all__ = [
-    "add_nodes",
     "async_notify_added",
     "async_reset_keeping_settings",
     "async_site_network_id",

@@ -13,10 +13,7 @@ from custom_components.termoweb.backend.radio.dialect import (
     build_frame,
     decode,
 )
-from custom_components.termoweb.backend.radio.link import (
-    RadioLink,
-    UnsupportedDialectError,
-)
+from custom_components.termoweb.backend.radio.link import RadioLink
 from tests.fakes.radio_gateway import NET, FakeGateway, FakeTime, rx_line
 from tests.fakes.radio_link import build_ack
 
@@ -381,75 +378,6 @@ async def test_announcements_keep_the_window_open() -> None:
     link = await air.link(responder=PairingHeater(refuse_acks=99))
     assert await air.pair(link, window_s=5, total_s=100, idle_stop_s=10) == []
     assert 34 <= air.ft.now < 36  # 10 s after the last sweep at 25 s
-
-
-# --- pair_new_network --------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_pair_new_network_alternates_until_a_dialect_pairs() -> None:
-    air = Air([(20.0, announce_a())])  # heard during the second (dialect A) slice
-    air.responders = {
-        "B": PairingHeater(),
-        "A": PairingHeater(DIALECT_A, replies={0xB8: STATUS}),
-    }
-    dialect, paired = await pr.pair_new_network(
-        "gw",
-        2323,
-        NET,
-        link_factory=air.link_factory,
-        clock=air.ft.clock,
-        sleep=air.sleep,
-    )
-    assert dialect is DIALECT_A and [h.node_id for h in paired] == [2]
-    assert [gw.dialect.name for gw in air.gateways] == ["B", "A"]
-    assert all(f"N{NET.hex().upper()}" in gw.commands for gw in air.gateways)
-    assert all(gw.writer.closed for gw in air.gateways)
-
-
-@pytest.mark.asyncio
-async def test_pair_new_network_gives_up_after_total_time() -> None:
-    air = Air()
-    dialect, paired = await pr.pair_new_network(
-        "gw",
-        2323,
-        NET,
-        total_s=40,
-        link_factory=air.link_factory,
-        clock=air.ft.clock,
-        sleep=air.sleep,
-    )
-    assert (dialect, paired) == (None, [])
-    assert [gw.dialect.name for gw in air.gateways] == ["B", "A", "B"]
-    assert air.ft.now >= 40
-
-
-@pytest.mark.asyncio
-async def test_pair_new_network_drops_dialects_the_firmware_lacks() -> None:
-    air = Air()
-
-    def factory(host, port, dialect, **kwargs):
-        link = air.link_factory(host, port, dialect, **kwargs)
-        if dialect is DIALECT_B:
-            air.gateways[-1].q_line = "# Q termoweb_rx 3.5 sync=2DE5 id=01"
-        return link
-
-    dialect, paired = await pr.pair_new_network(
-        "gw",
-        2323,
-        NET,
-        total_s=20,
-        link_factory=factory,
-        clock=air.ft.clock,
-        sleep=air.sleep,
-    )
-    assert (dialect, paired) == (None, [])
-    assert [gw.dialect.name for gw in air.gateways] == ["B", "A", "A"]
-
-    with pytest.raises(UnsupportedDialectError):
-        await pr.pair_new_network(
-            "gw", 2323, NET, dialects=(DIALECT_B,), link_factory=factory
-        )
 
 
 @pytest.mark.asyncio

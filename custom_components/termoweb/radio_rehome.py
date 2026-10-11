@@ -71,8 +71,8 @@ async def _reset_all(hass: HomeAssistant, runtime: Any, addrs: list[int]) -> Non
         except (RadioError, RadioLinkError) as err:
             waiting = (
                 f" Heaters {', '.join(map(str, done))} are already reset and keep "
-                "their saved settings: pair each one with the Radio pair action "
-                "and its heater number."
+                'their saved settings: press "Pair new heaters" on the gateway '
+                "device and put each one into pairing mode."
                 if done
                 else ""
             )
@@ -140,15 +140,15 @@ async def _async_rehome(
     Nothing changes when a heater does not answer the identity read. Once all
     heaters are reset, the entry always moves to the site network: paired
     heaters get new ids (old ids are skipped, so heaters that were not paired
-    keep their node and saved settings for a later Radio pair).
+    keep their node and saved settings until they are paired again).
     """
 
     entry, client = runtime.config_entry, runtime.client
     if client.dialect is not DIALECT_B:
         raise RehomeError(
             "Only dialect-B heaters can be reset over the radio. Reset dialect-A "
-            "heaters on their panel, then set the integration up again and "
-            'choose "Pair new heaters".'
+            "heaters on their panel, then set the integration up again and put "
+            "each heater into pairing mode within 30 minutes."
         )
     old_net = bytes.fromhex(entry.data[CONF_NETWORK_ID])
     new_net = await async_site_network_id(hass, str(runtime.dev_id))
@@ -249,9 +249,9 @@ def rehome_summary(result: dict[str, Any]) -> str:
         for addr in result["unidentified"]
     )
     lines.extend(
-        f"- Heater {addr} was not paired. It is reset and waits. Use the "
-        f"Radio pair action with heater number {addr} to pair it and "
-        "restore its settings."
+        f"- Heater {addr} was not paired. It is reset and waits. Press "
+        '"Pair new heaters" on the gateway device and put the heater into '
+        "pairing mode; its saved settings come back when it is recognised."
         for addr in result["waiting"]
     )
     if result["unidentified"] and result["waiting"]:

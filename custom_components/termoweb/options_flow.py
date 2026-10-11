@@ -71,7 +71,7 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
             _LOGGER.exception("Unexpected error while moving the radio heaters")
             self._rehome_summary = (
                 "Unexpected error. See the Home Assistant log. Heaters that were "
-                "reset keep their saved settings for the Radio pair action."
+                'reset keep their saved settings: pair them with "Pair new heaters".'
             )
         return self.async_show_progress_done(next_step_id="rehome_done")
 

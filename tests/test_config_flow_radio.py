@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 from homeassistant.config_entries import SOURCE_USER, SOURCE_ZEROCONF, ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType, section
+from homeassistant.data_entry_flow import FlowResultType, InvalidData, section
 from homeassistant.helpers import config_validation as cv, instance_id
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 import probatio
@@ -32,10 +32,6 @@ from custom_components.termoweb.backend.radio import (
     RadioLinkError,
 )
 from custom_components.termoweb.backend.radio.discovery import NetworkSighting
-from custom_components.termoweb.backend.radio.pairing import (
-    PAIRING_DIALECTS,
-    PairedHeater,
-)
 from custom_components.termoweb.backend.radio.survey import analyse
 from custom_components.termoweb.const import (
     BRAND_RADIO,
@@ -61,7 +57,6 @@ class FakeRadio:
         self.gateway: Any = GATEWAY_ID
         self.stick: Any = (GATEWAY_ID, True)
         self.discover: Any = (NetworkSighting(DIALECT_B, NET), {6: None, 7: None})
-        self.paired: Any = (DIALECT_B, [_paired(2), _paired(3, "S000003")])
         self.ports: list[config_flow_radio.SerialPort] = []
         self.calls: list[tuple[Any, ...]] = []
         self.kwargs: list[dict[str, Any]] = []
@@ -92,21 +87,6 @@ class FakeRadio:
             raise self.discover
         return self.discover
 
-    async def pair_new_network(
-        self, host: str, port: int, network_id: bytes, **kwargs: Any
-    ) -> Any:
-        """Return (or raise) the configured pairing result."""
-        self.calls.append(("pair", host, port, network_id))
-        self.kwargs.append(kwargs)
-        if isinstance(self.paired, Exception):
-            raise self.paired
-        return self.paired
-
-
-def _paired(node_id: int, serial: str | None = None) -> PairedHeater:
-    """Return a heater paired as ``node_id`` (with a synthetic ``serial``)."""
-    return PairedHeater(node_id, None, serial=serial)
-
 
 @pytest.fixture
 def radio() -> Generator[FakeRadio]:
@@ -116,7 +96,6 @@ def radio() -> Generator[FakeRadio]:
         patch.object(config_flow_radio, "probe_gateway", fake.probe_gateway),
         patch.object(config_flow_radio, "probe_nanocul", fake.probe_nanocul),
         patch.object(config_flow_radio, "discover_radio", fake.discover_radio),
-        patch.object(config_flow_radio, "pair_new_network", fake.pair_new_network),
         patch.object(config_flow_radio, "list_serial_ports", lambda: fake.ports),
         patch(
             "custom_components.termoweb.async_setup_entry",
@@ -466,18 +445,10 @@ async def _choose(
 ) -> dict[str, Any]:
     """Pick ``option`` from the method menu and let any progress finish."""
     assert menu["type"] is FlowResultType.MENU
-    assert menu["menu_options"] == ["radio_discover", "radio_pair", "radio_monitor"]
+    assert menu["menu_options"] == ["radio_discover", "radio_monitor"]
     result = await hass.config_entries.flow.async_configure(
         menu["flow_id"], {"next_step_id": option}
     )
-    return await _finish_progress(hass, result)
-
-
-async def _pair(hass: HomeAssistant, menu: dict[str, Any]) -> dict[str, Any]:
-    """Choose pairing, confirm the explanation and return the final result."""
-    form = await _choose(hass, menu, "radio_pair")
-    assert form["step_id"] == "radio_pair"
-    result = await hass.config_entries.flow.async_configure(form["flow_id"], {})
     return await _finish_progress(hass, result)
 
 
@@ -511,6 +482,24 @@ async def test_radio_gateway_entry_is_created_without_waiting_for_heaters(
         "nodes": [],
     }
     assert radio.calls == [("probe", "10.0.0.5", 2323)]  # nothing listened to
+
+
+@pytest.mark.parametrize("menu_of", ["gateway", "stick"])
+async def test_setup_menu_offers_only_add_or_listen(
+    hass: HomeAssistant, radio: FakeRadio, menu_of: str
+) -> None:
+    """Pairing is automatic after setup: the menu has no separate pairing choice."""
+    radio.ports = [PORT]
+    if menu_of == "gateway":
+        menu = await _gateway_menu(hass, FORM)
+    else:
+        menu = await _stick_menu(hass, STICK_FORM)
+    assert menu["menu_options"] == ["radio_discover", "radio_monitor"]
+    assert not hasattr(config_flow_radio.RadioConfigFlow, "async_step_radio_pair")
+    with pytest.raises(InvalidData):
+        await hass.config_entries.flow.async_configure(
+            menu["flow_id"], {"next_step_id": "radio_pair"}
+        )
 
 
 async def test_dialect_a_entry_starts_on_its_fixed_network(
@@ -661,26 +650,7 @@ async def test_rescan_of_an_entry_still_learning_its_network_just_saves(
     assert "network_id" not in entry.data
 
 
-# --- pairing new heaters from the config flow -------------------------------------
-
-
-async def test_pairing_creates_an_entry_on_the_site_network(
-    hass: HomeAssistant, radio: FakeRadio
-) -> None:
-    """Without a typed network id, heaters are paired into the site network."""
-    site_net = await radio_pairing.async_site_network_id(hass, GATEWAY_ID)
-
-    result = await _pair(hass, await _gateway_menu(hass, FORM))
-
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"]["dialect"] == "B"
-    assert result["data"]["network_id"] == site_net.hex().upper()
-    assert result["data"]["nodes"] == [
-        {"type": "htr", "addr": "2", "name": "Heater 2"},
-        {"type": "htr", "addr": "3", "name": "Heater S000003", "serial": "S000003"},
-    ]
-    assert radio.calls[-1] == ("pair", "10.0.0.5", 2323, site_net)
-    assert radio.kwargs[-1]["dialects"] == PAIRING_DIALECTS
+# --- the site network ------------------------------------------------------------
 
 
 async def test_site_network_id_hashes_instance_and_gateway(
@@ -692,56 +662,6 @@ async def test_site_network_id_hashes_instance_and_gateway(
         await radio_pairing.async_site_network_id(hass, GATEWAY_ID)
         == (hashlib.sha256(seed).digest()[:2])
     )
-
-
-@pytest.mark.parametrize(
-    ("dialect", "dialects"), [("auto", PAIRING_DIALECTS), ("B", (DIALECT_B,))]
-)
-async def test_pairing_uses_the_dialect_the_user_chose(
-    hass: HomeAssistant, radio: FakeRadio, dialect: str, dialects: tuple
-) -> None:
-    """A chosen dialect limits pairing; the network is always the site's."""
-    site_net = await radio_pairing.async_site_network_id(hass, GATEWAY_ID)
-    radio.paired = (DIALECT_A, [_paired(2)])
-    menu = await _gateway_menu(hass, {**FORM, "advanced": {"dialect": dialect}})
-    result = await _pair(hass, menu)
-    assert result["data"]["network_id"] == site_net.hex().upper()
-    assert result["data"]["dialect"] == "A"
-    assert radio.kwargs[-1]["dialects"] == dialects
-
-
-@pytest.mark.parametrize(
-    ("error", "reason"),
-    [
-        ((None, []), "no_heaters_paired"),
-        (RadioLinkError("closed"), "cannot_connect_radio"),
-        (RuntimeError("boom"), "unknown"),
-    ],
-)
-async def test_pairing_errors_return_to_the_pairing_form(
-    hass: HomeAssistant, radio: FakeRadio, error: Any, reason: str
-) -> None:
-    """A failed pairing run shows the pairing form again with the reason."""
-    radio.paired = error
-    result = await _pair(hass, await _gateway_menu(hass, FORM))
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "radio_pair"
-    assert result["errors"] == {"base": reason}
-
-
-async def test_nanocul_pairing_listens_for_dialect_a_only(
-    hass: HomeAssistant, radio: FakeRadio
-) -> None:
-    """Stock nanoCUL firmware pairs dialect-A heaters only."""
-    radio.ports = [PORT]
-    radio.stick = ("nanocul-a1b2c3", False)
-    radio.paired = (DIALECT_A, [_paired(2)])
-
-    result = await _pair(hass, await _stick_menu(hass, STICK_FORM))
-
-    assert result["data"]["radio_type"] == "nanocul"
-    assert radio.calls[-1][2] == 0  # serial: no port number
-    assert radio.kwargs[-1]["dialects"] == (DIALECT_A,)
 
 
 # --- listen-only entries -----------------------------------------------------------
@@ -1103,28 +1023,6 @@ async def test_survey_sighting_outcomes(
     assert seen[1:] == ([] if bursts is None else [bursts])
 
 
-async def test_pairing_shows_progress_until_the_run_ends(
-    hass: HomeAssistant, radio: FakeRadio
-) -> None:
-    """A pairing run that is still listening shows progress."""
-    release = asyncio.Event()
-
-    async def slow(*_args: Any, **_kwargs: Any) -> Any:
-        await release.wait()
-        return DIALECT_B, [_paired(2)]
-
-    form = await _choose(hass, await _gateway_menu(hass, FORM), "radio_pair")
-    with patch.object(config_flow_radio, "pair_new_network", slow):
-        result = await hass.config_entries.flow.async_configure(form["flow_id"], {})
-        assert result["type"] is FlowResultType.SHOW_PROGRESS
-        assert result["progress_action"] == "radio_pair"
-        again = await hass.config_entries.flow.async_configure(result["flow_id"])
-        assert again["type"] is FlowResultType.SHOW_PROGRESS
-        release.set()
-        result = await _finish_progress(hass, again)
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-
-
 # --- zeroconf discovery of the ESP32 gateway -----------------------------------------
 
 
@@ -1186,20 +1084,6 @@ async def test_zeroconf_confirm_probes_then_offers_the_heater_menu(
     assert (result["data"]["host"], result["data"]["port"]) == ("10.0.0.7", 2323)
     assert "network_id" not in result["data"]  # learned after setup
     assert radio.calls == [("probe", "10.0.0.7", 2323)]
-
-
-async def test_zeroconf_pairing_uses_the_site_network(
-    hass: HomeAssistant, radio: FakeRadio
-) -> None:
-    """Pairing a discovered gateway derives the network: nothing is typed."""
-    site_net = await radio_pairing.async_site_network_id(hass, GATEWAY_ID)
-    form = await _discovered(hass)
-    menu = await hass.config_entries.flow.async_configure(form["flow_id"], {})
-
-    result = await _pair(hass, menu)
-
-    assert result["data"]["network_id"] == site_net.hex().upper()
-    assert radio.calls[-1] == ("pair", "10.0.0.7", 2323, site_net)
 
 
 async def test_zeroconf_moves_a_configured_gateway_to_its_new_address(
