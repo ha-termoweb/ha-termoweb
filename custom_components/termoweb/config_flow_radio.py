@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import functools
 import logging
@@ -25,17 +25,9 @@ from .backend.radio import (
     RadioLinkError,
     RadioMissingError,
 )
-from .backend.radio.discovery import (
-    DISCOVERY_DIALECTS,
-    SCAN_ADDRESSES,
-    NetworkSighting,
-    discover_network,
-    probe_heaters,
-    survey_network,
-)
+from .backend.radio.discovery import SCAN_ADDRESSES, NetworkSighting, probe_heaters
 from .backend.radio.link import DEFAULT_PORT as RADIO_DEFAULT_PORT
 from .backend.radio.serial_link import serial_device_id, serial_opener
-from .backend.radio.survey import RawBurst, SurveyReport, analyse
 from .backend.radio_client import dev_id_from_mac
 from .const import (
     BRAND_RADIO,
@@ -70,7 +62,6 @@ def _is_mac_id(dev_id: str | None) -> bool:
     return dev_id is not None and dev_id_from_mac(dev_id) == dev_id
 
 
-DIALECT_AUTO = "auto"
 CONF_RESCAN = "rescan"
 MANUAL_DEVICE = "manual"  # nanoCUL port choice: type a path or URL instead
 ADVANCED = "advanced"  # collapsed form section: the gateway port
@@ -153,23 +144,6 @@ class RadioSetupError(Exception):
         """Store the error key."""
         super().__init__(reason)
         self.reason = reason
-
-
-class UnknownDialectError(RadioSetupError):
-    """Bursts were heard but no known dialect decoded; carries the survey report."""
-
-    def __init__(self, report: SurveyReport) -> None:
-        """Store the report for the flow to save."""
-        super().__init__("unknown_dialect")
-        self.report = report
-
-
-AnalyseSurvey = Callable[[Sequence[RawBurst]], Awaitable[SurveyReport]]
-
-
-async def _analyse_inline(bursts: Sequence[RawBurst]) -> SurveyReport:
-    """Analyse survey bursts on the calling loop (tests and fallbacks)."""
-    return analyse(bursts)
 
 
 def _advanced(fields: dict[Any, Any]) -> dict[Any, Any]:
@@ -312,101 +286,22 @@ def radio_address(radio: Mapping[str, Any]) -> tuple[str, int]:
     return radio[CONF_HOST], radio[CONF_PORT]
 
 
-async def survey_sighting(
-    host: str,
-    port: int,
-    *,
-    link_factory: Any = RadioLink,
-    analyse_survey: AnalyseSurvey = _analyse_inline,
-) -> NetworkSighting | None:
-    """Raw-survey after silent discovery; raise UnknownDialectError for new dialects.
-
-    Returns the network a known dialect was heard on, or None when the air was
-    silent or the gateway firmware has no survey.
-    """
-    bursts = await survey_network(host, port, link_factory=link_factory)
-    if bursts is None:
-        return None
-    report = await analyse_survey(bursts)
-    _LOGGER.info("Radio survey verdict: %s", report.verdict)
-    if report.verdict == "silent":
-        return None
-    if report.verdict == "known" and report.dialect in DIALECTS:
-        known = DIALECTS[report.dialect]
-        if report.network_ids:
-            return NetworkSighting(known, bytes.fromhex(report.network_ids[0]))
-        return None
-    raise UnknownDialectError(report)
-
-
-async def find_network(
-    host: str,
-    port: int,
-    dialect: str,
-    network_id: bytes | None,
-    *,
-    link_factory: Any = RadioLink,
-    dialect_capable: bool = True,
-    analyse_survey: AnalyseSurvey = _analyse_inline,
-) -> NetworkSighting:
-    """Return the heater network: the known one, else learned by listening.
-
-    When listening hears nothing in a known dialect, a raw survey tells a
-    silent installation (``no_traffic``) from one that speaks an unknown
-    dialect (UnknownDialectError).
-    """
-    if dialect != DIALECT_AUTO and network_id is not None:
-        return NetworkSighting(DIALECTS[dialect], network_id)
-    if dialect != DIALECT_AUTO:
-        dialects: tuple[Any, ...] = (DIALECTS[dialect],)
-    elif dialect_capable:
-        dialects = DISCOVERY_DIALECTS
-    else:
-        dialects = (DIALECT_A,)  # stock nanoCUL firmware: dialect A only
-    sighting = await discover_network(
-        host,
-        port,
-        dialects=dialects,
-        link_factory=link_factory,
-    )
-    if sighting is None:
-        sighting = await survey_sighting(
-            host,
-            port,
-            link_factory=link_factory,
-            analyse_survey=analyse_survey,
-        )
-    if sighting is None:
-        raise RadioSetupError("no_traffic")
-    return sighting
-
-
 async def discover_radio(
     host: str,
     port: int,
     dialect: str,
-    network_id: bytes | None,
+    network_id: bytes,
     *,
     link_factory: Any = RadioLink,
-    dialect_capable: bool = True,
-    analyse_survey: AnalyseSurvey = _analyse_inline,
 ) -> tuple[NetworkSighting, dict[int, Any]]:
-    """Learn the network (unless given), then confirm heaters by address."""
-    sighting = await find_network(
-        host,
-        port,
-        dialect,
-        network_id,
-        link_factory=link_factory,
-        dialect_capable=dialect_capable,
-        analyse_survey=analyse_survey,
-    )
+    """Confirm heaters by address on the entry's known network."""
+    sighting = NetworkSighting(DIALECTS[dialect], network_id)
     heaters = await probe_heaters(
         host,
         port,
         sighting.dialect,
         sighting.network_id,
-        set(SCAN_ADDRESSES) | sighting.sources,
+        SCAN_ADDRESSES,
         link_factory=link_factory,
     )
     if not heaters:

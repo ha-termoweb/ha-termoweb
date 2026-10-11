@@ -1,40 +1,24 @@
-"""Find a heater network from its own traffic, then confirm heaters by address.
+"""Confirm heaters by address on a known network, plus shared listening constants.
 
-A dialect-B network id belongs to one installation and has no default, so the
-only way to learn it is to listen: heaters send registrations, route probes and
-power requests on their own. Listening never transmits (auto-ack is off).
-A heater's pairing announcement is not network traffic (dialect B sends it on
-net ``00 00``): it is skipped.
+Learning a network from its traffic happens in the background, in
+``radio_discovery``; listening never transmits (auto-ack is off).
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass
 import logging
-import time
 
 from . import protocol
-from .dialect import DIALECT_A, DIALECT_B, Dialect
-from .link import (
-    DEFAULT_PORT,
-    RadioLink,
-    ReceivedFrame,
-    rotate_dialects,
-    supports_survey,
-)
-from .pairing import classify_announcement
-from .survey import RawBurst
+from .dialect import Dialect
+from .link import RadioLink
 
 _LOGGER = logging.getLogger(__name__)
 
 LISTEN_PLACEHOLDER_NET = b"\x00\x00"  # never transmitted: listening sends nothing
-DISCOVERY_DIALECTS: tuple[Dialect, ...] = (DIALECT_B, DIALECT_A)
 LISTEN_WINDOW_S = 10.0  # longer than the gap between frames in a spell (< 8 s)
-LISTEN_TOTAL_S = 360.0  # a heater that wants heat asks every few minutes
-LISTEN_GRACE_S = 5.0  # keep listening this long after the first frame
-POLL_STEP_S = 0.5
 SCAN_ADDRESSES: tuple[int, ...] = tuple(range(2, 33))
 PROBE_GAP_S = 0.2
 SURVEY_S = 120  # raw survey after silent discovery: heaters repeat within minutes
@@ -45,136 +29,10 @@ Sleep = Callable[[float], Awaitable[None]]
 
 @dataclass(frozen=True)
 class NetworkSighting:
-    """A heater network heard on air: its dialect, network id and senders."""
+    """A heater network: its dialect and network id."""
 
     dialect: Dialect
     network_id: bytes
-    sources: frozenset[int] = field(default_factory=frozenset)
-
-
-async def listen_once(
-    host: str,
-    port: int,
-    dialect: Dialect,
-    window_s: float,
-    *,
-    station_id: int = 1,
-    link_factory: LinkFactory = RadioLink,
-    sleep: Sleep = asyncio.sleep,
-    clock: Callable[[], float] = time.monotonic,
-) -> NetworkSighting | None:
-    """Listen in ``dialect`` for up to ``window_s``; return the first network heard."""
-
-    link = link_factory(
-        host,
-        port,
-        dialect,
-        station_id=station_id,
-        network_id=LISTEN_PLACEHOLDER_NET,
-        auto_ack=False,
-    )
-    networks: dict[bytes, set[int]] = {}
-    first_seen: float | None = None
-
-    def _on_frame(received: ReceivedFrame) -> None:
-        """Record the network id and sender of every valid data frame."""
-
-        nonlocal first_seen
-        frame = received.frame
-        if classify_announcement(dialect, frame) is not None:
-            _LOGGER.debug("Ignoring a pairing announcement: it is not network traffic")
-            return
-        if not frame.ok or frame.is_ack or frame.network_id is None:
-            return
-        senders = networks.setdefault(frame.network_id, set())
-        if frame.src is not None and frame.src != station_id:
-            senders.add(frame.src)
-        if first_seen is None:
-            first_seen = clock()
-
-    await link.connect()
-    remove = link.add_listener(_on_frame)
-    try:
-        start = clock()
-        while clock() - start < window_s:
-            if first_seen is not None and clock() - first_seen >= LISTEN_GRACE_S:
-                break
-            await sleep(POLL_STEP_S)
-    finally:
-        remove()
-        await link.close()
-    if not networks:
-        return None
-    network_id = max(networks, key=lambda net: len(networks[net]))
-    _LOGGER.info(
-        "Heard dialect %s network with %d sender(s)",
-        dialect.name,
-        len(networks[network_id]),
-    )
-    return NetworkSighting(dialect, network_id, frozenset(networks[network_id]))
-
-
-async def discover_network(
-    host: str,
-    port: int = DEFAULT_PORT,
-    *,
-    dialects: Sequence[Dialect] = DISCOVERY_DIALECTS,
-    window_s: float = LISTEN_WINDOW_S,
-    total_s: float = LISTEN_TOTAL_S,
-    link_factory: LinkFactory = RadioLink,
-    sleep: Sleep = asyncio.sleep,
-    clock: Callable[[], float] = time.monotonic,
-) -> NetworkSighting | None:
-    """Alternate listening windows across ``dialects`` until a network is heard.
-
-    A dialect the gateway firmware cannot speak (a stock nanoCUL only knows
-    dialect A) is dropped from the rotation; if none is left, RadioLinkError.
-    """
-
-    async def _listen(dialect: Dialect, _left: float) -> NetworkSighting | None:
-        """Listen for one window in ``dialect``."""
-
-        return await listen_once(
-            host,
-            port,
-            dialect,
-            window_s,
-            link_factory=link_factory,
-            sleep=sleep,
-            clock=clock,
-        )
-
-    sighting = await rotate_dialects(dialects, _listen, total_s, clock)
-    if sighting is None:
-        _LOGGER.info("No heater traffic heard on %s:%s", host, port)
-    return sighting
-
-
-async def survey_network(
-    host: str,
-    port: int,
-    seconds: int = SURVEY_S,
-    *,
-    link_factory: LinkFactory = RadioLink,
-) -> list[RawBurst] | None:
-    """Capture raw bursts of any dialect; None when the firmware has no survey."""
-
-    link = link_factory(
-        host,
-        port,
-        DIALECT_A,
-        network_id=LISTEN_PLACEHOLDER_NET,
-        auto_ack=False,
-    )
-    info = await link.connect()
-    try:
-        if not supports_survey(info):
-            _LOGGER.info("Radio gateway firmware has no raw survey")
-            return None
-        _LOGGER.info("Running a %d s raw radio survey on %s:%s", seconds, host, port)
-        return await link.survey(seconds)
-    finally:
-        await link.close()
 
 
 async def probe_heaters(
@@ -212,12 +70,8 @@ async def probe_heaters(
 
 
 __all__ = [
-    "DISCOVERY_DIALECTS",
     "SCAN_ADDRESSES",
     "SURVEY_S",
     "NetworkSighting",
-    "discover_network",
-    "listen_once",
     "probe_heaters",
-    "survey_network",
 ]

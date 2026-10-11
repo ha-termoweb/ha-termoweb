@@ -32,9 +32,11 @@ from custom_components.termoweb.backend.radio import (
     RadioLinkError,
     RadioMissingError,
 )
-from custom_components.termoweb.backend.radio.discovery import NetworkSighting
+from custom_components.termoweb.backend.radio.discovery import (
+    SCAN_ADDRESSES,
+    NetworkSighting,
+)
 from custom_components.termoweb.backend.radio.link import parse_query_line
-from custom_components.termoweb.backend.radio.survey import analyse
 from custom_components.termoweb.const import (
     BRAND_RADIO,
     BRAND_RADIO_MONITOR,
@@ -930,142 +932,46 @@ def test_serial_ports_resolve_to_stable_by_id_links(
     assert config_flow_radio._by_id_path("/dev/ttyACM0") == "/dev/ttyACM0"
 
 
-class DiscoveryRadio:
-    """Scripted listen, probe and survey steps behind discover_radio."""
+class ProbeRecorder:
+    """Scripted heater probe behind discover_radio."""
 
     def __init__(self) -> None:
-        """Hear dialect B on NET from source 40; heater 6 answers."""
-        self.sighting: Any = NetworkSighting(DIALECT_B, NET, frozenset({40}))
+        """Heater 6 answers."""
         self.heaters: dict[int, Any] = {6: "s"}
-        self.surveyed: Any = None
         self.calls: list[tuple] = []
-
-    async def discover_network(self, host, port, *, dialects, link_factory) -> Any:
-        """Record the dialects listened for."""
-        self.calls.append(("listen", tuple(d.name for d in dialects)))
-        return self.sighting
 
     async def probe_heaters(
         self, host, port, dialect, network_id, candidates, link_factory
     ) -> Any:
-        """Record the network probed and whether heard sources were included."""
-        self.calls.append(
-            ("probe", dialect.name, network_id, 40 in candidates, 2 in candidates)
-        )
+        """Record the network probed and the addresses tried."""
+        self.calls.append((dialect.name, network_id, tuple(candidates)))
         return self.heaters
-
-    async def survey_sighting(self, host, port, **kwargs) -> Any:
-        """Return the scripted survey result."""
-        self.calls.append(("survey",))
-        return self.surveyed
 
 
 @pytest.fixture
-def air(monkeypatch: pytest.MonkeyPatch) -> DiscoveryRadio:
-    """Patch the radio discovery primitives used by discover_radio."""
-    fake = DiscoveryRadio()
-    monkeypatch.setattr(config_flow_radio, "discover_network", fake.discover_network)
+def air(monkeypatch: pytest.MonkeyPatch) -> ProbeRecorder:
+    """Patch the heater probe used by discover_radio."""
+    fake = ProbeRecorder()
     monkeypatch.setattr(config_flow_radio, "probe_heaters", fake.probe_heaters)
-    monkeypatch.setattr(config_flow_radio, "survey_sighting", fake.survey_sighting)
     return fake
 
 
-@pytest.mark.parametrize(
-    ("dialect", "network_id", "capable", "calls"),
-    [
-        ("auto", None, True, [("listen", ("B", "A")), ("probe", "B", NET, True, True)]),
-        ("auto", None, False, [("listen", ("A",)), ("probe", "B", NET, True, True)]),
-        ("B", None, True, [("listen", ("B",)), ("probe", "B", NET, True, True)]),
-        ("A", None, True, [("listen", ("A",)), ("probe", "B", NET, True, True)]),
-        ("A", NET, True, [("probe", "A", NET, False, True)]),
-        ("B", NET, True, [("probe", "B", NET, False, True)]),
-    ],
-)
-async def test_discover_radio_listens_only_when_it_must(
-    air: DiscoveryRadio, dialect: str, network_id: Any, capable: bool, calls: list
+@pytest.mark.parametrize("dialect", ["A", "B"])
+async def test_discover_radio_probes_the_known_network(
+    air: ProbeRecorder, dialect: str
 ) -> None:
-    """A known network is probed directly; otherwise the air is listened to."""
-    await config_flow_radio.discover_radio(
-        "gw", 1, dialect, network_id, dialect_capable=capable
-    )
-    assert air.calls == calls
+    """The entry's own network is probed at every scan address."""
+    sighting, heaters = await config_flow_radio.discover_radio("gw", 1, dialect, NET)
+    assert (sighting.dialect.name, sighting.network_id) == (dialect, NET)
+    assert heaters == {6: "s"}
+    assert air.calls == [(dialect, NET, SCAN_ADDRESSES)]
 
 
-async def test_discover_radio_surveys_silent_air(air: DiscoveryRadio) -> None:
-    """Nothing heard: a survey decides between no traffic and a known network."""
-    air.sighting = None
-    with pytest.raises(config_flow_radio.RadioSetupError, match="no_traffic"):
-        await config_flow_radio.discover_radio("gw", 1, "auto", None)
-    air.surveyed = NetworkSighting(DIALECT_B, NET)
-    sighting, _ = await config_flow_radio.discover_radio("gw", 1, "auto", None)
-    assert sighting.network_id == NET
-    assert air.calls[-1] == ("probe", "B", NET, False, True)
-
-
-async def test_discover_radio_without_heaters(air: DiscoveryRadio) -> None:
+async def test_discover_radio_without_heaters(air: ProbeRecorder) -> None:
     """A network without answering heaters is an error."""
     air.heaters = {}
     with pytest.raises(config_flow_radio.RadioSetupError, match="no_heaters"):
-        await config_flow_radio.discover_radio("gw", 1, "auto", None)
-
-
-async def test_survey_is_analysed_inline_by_default() -> None:
-    """Without Home Assistant's executor the survey is analysed on the loop."""
-    assert (await config_flow_radio._analyse_inline([])).verdict == "silent"
-
-
-def _report(verdict: str, dialect: str | None = None, nets: tuple[str, ...] = ()):
-    """Return a survey report with the given outcome and no bursts."""
-    return dataclasses.replace(
-        analyse([]), verdict=verdict, dialect=dialect, network_ids=nets
-    )
-
-
-@pytest.mark.parametrize(
-    ("bursts", "report", "expected"),
-    [
-        (None, None, None),
-        (["b"], _report("silent"), None),
-        (["b"], _report("known", "B", ("1234", "5678")), (DIALECT_B, NET)),
-        (["b"], _report("known", "A", ("1234",)), (DIALECT_A, NET)),
-        (["b"], _report("known", "A"), None),
-        (["b"], _report("known", "B"), None),
-        (["b"], _report("known", "Z"), "raise"),
-        (["b"], _report("undecodable"), "raise"),
-        (["b"], _report("candidate"), "raise"),
-    ],
-)
-async def test_survey_sighting_outcomes(
-    monkeypatch: pytest.MonkeyPatch, bursts: Any, report: Any, expected: Any
-) -> None:
-    """Survey verdicts map to a known network, nothing, or an unknown dialect."""
-    seen: list[Any] = []
-
-    async def fake_survey(host, port, *, link_factory):
-        seen.append((host, port, link_factory))
-        return bursts
-
-    async def fake_analyse(raw):
-        seen.append(raw)
-        return report
-
-    monkeypatch.setattr(config_flow_radio, "survey_network", fake_survey)
-    if expected == "raise":
-        with pytest.raises(config_flow_radio.UnknownDialectError) as err:
-            await config_flow_radio.survey_sighting(
-                "gw", 1, analyse_survey=fake_analyse
-            )
-        assert err.value.reason == "unknown_dialect" and err.value.report is report
-        return
-    sighting = await config_flow_radio.survey_sighting(
-        "gw", 1, analyse_survey=fake_analyse
-    )
-    if expected is None:
-        assert sighting is None
-    else:
-        assert (sighting.dialect, sighting.network_id) == expected
-    assert seen[0] == ("gw", 1, RadioLink)
-    assert seen[1:] == ([] if bursts is None else [bursts])
+        await config_flow_radio.discover_radio("gw", 1, "B", NET)
 
 
 # --- zeroconf discovery of the ESP32 gateway -----------------------------------------

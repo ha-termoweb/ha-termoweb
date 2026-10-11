@@ -32,7 +32,7 @@ from .backend.radio.pairing import PairedHeater
 from .backend.radio.survey import SurveyReport
 from .backend.radio_client import RadioError
 from .backend.sanitize import mask_identifier
-from .config_flow_radio import DIALECT_AUTO, probe_nanocul
+from .config_flow_radio import probe_nanocul
 from .const import (
     CONF_BRAND,
     CONF_DEVICE,
@@ -247,7 +247,7 @@ async def _async_report_unknown_dialect(
         seconds=SURVEY_S,
         gateway=None,
         radio_type=entry.data.get(CONF_RADIO_TYPE),
-        dialect=entry.data.get(CONF_DIALECT, DIALECT_AUTO),
+        dialect=entry.data.get(CONF_DIALECT),
         version=await async_get_integration_version(hass),
     )
     path = await async_save_report(hass, "setup", payload)

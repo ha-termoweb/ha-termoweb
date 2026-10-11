@@ -299,7 +299,7 @@ async def test_unknown_dialect_saves_a_report_and_tells_the_user(
     files = list(tmp_path.glob("termoweb_radio_survey_setup_*.json"))
     saved = json.loads(files[0].read_text())
     assert saved["integration_version"] == VERSION
-    assert saved["radio_type"] is None and saved["configured_dialect"] == "auto"
+    assert saved["radio_type"] is None and saved["configured_dialect"] is None
     assert saved["report"]["verdict"] == "undecodable"
     note = _notifications(hass)[f"{DOMAIN}_{entry.entry_id}_unknown_dialect"]
     assert str(files[0]) in note["message"]
