@@ -8,7 +8,8 @@ onto radio payloads. A key is only emitted when the record carries its value.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime, timedelta
 import math
 from typing import Any
@@ -108,6 +109,64 @@ def settings_from_status(
             end = boost_end(record.boost_end_day, record.boost_end_min, now)
         settings["boost_end_datetime"] = end
     return settings
+
+
+# Advanced setup: wire control mode <-> canonical name, wire units <-> "C"/"F".
+CONTROL_MODES: dict[int, str] = {
+    0: "hysteresis_0_25",
+    1: "hysteresis_0_35",
+    2: "hysteresis_0_5",
+    3: "hysteresis_0_75",
+    protocol.CONTROL_MODE_PID: "pid",
+}
+PANEL_UNITS: dict[int, str] = {0: "C", 1: "F"}
+ADVANCED_KEYS = frozenset(
+    {"control_mode", "panel_units", "temp_offset", "window_detection", "true_radiant"}
+)
+
+
+def settings_from_advanced(setup: protocol.AdvancedSetup) -> dict[str, Any]:
+    """Return the canonical advanced settings of a ``C4`` record."""
+
+    return {
+        "control_mode": CONTROL_MODES[setup.control_mode],
+        "panel_units": PANEL_UNITS[setup.units],
+        "temp_offset": setup.offset_tenths / 10,
+        "window_detection": bool(setup.window_mode),
+        "true_radiant": bool(setup.true_radiant),
+    }
+
+
+def advanced_with_changes(
+    setup: protocol.AdvancedSetup, changes: Mapping[str, Any]
+) -> protocol.AdvancedSetup:
+    """Return ``setup`` with canonical ``changes`` applied; raise ValueError on bad input."""
+
+    unknown = set(changes) - ADVANCED_KEYS
+    if unknown:
+        raise ValueError(f"unknown advanced settings {sorted(unknown)}")
+    fields: dict[str, int] = {}
+    if "control_mode" in changes:
+        codes = {name: code for code, name in CONTROL_MODES.items()}
+        if changes["control_mode"] not in codes:
+            raise ValueError(f"unknown control mode {changes['control_mode']!r}")
+        fields["control_mode"] = codes[changes["control_mode"]]
+    if "panel_units" in changes:
+        units = {name: code for code, name in PANEL_UNITS.items()}
+        if changes["panel_units"] not in units:
+            raise ValueError(
+                f"panel units must be C or F, not {changes['panel_units']!r}"
+            )
+        fields["units"] = units[changes["panel_units"]]
+    if "temp_offset" in changes:
+        fields["offset_tenths"] = round(_celsius(changes["temp_offset"], "offset") * 10)
+    for key, field in (
+        ("window_detection", "window_mode"),
+        ("true_radiant", "true_radiant"),
+    ):
+        if key in changes:
+            fields[field] = int(bool(changes[key]))
+    return replace(setup, **fields)
 
 
 def prog_from_program(record: protocol.ProgramRecord) -> list[int] | None:
@@ -259,14 +318,18 @@ def encode_command(command: BaseCommand, dialect: Dialect = DIALECT_A) -> bytes:
 
 
 __all__ = [
+    "CONTROL_MODES",
     "MODE_FROM_RADIO",
     "MODE_TO_RADIO",
+    "PANEL_UNITS",
     "PROGRAM_LEN",
     "RADIO_UNITS",
+    "advanced_with_changes",
     "boost_end",
     "encode_command",
     "encode_preset_mode_write",
     "prog_from_program",
+    "settings_from_advanced",
     "settings_from_power_record",
     "settings_from_power_request",
     "settings_from_status",

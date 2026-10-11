@@ -72,6 +72,8 @@ custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_runback
     Switch a heater's runback mode (heater_toggles).
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_easy
     Switch a heater's EASY mode (heater_toggles).
+custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_advanced
+    Write a heater's advanced settings (advanced_setup), e.g. ``temp_offset``.
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_priority
     Set the priority level for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.normalise_ws_nodes
@@ -110,6 +112,8 @@ custom_components/termoweb/backend/base.py :: Backend.set_node_runback
     Switch a heater's runback mode using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_node_easy
     Switch a heater's EASY mode using the backend client.
+custom_components/termoweb/backend/base.py :: Backend.set_node_advanced
+    Write a heater's advanced settings using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_node_priority
     Set the priority level using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_power_limit
@@ -274,6 +278,8 @@ custom_components/termoweb/backend/factory.py :: _create_gateway_client
     Return the radio client of a gateway entry; power settings live in its options.
 custom_components/termoweb/backend/factory.py :: _create_gateway_client._save_power
     Store the power manager's settings in the entry options.
+custom_components/termoweb/backend/factory.py :: _create_gateway_client._save_advanced
+    Store the advanced setup written to each heater in the entry options.
 custom_components/termoweb/backend/factory.py :: create_entry_client
     Return the client a config entry talks through: cloud REST or local radio.
 custom_components/termoweb/backend/factory.py :: create_rest_client
@@ -518,6 +524,12 @@ custom_components/termoweb/backend/radio/protocol.py :: _pack_slots
     Pack slot codes four to a byte, MSB first; raise on an unknown code.
 custom_components/termoweb/backend/radio/protocol.py :: decode_program
     Decode a ``B1`` program reply (43 or 85 bytes) or a ``56 B1`` program report.
+custom_components/termoweb/backend/radio/protocol.py :: write_advanced_setup
+    Return ``C4`` + the 8 setup bytes; raise ValueError for a value out of range.
+custom_components/termoweb/backend/radio/protocol.py :: request_advanced_record
+    Return the ``DA`` advanced record request.
+custom_components/termoweb/backend/radio/protocol.py :: decode_advanced_record
+    Decode the 17-byte ``DB`` reply to ``DA`` (an E3 report of that length is not one).
 custom_components/termoweb/backend/radio/protocol.py :: IdentityRecord.ascii_serial
     Return the short form's trailing printable-ASCII run, or None.
 custom_components/termoweb/backend/radio/protocol.py :: IdentityRecord.serial
@@ -610,6 +622,18 @@ custom_components/termoweb/backend/radio/survey.py :: _mask
     Zero the network id bytes and cut an identity reply's payload.
 custom_components/termoweb/backend/radio/survey.py :: parse_run_tokens
     Parse ``+118 -92`` run tokens into ``(level, micros)``; skip bad tokens.
+custom_components/termoweb/backend/radio_advanced.py :: AdvancedSetupStore.__init__
+    Read through ``load`` on every use; ``save`` stores a changed mapping.
+custom_components/termoweb/backend/radio_advanced.py :: AdvancedSetupStore._replace_memory
+    Keep ``records`` in memory (no config entry).
+custom_components/termoweb/backend/radio_advanced.py :: AdvancedSetupStore._records
+    Return a copy of the stored mapping.
+custom_components/termoweb/backend/radio_advanced.py :: AdvancedSetupStore.get
+    Return the record last written to ``addr``, or None (never written).
+custom_components/termoweb/backend/radio_advanced.py :: AdvancedSetupStore.put
+    Store the record just written to ``addr``.
+custom_components/termoweb/backend/radio_advanced.py :: AdvancedSetupStore.forget
+    Drop the record of ``addr`` (the heater was reset or replaced).
 custom_components/termoweb/backend/radio_backend.py :: radio_diagnostics
     Return radio link facts and recent masked frames; no MAC or network id.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.features
@@ -668,6 +692,14 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.async_read_ide
     Return the heater's decoded ``5A`` identity reply; note its rating.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._learn_rated_power
     Read a heater's identity once for its rating while its power is unknown.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.read_advanced_record
+    Return the heater's decoded ``DA`` → ``DB`` advanced record; raise if silent.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._learn_advanced
+    Read the advanced record once, to learn whether the heater has these settings.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._advanced_settings
+    Return ``advanced_setup`` and, once written, the advanced settings.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_advanced
+    Write the whole ``C4`` record with ``changes``; require ``C5 55``.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_factory_reset
     Factory-reset a heater (dialect B ``C8 01 D0``): settings and pairing are wiped.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_restore
@@ -1440,6 +1472,10 @@ custom_components/termoweb/codecs/radio_codec.py :: boost_end
     Return the next ``day`` (0 = Sunday) at ``minute`` of day, from ``now`` on.
 custom_components/termoweb/codecs/radio_codec.py :: settings_from_status
     Return canonical settings carried by a decoded status record.
+custom_components/termoweb/codecs/radio_codec.py :: settings_from_advanced
+    Return the canonical advanced settings of a ``C4`` record.
+custom_components/termoweb/codecs/radio_codec.py :: advanced_with_changes
+    Return ``setup`` with canonical ``changes`` applied; raise ValueError on bad input.
 custom_components/termoweb/codecs/radio_codec.py :: prog_from_program
     Return the 168-slot Monday-first ``prog``, or None if any hour is unknown.
 custom_components/termoweb/codecs/radio_codec.py :: settings_from_power_request
@@ -1786,8 +1822,8 @@ custom_components/termoweb/domain/state.py :: NodeSettingsDelta.payload
     Return the mapping of changed fields.
 custom_components/termoweb/domain/state.py :: _populate_heater_state
     Populate base heater fields on ``state`` from ``payload``.
-custom_components/termoweb/domain/state.py :: _populate_heater_modes
-    Populate the boost, runback and EASY fields on ``state`` from ``payload``.
+custom_components/termoweb/domain/state.py :: _populate_heater_extras
+    Populate the boost, runback, EASY and advanced setup fields from ``payload``.
 custom_components/termoweb/domain/state.py :: _build_heater_state
     Construct a heater state instance from ``payload``.
 custom_components/termoweb/domain/state.py :: _populate_accumulator_fields
@@ -1960,6 +1996,18 @@ custom_components/termoweb/entity.py :: HeaterNodeBase._setpoint_range
     Return the (min, max) setpoint in the device's units.
 custom_components/termoweb/entity.py :: HeaterNodeBase.device_info
     Expose Home Assistant device metadata for the heater.
+custom_components/termoweb/entity.py :: HeaterSettingEntity.__init__
+    Bind the setting to heater ``addr``.
+custom_components/termoweb/entity.py :: HeaterSettingEntity.async_added_to_hass
+    Cancel a pending fallback refresh when the entity is removed.
+custom_components/termoweb/entity.py :: HeaterSettingEntity._setting
+    Return the setting's last known value, or None.
+custom_components/termoweb/entity.py :: HeaterSettingEntity.available
+    Return False while the heater does not report the feature.
+custom_components/termoweb/entity.py :: HeaterSettingEntity.device_info
+    Attach the entity to its heater device.
+custom_components/termoweb/entity.py :: HeaterSettingEntity._async_write_setting
+    Write ``value``, then show it until the heater's next report.
 custom_components/termoweb/identifiers.py :: _key
     Return ``suffix`` without its leading colon; it must be one snake_case token.
 custom_components/termoweb/identifiers.py :: _dev
@@ -2190,6 +2238,10 @@ custom_components/termoweb/number.py :: PowerLimitNumber.native_value
     Return the current power limit in watts from the domain state.
 custom_components/termoweb/number.py :: PowerLimitNumber.async_set_native_value
     Write the new power limit through the backend, then store it.
+custom_components/termoweb/number.py :: TemperatureOffsetNumber.native_value
+    Return the offset last written (None until written).
+custom_components/termoweb/number.py :: TemperatureOffsetNumber.async_set_native_value
+    Write the offset, rounded to 0.1 °C.
 custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.__init__
     Store the entry being configured.
 custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_init
@@ -2356,6 +2408,16 @@ custom_components/termoweb/runtime.py :: require_runtime
     Return the running runtime of ``entry_id``; raise LookupError otherwise.
 custom_components/termoweb/runtime.py :: loaded_runtimes
     Return the runtimes of every running TermoWeb entry.
+custom_components/termoweb/select.py :: async_setup_entry
+    Add control mode and panel unit selects for heaters with advanced setup.
+custom_components/termoweb/select.py :: ControlModeSelect.current_option
+    Return the control mode last written (None until written).
+custom_components/termoweb/select.py :: ControlModeSelect.async_select_option
+    Write the control mode.
+custom_components/termoweb/select.py :: PanelUnitsSelect.current_option
+    Return the panel unit last written (None until written).
+custom_components/termoweb/select.py :: PanelUnitsSelect.async_select_option
+    Write the panel unit (``C`` or ``F``).
 custom_components/termoweb/sensor.py :: _power_monitor_display_name
     Return the display name for a power monitor address.
 custom_components/termoweb/sensor.py :: async_setup_entry
@@ -2485,21 +2547,13 @@ custom_components/termoweb/services/radio_survey.py :: async_register_radio_surv
 custom_components/termoweb/services/radio_survey.py :: async_register_radio_survey_service._async_radio_survey
     Survey the air, save a redacted report and return its summary.
 custom_components/termoweb/switch.py :: async_setup_entry
-    Add runback and EASY switches for heaters whose backend supports them.
-custom_components/termoweb/switch.py :: HeaterModeSwitch.__init__
-    Bind the switch to heater ``addr``.
-custom_components/termoweb/switch.py :: HeaterModeSwitch.async_added_to_hass
-    Cancel a pending fallback refresh when the entity is removed.
-custom_components/termoweb/switch.py :: HeaterModeSwitch.is_on
-    Return the mode flag the heater last reported (None before a full status).
-custom_components/termoweb/switch.py :: HeaterModeSwitch.device_info
-    Attach the switch to its heater device.
-custom_components/termoweb/switch.py :: HeaterModeSwitch.async_turn_on
-    Switch the mode on.
-custom_components/termoweb/switch.py :: HeaterModeSwitch.async_turn_off
-    Switch the mode off.
-custom_components/termoweb/switch.py :: HeaterModeSwitch._async_set
-    Write the mode, then show it until the heater's next status confirms it.
+    Add the heater switches the entry's backend supports.
+custom_components/termoweb/switch.py :: HeaterSettingSwitch.is_on
+    Return the setting the heater last reported (None while unknown).
+custom_components/termoweb/switch.py :: HeaterSettingSwitch.async_turn_on
+    Switch the setting on.
+custom_components/termoweb/switch.py :: HeaterSettingSwitch.async_turn_off
+    Switch the setting off.
 custom_components/termoweb/throttle.py :: MonotonicRateLimiter.async_throttle
     Sleep if required to honour ``min_interval`` seconds between calls.
 custom_components/termoweb/throttle.py :: MonotonicRateLimiter.reset

@@ -20,6 +20,7 @@ from custom_components.termoweb.const import (
     CONF_NETWORK_ID,
     CONF_NODES,
     CONF_PORT,
+    CONF_RADIO_ADVANCED,
     CONF_RADIO_DEVICE_ID,
     CONF_RADIO_POWER,
     CONF_RADIO_TYPE,
@@ -34,6 +35,7 @@ from .base import Backend, BackendCapabilities, HttpClientProto
 from .rest_client import RESTClient
 
 if TYPE_CHECKING:
+    from .radio_advanced import AdvancedSetupStore
     from .radio_client import RadioClient
     from .radio_power import PowerManager
 
@@ -79,6 +81,7 @@ def create_radio_client(
     network_id: bytes | None,
     *,
     power: PowerManager | None = None,
+    advanced: AdvancedSetupStore | None = None,
     serial_url: str | None = None,
     device_id: str | None = None,
     listen_only: bool = False,
@@ -99,7 +102,14 @@ def create_radio_client(
     )
     if serial_url is None:
         return RadioClient(
-            host, port, dialect, nodes, network_id=network_id, power=power, **listen
+            host,
+            port,
+            dialect,
+            nodes,
+            network_id=network_id,
+            power=power,
+            advanced=advanced,
+            **listen,
         )
     from .radio.link import RadioLink  # noqa: PLC0415
     from .radio.serial_link import serial_opener  # noqa: PLC0415
@@ -111,6 +121,7 @@ def create_radio_client(
         nodes,
         network_id=network_id,
         power=power,
+        advanced=advanced,
         link_factory=functools.partial(
             RadioLink, open_connection=serial_opener(serial_url)
         ),
@@ -156,6 +167,7 @@ def _create_gateway_client(
     its heaters' network yet: it runs on the installation's own network.
     """
 
+    from .radio_advanced import AdvancedSetupStore  # noqa: PLC0415
     from .radio_power import PowerManager  # noqa: PLC0415
 
     data = entry.data
@@ -172,6 +184,17 @@ def _create_gateway_client(
         )
 
     power = PowerManager(lambda: entry.options.get(CONF_RADIO_POWER), _save_power)
+
+    def _save_advanced(records: dict[str, Any]) -> None:
+        """Store the advanced setup written to each heater in the entry options."""
+
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, CONF_RADIO_ADVANCED: records}
+        )
+
+    advanced = AdvancedSetupStore(
+        lambda: entry.options.get(CONF_RADIO_ADVANCED), _save_advanced
+    )
     if data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
         return create_radio_client(
             data[CONF_DEVICE],
@@ -180,6 +203,7 @@ def _create_gateway_client(
             data.get(CONF_NODES, []),
             network_id,
             power=power,
+            advanced=advanced,
             serial_url=data[CONF_DEVICE],
             device_id=data.get(CONF_RADIO_DEVICE_ID),
         )
@@ -190,6 +214,7 @@ def _create_gateway_client(
         data.get(CONF_NODES, []),
         network_id,
         power=power,
+        advanced=advanced,
     )
 
 

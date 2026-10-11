@@ -338,3 +338,64 @@ def test_power_record_maps_heating_state() -> None:
     assert codec.settings_from_power_record(idle)["stemp"] == "22.0"
     night = p.decode_power_record(bytes.fromhex("BDD30025713B000000"))
     assert codec.settings_from_power_record(night)["stemp"] == "18.5"
+
+
+def test_advanced_setup_maps_to_canonical_settings() -> None:
+    """The C4 record's fields become control mode, panel unit, offset and flags."""
+
+    assert codec.settings_from_advanced(p.AdvancedSetup()) == {
+        "control_mode": "pid",
+        "panel_units": "C",
+        "temp_offset": 0.0,
+        "window_detection": False,
+        "true_radiant": False,
+    }
+    setup = p.AdvancedSetup(
+        control_mode=2, units=1, offset_tenths=-15, window_mode=1, true_radiant=1
+    )
+    assert codec.settings_from_advanced(setup) == {
+        "control_mode": "hysteresis_0_5",
+        "panel_units": "F",
+        "temp_offset": -1.5,
+        "window_detection": True,
+        "true_radiant": True,
+    }
+
+
+def test_advanced_changes_keep_every_other_field() -> None:
+    """A change rewrites only its own field; the rest come from the current record."""
+
+    current = p.AdvancedSetup(control_mode=1, window_mode=1)
+    assert codec.advanced_with_changes(current, {"temp_offset": -1.0}) == (
+        p.AdvancedSetup(control_mode=1, window_mode=1, offset_tenths=-10)
+    )
+    changed = codec.advanced_with_changes(
+        current,
+        {
+            "control_mode": "hysteresis_0_75",
+            "panel_units": "F",
+            "window_detection": False,
+            "true_radiant": True,
+            "temp_offset": "0.3",
+        },
+    )
+    assert changed == p.AdvancedSetup(
+        control_mode=3, units=1, offset_tenths=3, true_radiant=1
+    )
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"away_mode": 1}, "unknown advanced settings"),
+        ({"control_mode": "fuzzy"}, "unknown control mode"),
+        ({"panel_units": "K"}, "C or F"),
+        ({"temp_offset": "warm"}, "invalid offset"),
+        ({"temp_offset": float("nan")}, "invalid offset"),
+    ],
+)
+def test_advanced_changes_reject_bad_values(changes, message) -> None:
+    """Bad input raises ValueError before any frame is built."""
+
+    with pytest.raises(ValueError, match=message):
+        codec.advanced_with_changes(p.AdvancedSetup(), changes)

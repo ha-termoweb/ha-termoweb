@@ -65,6 +65,7 @@ class RadioBackend(Backend):
         options_flow=True,
         heater_discovery=True,
         heater_toggles=True,
+        advanced_setup=True,  # per heater: only heaters that answer DA
         web_portal=False,
         node_manufacturer=RADIO_NODE_MANUFACTURER,
         site_name=RADIO_SITE_NAME,

@@ -8,6 +8,7 @@
 - Radio: heaters of radio type A keep their own energy meter. The **Energy** sensor now shows that meter, read every 10 minutes, instead of an estimate. The first reading after this update is the heater's total so far, so the Energy Dashboard can show one large step that day. Heaters of radio type B have no meter and keep the estimate.
 - Radio: heaters of radio type A can **boost**. Choose the **Boost** preset on the heater, or use the **Start boost** and **Cancel boost** actions. The heater boosts for its own boost time, so leave the duration out. The heater shows when the boost ends.
 - Radio: heaters of radio type A get two switches, **Runback** and **EASY mode**. When you turn Runback off, the heater gets back the mode and temperature it had before.
+- Radio: heater advanced settings under the device's **Configuration**: **Temperature offset**, **Control mode**, **Panel temperature unit**, **Open window detection** and **True radiant**. The heater cannot report them, so they show **Unknown** until you set them in Home Assistant. When you set one, the others are sent too (unknown ones as the factory defaults). Heaters that do not support these settings show them as unavailable.
 
 ### Changed
 - The **Start accumulator boost** and **Cancel accumulator boost** actions are now called **Start boost** and **Cancel boost**, because they also work for radio heaters.

@@ -113,6 +113,11 @@ class HttpClientProto(Protocol):
     ) -> Any:
         """Switch a heater's EASY mode (heater_toggles)."""
 
+    async def set_node_advanced(
+        self, dev_id: str, node: NodeDescriptor, **changes: Any
+    ) -> Any:
+        """Write a heater's advanced settings (advanced_setup), e.g. ``temp_offset``."""
+
     async def set_node_priority(
         self,
         dev_id: str,
@@ -174,6 +179,9 @@ class BackendCapabilities:
     options_flow: bool = False  # heater power, pairing and rehoming options
     heater_discovery: bool = False  # radio heaters are found and added after setup
     heater_toggles: bool = False  # heater boost, runback and EASY (radio dialect A)
+    advanced_setup: bool = (
+        False  # heater offset, control mode, panel unit, window, radiant
+    )
     site_device: bool = True  # the gateway sits under a site (installation) device
     web_portal: bool = True  # devices link to the cloud web portal
     node_manufacturer: str = (
@@ -316,6 +324,13 @@ class Backend(ABC):
         """Switch a heater's EASY mode using the backend client."""
 
         await self.client.set_node_easy(dev_id, node, easy=easy)
+
+    async def set_node_advanced(
+        self, dev_id: str, node: NodeDescriptor, **changes: Any
+    ) -> Any:
+        """Write a heater's advanced settings using the backend client."""
+
+        await self.client.set_node_advanced(dev_id, node, **changes)
 
     async def set_node_priority(
         self,

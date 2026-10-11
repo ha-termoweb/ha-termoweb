@@ -20,7 +20,9 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.termoweb.codecs.radio_codec import (
     MODE_FROM_RADIO,
+    advanced_with_changes,
     prog_from_program,
+    settings_from_advanced,
     settings_from_power_record,
     settings_from_status,
 )
@@ -51,6 +53,7 @@ from .radio.link import (
 )
 from .radio.pairing import PairedHeater, pair_heaters
 from .radio.survey import RawBurst
+from .radio_advanced import AdvancedSetupStore
 from .radio_power import EnergyEstimator, PowerManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -155,6 +158,7 @@ class RadioClient:
         link_factory: LinkFactory = RadioLink,
         clock: Callable[[], float] = time.monotonic,
         power: PowerManager | None = None,
+        advanced: AdvancedSetupStore | None = None,
         device_id: str | None = None,
         model: str = GATEWAY_MODEL,
         name: str = GATEWAY_NAME,
@@ -203,6 +207,9 @@ class RadioClient:
         self._energy_counters: dict[int, int] = {}  # last dialect-A Wh counter read
         self._energy_reads: dict[int, float] = {}  # when that counter was last asked
         self.power = power or PowerManager()
+        self.advanced = advanced or AdvancedSetupStore()
+        self._advanced_heaters: set[int] = set()  # heaters that answered DA
+        self._advanced_failures: dict[int, float] = {}  # last unanswered DA read
         self.energy = EnergyEstimator(self.power.rated_power)
         self.frame_log = FrameLog()  # recent frames for diagnostics
 
@@ -438,6 +445,62 @@ class RadioClient:
             _LOGGER.debug("Identity read from heater %s failed: %s", addr, err)
             self._identity_failures[addr] = now
 
+    async def read_advanced_record(self, addr: int) -> protocol.AdvancedRecord:
+        """Return the heater's decoded ``DA`` → ``DB`` advanced record; raise if silent."""
+
+        reply = await self._exchange(
+            addr, protocol.request_advanced_record(), (protocol.ADVANCED_RECORD_LEN,)
+        )
+        record = protocol.decode_advanced_record(reply.payload)
+        assert record is not None  # the reply predicate only accepts DB + 16
+        _LOGGER.debug("Heater %s advanced record %s", addr, record.raw.hex(" "))
+        self._advanced_heaters.add(addr)
+        return record
+
+    async def _learn_advanced(self, addr: int) -> None:
+        """Read the advanced record once, to learn whether the heater has these settings."""
+
+        if addr in self._advanced_heaters:
+            return
+        now = self._clock()
+        failed_at = self._advanced_failures.get(addr)
+        if failed_at is not None and now - failed_at < self.identity_retry_s:
+            return
+        try:
+            await self.read_advanced_record(addr)
+        except (RadioLinkError, RadioCommandError) as err:
+            _LOGGER.debug("Advanced record read from heater %s failed: %s", addr, err)
+            self._advanced_failures[addr] = now
+
+    def _advanced_settings(self, addr: int) -> dict[str, Any]:
+        """Return ``advanced_setup`` and, once written, the advanced settings."""
+
+        if addr not in self._advanced_heaters:
+            return {"advanced_setup": False}
+        setup = self.advanced.get(addr)
+        extra = {} if setup is None else settings_from_advanced(setup)
+        return {"advanced_setup": True, **extra}
+
+    async def set_node_advanced(
+        self, dev_id: str, node: NodeDescriptor, **changes: Any
+    ) -> None:
+        """Write the whole ``C4`` record with ``changes``; require ``C5 55``.
+
+        The heater cannot report these settings, so the fields not changed
+        come from the record last written (else the panel defaults).
+        """
+
+        _node_type, addr = self._resolve_node(node)
+        if addr not in self._advanced_heaters:
+            raise RadioUnsupportedError(
+                f"Advanced setup on heater {addr}, which has no advanced record,"
+            )
+        current = self.advanced.get(addr) or protocol.AdvancedSetup()
+        setup = advanced_with_changes(current, changes)
+        await self._write(addr, protocol.write_advanced_setup(setup))
+        self.advanced.put(addr, setup)
+        _LOGGER.info("Heater %s advanced setup written: %s", addr, sorted(changes))
+
     async def async_factory_reset(self, addr: int) -> None:
         """Factory-reset a heater (dialect B ``C8 01 D0``): settings and pairing are wiped."""
 
@@ -492,6 +555,8 @@ class RadioClient:
         self._energy_counters.pop(addr, None)
         self._energy_reads.pop(addr, None)
         self._runback_restore.pop(addr, None)
+        self._advanced_heaters.discard(addr)
+        self.advanced.forget(addr)
 
     # --- radio exchanges -----------------------------------------------------
 
@@ -742,6 +807,8 @@ class RadioClient:
         if prog is not None:
             settings["prog"] = prog
         await self._learn_rated_power(addr)
+        await self._learn_advanced(addr)
+        settings.update(self._advanced_settings(addr))
         if "state" not in settings:
             power = await self.read_power_record(addr)
             if power is not None:

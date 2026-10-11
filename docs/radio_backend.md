@@ -50,7 +50,8 @@ decoders in `backend/radio/protocol.py` return frozen dataclasses.
 | `energy_history` | False | True | `import_energy_history` service (logs an error and skips the entry) |
 | `local_radio` | True | False | one entry per gateway/stick, link closed on unload, radio reconfigure steps |
 | `options_flow` | True | False | options flow (rehoming) |
-| `heater_toggles` | True (class); per entry: the dialect's `heater_toggles` (A only) | False | heater boost preset and `start_boost`/`cancel_boost` on heaters, `switch` platform (runback, EASY) |
+| `heater_toggles` | True (class); per entry: the dialect's `heater_toggles` (A only) | False | heater boost preset and `start_boost`/`cancel_boost` on heaters, runback and EASY switches |
+| `advanced_setup` | True; per heater: only heaters that answer `DA` | False | temperature offset number, control mode and panel unit selects, open window and true radiant switches |
 | `web_portal` | False | True | `configuration_url` on devices |
 
 `priority` and `energy_history` are new in this PR. Both cloud backends
@@ -80,6 +81,8 @@ derived or guessed.
 | `lock` | full record flag `02`; dialect B: the last lock state written (the short record has none) | bool | 🟡 dialect A; 🟡 dialect B |
 | `boost_active`, `runback`, `easy` | full record flags `20` / `80` / `40` (dialect B's short record has none) | bool | 🟡 dialect A |
 | `boost_end_datetime` | E3/E4 boost tail (day 0 = Sunday, minute of day) while flag `20` is set: the next such local time; else None | datetime | 🟡 dialect A |
+| `advanced_setup` | True once the heater answered `DA` (read once per heater; an unanswered read is retried hourly) | bool | 🟡 dialect A; dialect B not yet seen to answer |
+| `control_mode`, `panel_units`, `temp_offset`, `window_detection`, `true_radiant` | the `C4` record this integration last wrote to the heater (entry options `radio_advanced`); absent until the first write: the heater cannot report them | `"pid"`/`"hysteresis_0_25"`…`"_0_75"`, `"C"`/`"F"`, °C, bool, bool | 🟡 dialect A |
 | `max_power` | full record power, or the dialect-A `BE hi lo` power request (deciwatts); dialect B: the rating in the `5B 55` identity reply (byte 10 × 100 W) | float watts | 🟡 dialect A; 🟡 dialect B (one 1500 W heater checked) |
 
 Mode: radio `03` is a temporary override that ends at the next program slot.
@@ -154,6 +157,8 @@ re-reads it.
 | `set_acm_boost_state` | `RadioUnsupportedError` (accumulator boost is unknown on radio; heaters use `set_node_boost`) | ❌ |
 | `set_node_boost` | `D2 01` / `D2 00`, verdict `D3 55`; the heater uses its own boost time and temperature. Dialect B: `RadioUnsupportedError`. | 🟡 A |
 | `set_node_easy` | `D6 01` / `D6 00`, verdict `D7 55`. EASY forces manual heat with the setpoint unchanged; off restores the mode. Dialect B: `RadioUnsupportedError`. | 🟡 A |
+| `set_node_advanced(**changes)` | Any of `control_mode`, `panel_units`, `temp_offset`, `window_detection`, `true_radiant`: merged into the last written `C4` record (else the panel defaults), validated, sent as `C4` + 8 bytes, verdict `C5 55` (`C5 56` → `RadioCommandError`, nothing stored). The accepted record is stored in the entry options. A heater that never answered `DA`: `RadioUnsupportedError`. | 🟡 A |
+| `read_advanced_record` | `DA` → `DB` + 16 bytes (eco, comfort, boost temperature, as ha-termoweb-local decodes it); `get_node_settings` reads it once per heater to learn `advanced_setup`. | 🟡 A |
 | `set_node_runback` | on: `B8` (remember mode and target), then `D4 01`, verdict `D5 55`; off: `D4 00`, then the remembered mode and target are written back (manual → `B4 02 <t>`, override → `B4 03 <t>`, program/off → the last manual target if known, then `B4 01`/`B4 04`). Runback forces manual heat at the anti-frost setpoint and does not undo it itself. Remembered in memory only. Dialect B: `RadioUnsupportedError`. | 🟡 A |
 | `set_node_display_select` | `select=True`: `5E 01`; dialect A must answer `5F 55`, dialect B only acks. `select=False`: no-op. | 🟡 |
 | `set_node_priority` | `RadioUnsupportedError`; entities not created (`priority` False) | ❌ |
@@ -231,6 +236,7 @@ reconnects; it does no harm.
 | Child lock entity | 🟡 | `BA 01`/`BA 00`. A dialect-B heater acks it without a reply and does not report the lock, so the entity shows the last state written (unknown until first used). The keypad effect on dialect B is not yet confirmed. |
 | Heater boost | 🟡 A / ❌ B | Dialect A: climate preset **boost** and the `termoweb.start_boost` / `termoweb.cancel_boost` services (no `minutes`: the heater boosts for its own boost time). State from status flag `20`; the end time from the E3/E4 boost tail (`boost_end`, `boost_minutes_remaining` attributes). |
 | Runback and EASY switches | 🟡 A / ❌ B | Dialect A: `switch.<heater>_runback` and `switch.<heater>_easy_mode`, state from status flags `80` / `40`; unknown until a full status record arrives. Not created for dialect B. |
+| Advanced setup (config entities) | 🟡 A / 🔬 B | `number.<heater>_temperature_offset` (−3.0 to +3.0 °C, subtracted from the measured temperature), `select.<heater>_control_mode` (PID or hysteresis 0.25/0.35/0.5/0.75 °C), `select.<heater>_panel_temperature_unit` (°C/°F on the heater's own panel only; Home Assistant keeps reading Celsius and converts as usual), `switch.<heater>_open_window_detection`, `switch.<heater>_true_radiant` (no effect on panels without that menu). Each write sends the whole `C4` record and needs `C5 55`; a `C5 56` fails the call and changes nothing. Values show as unknown until Home Assistant writes them, and a change made at the panel is not seen. Unavailable on a heater that does not answer `DA` (the dialect-B reference heater has not been tried). |
 | Accumulator boost, boost defaults | ❌ | Unknown on radio; no accumulator was available to test. |
 | Display flash button | 🟡 | `5E 01`: dialect A answers `5F 55`; a dialect-B heater acks it (no reply record). The visible flash on dialect B is not yet confirmed. |
 | Heater priority numbers | ✅ | Local power manager (see below). Higher numbers win. |
@@ -408,6 +414,7 @@ both: `addr` addresses radio frames; `serial` names and identifies it.
 - Keypad lock on dialect B: acked; whether the keypad locks is not yet confirmed.
 - Boost, runback and EASY on dialect B: `D2` answers `D3 00 00`, `D6` answers `D7 19`, `D4` is ack only; no effect seen. Their meaning is unknown, so `Dialect.heater_toggles` is False for B and no boost preset or switch is created.
 - Boost, runback and EASY on dialect A come from captures of a dialect-A installation; not yet checked on a dialect-A heater through this integration.
+- Advanced setup: no radio read-back, so the entities show what Home Assistant last wrote (unknown before the first write) and the first write sets every other field to the panel defaults (PID, °C, no offset, window detection and true radiant off). Pairing a heater again at an address forgets its record. Dialect B: whether a heater answers `DA` or accepts `C4` is not known yet; one that does not answer `DA` keeps these entities unavailable.
 - Display flash on dialect-B heaters: the command is acked, the visible flash is not yet confirmed.
 - Energy counter: dialect B has none, so energy is estimated. Dialect A's
   counter is read from captures of a dialect-A installation; it is not yet

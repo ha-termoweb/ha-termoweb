@@ -519,6 +519,58 @@ def test_energy_counter_rejects_other_records(payload) -> None:
     assert p.decode_energy_counter(payload) is None
 
 
+@pytest.mark.parametrize(
+    ("fields", "payload"),
+    [
+        ({}, "C40400000000000000"),  # the panel defaults
+        ({"true_radiant": 1}, "C40400000000000001"),
+        ({"window_mode": 1}, "C40400000000000100"),
+        ({"units": 1}, "C40401000000000000"),
+        ({"offset_tenths": 10}, "C404000A0000000000"),
+        ({"offset_tenths": -10}, "C40400F60000000000"),  # wire F6 = -1.0 C
+        ({"offset_tenths": 30}, "C404001E0000000000"),
+        ({"control_mode": 0}, "C40000000000000000"),
+    ],
+)
+def test_advanced_setup_record(fields, payload) -> None:
+    """``C4`` carries all eight fields; each row changes one of the defaults."""
+    assert p.write_advanced_setup(p.AdvancedSetup(**fields)) == bytes.fromhex(payload)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"control_mode": 5},
+        {"control_mode": -1},
+        {"offset_tenths": 31},
+        {"offset_tenths": -31},
+        {"units": 2},
+        {"window_mode": 2},
+        {"true_radiant": -1},
+    ],
+)
+def test_advanced_setup_record_rejects_values_out_of_range(fields) -> None:
+    """Nothing outside the panel's ranges is ever encoded."""
+    with pytest.raises(ValueError):
+        p.write_advanced_setup(p.AdvancedSetup(**fields))
+
+
+def test_advanced_record_decodes_presets_and_boost_temperature() -> None:
+    """``DA`` → ``DB`` + 16: eco (2), comfort (5), boost temperature (15)."""
+    assert p.request_advanced_record() == b"\xda"
+    payload = bytes.fromhex("DB00242A032A0100000300000000002A06")
+    air = build_frame(DIALECT_A, 4, 1, payload, network_id=NET)
+    record = p.decode_advanced_record(decode(DIALECT_A, air).payload)
+    assert (record.eco_c, record.comfort_c) == (18.0, 21.0)
+    assert record.boost_temp_c == 21.0
+    assert record.raw == payload
+    # An E3 status report is 17 bytes too, but starts with the 56 marker.
+    assert len(A_E3) == p.ADVANCED_RECORD_LEN
+    assert p.decode_advanced_record(A_E3) is None
+    assert p.decode_advanced_record(payload[:-1]) is None
+    assert p.reply_verdict(b"\xc5\x56", p.OP_ADVANCED_WRITE) is False
+
+
 def test_factory_reset_is_dialect_b_only() -> None:
     """``C8 01 D0`` resets a dialect-B heater; dialect A has no known reset."""
     assert p.factory_reset(DIALECT_B) == bytes.fromhex("C801D0")

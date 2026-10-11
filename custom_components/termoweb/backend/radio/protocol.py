@@ -34,6 +34,8 @@ OP_CONFIRM_REPORT = 0x57
 OP_REPORT = 0x56  # leading marker of every unsolicited report
 OP_FLASH_DISPLAY = 0x5E
 OP_WRITE_PARAMETER = 0xC8  # C8 <two argument bytes>; reply C9 55
+OP_ADVANCED_WRITE = 0xC4  # C4 + 8 setup bytes; reply C5 55 (56: rejected)
+OP_ADVANCED_READ = 0xDA  # reply DB + 16 bytes (the E2 record without 56)
 
 TOGGLE_BOOST = 0xD2  # boost for the heater's own boost time; payload masked to 1 bit
 TOGGLE_RUNBACK = 0xD4  # forces manual at the anti-frost setpoint; off restores nothing
@@ -175,6 +177,11 @@ ENERGY_COUNTER_LEN = 5  # dialect A: BD + u32 big-endian Wh counter
 
 POWER_REQUEST_A_LEN = 3
 POWER_REQUEST_B_LEN = 9
+
+ADVANCED_RECORD_LEN = 17  # DB + 16 bytes
+ADVANCED_RECORD_MARKER = OP_ADVANCED_READ + 1  # DB
+CONTROL_MODE_PID = 4  # 0-3: hysteresis 0.25 / 0.35 / 0.50 / 0.75 C
+OFFSET_LIMIT_TENTHS = 30  # the panel offers -3.0 to +3.0 C
 
 
 # --- builders ----------------------------------------------------------------
@@ -501,6 +508,81 @@ def decode_program(payload: bytes) -> ProgramRecord | None:
         ]
     return ProgramRecord(
         resolution=resolution, slots=tuple(slots), hourly=tuple(hourly), raw=raw
+    )
+
+
+# --- advanced setup ------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AdvancedSetup:
+    """The eight ``C4`` fields; defaults are the panel's factory settings.
+
+    ``units`` 0 = C, 1 = F: a display setting; per ha-termoweb-local the radio's
+    temperature encoding does not change with it (unconfirmed at the panel);
+    ``offset_tenths`` is subtracted from the measured room temperature.
+    The away fields are only ever sent as 0.
+    """
+
+    control_mode: int = CONTROL_MODE_PID
+    units: int = 0
+    offset_tenths: int = 0
+    away_mode: int = 0
+    away_offset: int = 0
+    modified_auto_span: int = 0
+    window_mode: int = 0
+    true_radiant: int = 0
+
+
+def write_advanced_setup(setup: AdvancedSetup) -> bytes:
+    """Return ``C4`` + the 8 setup bytes; raise ValueError for a value out of range."""
+    if not 0 <= setup.control_mode <= CONTROL_MODE_PID:
+        raise ValueError(f"control mode {setup.control_mode!r} is not 0-4")
+    if not -OFFSET_LIMIT_TENTHS <= setup.offset_tenths <= OFFSET_LIMIT_TENTHS:
+        raise ValueError(f"offset {setup.offset_tenths / 10} C is outside -3.0-3.0 C")
+    flags = (setup.units, setup.window_mode, setup.true_radiant)
+    if any(value not in (0, 1) for value in flags):
+        raise ValueError("units, window mode and true radiant must be 0 or 1")
+    return bytes(
+        [
+            OP_ADVANCED_WRITE,
+            setup.control_mode,
+            setup.units,
+            setup.offset_tenths & 0xFF,
+            setup.away_mode,
+            setup.away_offset,
+            setup.modified_auto_span,
+            setup.window_mode,
+            setup.true_radiant,
+        ]
+    )
+
+
+def request_advanced_record() -> bytes:
+    """Return the ``DA`` advanced record request."""
+    return bytes([OP_ADVANCED_READ])
+
+
+@dataclass(frozen=True)
+class AdvancedRecord:
+    """A decoded ``DB`` advanced record; its other bytes are not understood."""
+
+    eco_c: float  # index 2
+    comfort_c: float  # index 5
+    boost_temp_c: float  # index 15: the boost temperature
+    raw: bytes
+
+
+def decode_advanced_record(payload: bytes) -> AdvancedRecord | None:
+    """Decode the 17-byte ``DB`` reply to ``DA`` (an E3 report of that length is not one)."""
+    payload = bytes(payload)
+    if len(payload) != ADVANCED_RECORD_LEN or payload[0] != ADVANCED_RECORD_MARKER:
+        return None
+    return AdvancedRecord(
+        eco_c=payload[2] / 2,
+        comfort_c=payload[5] / 2,
+        boost_temp_c=payload[15] / 2,
+        raw=payload,
     )
 
 

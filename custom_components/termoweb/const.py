@@ -43,6 +43,7 @@ RADIO_TYPE_NANOCUL: Final = "nanocul"
 CONF_RADIO_POWER: Final = (
     "radio_power"  # options: power manager limit, priorities, shed heaters
 )
+CONF_RADIO_ADVANCED: Final = "radio_advanced"  # options: C4 record written per heater
 CONF_RADIO_RESTORE: Final = (
     "radio_restore"  # options: heater settings saved before a factory reset
 )
