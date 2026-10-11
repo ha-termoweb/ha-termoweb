@@ -382,19 +382,12 @@ async def test_reconfigure_nanocul_without_mac_cannot_be_checked(
     assert entry.unique_id == f"{BRAND_RADIO}:nanocul-a1b2c3"
 
 
-@pytest.mark.parametrize(
-    ("stick", "expected"),
-    [
-        (RadioLinkError("gone"), "cannot_connect_nanocul"),
-        ((GATEWAY_ID, False), "dialect_unsupported_firmware"),
-    ],
-)
-async def test_reconfigure_nanocul_errors(
-    hass: HomeAssistant, radio: FakeRadio, stick: Any, expected: str
+async def test_reconfigure_nanocul_unreadable_stick_shows_an_error(
+    hass: HomeAssistant, radio: FakeRadio
 ) -> None:
-    """An unreadable stick, or one that cannot speak dialect B, shows an error."""
+    """An unreadable stick keeps the reconfigure form open with an error."""
     entry = _stick_entry(hass)
-    radio.stick = stick
+    radio.stick = RadioLinkError("gone")
     form = await entry.start_reconfigure_flow(hass)
 
     result = await hass.config_entries.flow.async_configure(
@@ -403,7 +396,33 @@ async def test_reconfigure_nanocul_errors(
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reconfigure_nanocul"
-    assert result["errors"] == {"base": expected}
+    assert result["errors"] == {"base": "cannot_connect_nanocul"}
+
+
+@pytest.mark.parametrize(
+    ("stored", "reason"),
+    [
+        ({"dialect": "B"}, "nanocul_firmware_too_old"),
+        ({"dialect": "A"}, "reconfigure_successful"),
+        ({}, "reconfigure_successful"),
+    ],
+)
+async def test_reconfigure_nanocul_with_old_firmware(
+    hass: HomeAssistant, radio: FakeRadio, stored: dict, reason: str
+) -> None:
+    """Old firmware is refused only when the entry detected the newer radio type."""
+    entry = _stick_entry(hass, device_id="nanocul-a1b2c3")
+    data = {key: value for key, value in entry.data.items() if key != "dialect"}
+    hass.config_entries.async_update_entry(entry, data=data | stored)
+    radio.stick = ("nanocul-a1b2c3", False)
+    form = await entry.start_reconfigure_flow(hass)
+
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"], {"device": "/dev/ttyUSB1", "rescan": False}
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == reason
 
 
 async def test_listen_only_entry_cannot_be_reconfigured(
@@ -503,30 +522,16 @@ async def test_setup_menu_offers_only_add_or_listen(
         )
 
 
-async def test_dialect_a_entry_starts_on_its_fixed_network(
-    hass: HomeAssistant, radio: FakeRadio
-) -> None:
-    """Dialect A has one network id, so the entry knows it from the start."""
-    menu = await _gateway_menu(hass, {**FORM, "advanced": {"dialect": "A"}})
-    result = await _choose(hass, menu, "radio_discover")
-    assert result["data"]["dialect"] == "A"
-    assert result["data"]["network_id"] == DIALECT_A.network_id.hex().upper()
-    assert result["data"]["nodes"] == []
-
-
 async def test_radio_form_asks_only_for_the_address(
     hass: HomeAssistant, radio: FakeRadio
 ) -> None:
-    """Port and dialect sit in a collapsed section; no network id field."""
+    """The port sits in a collapsed section; no radio type or network id field."""
     form = await _menu(hass, "radio")
     fields = {str(key): value for key, value in form["data_schema"].schema.items()}
     assert set(fields) == {"host", "advanced"}
     assert isinstance(fields["advanced"], section)
     assert fields["advanced"].options == {"collapsed": True}
-    assert {str(key) for key in fields["advanced"].schema.schema} == {
-        "port",
-        "dialect",
-    }
+    assert {str(key) for key in fields["advanced"].schema.schema} == {"port"}
     fields_json = probatio.to_field_list(
         form["data_schema"], custom_serializer=cv.custom_serializer
     )
@@ -534,16 +539,14 @@ async def test_radio_form_asks_only_for_the_address(
     assert fields_json[1]["type"] == "expandable"
 
 
-async def test_radio_advanced_port_and_dialect_are_used(
+async def test_radio_advanced_port_is_used(
     hass: HomeAssistant, radio: FakeRadio
 ) -> None:
-    """A port and dialect from the advanced section reach the probe and the entry."""
-    menu = await _gateway_menu(
-        hass, {**FORM, "advanced": {"port": 2424, "dialect": "B"}}
-    )
+    """A port from the advanced section reaches the probe and the entry."""
+    menu = await _gateway_menu(hass, {**FORM, "advanced": {"port": 2424}})
     result = await _choose(hass, menu, "radio_discover")
     assert result["data"]["port"] == 2424
-    assert result["data"]["dialect"] == "B"
+    assert "dialect" not in result["data"]  # detected after setup
     assert "network_id" not in result["data"]  # the network is learned later
     assert radio.calls == [("probe", "10.0.0.5", 2424)]
 
@@ -706,9 +709,9 @@ async def test_nanocul_listen_only_entry(hass: HomeAssistant, radio: FakeRadio) 
 
 @pytest.fixture
 def stick(radio: FakeRadio) -> FakeRadio:
-    """A detected stock nanoCUL hearing a dialect-A installation."""
+    """A detected nanoCUL whose firmware detects the radio type."""
     radio.ports = [PORT]
-    radio.stick = ("nanocul-a1b2c3", False)
+    radio.stick = ("nanocul-a1b2c3", True)
     radio.discover = (NetworkSighting(DIALECT_A, DIALECT_A.network_id), {6: None})
     return radio
 
@@ -749,26 +752,36 @@ async def test_manual_path_when_no_port_is_detected(
     assert stick.serials == [None]
 
 
-@pytest.mark.parametrize(
-    ("form", "probe", "error"),
-    [
-        (STICK_FORM, RadioLinkError("busy"), {"base": "cannot_connect_nanocul"}),
-        (
-            {**STICK_FORM, "advanced": {"dialect": "B"}},
-            ("id", False),
-            {"base": "dialect_unsupported_firmware"},
-        ),
-    ],
-)
-async def test_stick_errors_stay_on_the_form(
-    hass: HomeAssistant, stick: FakeRadio, form: dict, probe: Any, error: dict
+async def test_stick_form_asks_only_for_the_port(
+    hass: HomeAssistant, stick: FakeRadio
 ) -> None:
-    """A busy stick, or a dialect its firmware lacks, keeps the form open."""
-    stick.stick = probe
-    result = await _stick_menu(hass, form)
+    """The nanoCUL forms have no radio type field: it is always detected."""
+    form = await _menu(hass, "nanocul")
+    assert [str(key) for key in form["data_schema"].schema] == ["device"]
+    manual = await _stick_menu(hass, {"device": "manual"})
+    assert [str(key) for key in manual["data_schema"].schema] == ["device"]
+
+
+async def test_busy_stick_stays_on_the_form(
+    hass: HomeAssistant, stick: FakeRadio
+) -> None:
+    """A busy stick keeps the form open with an error."""
+    stick.stick = RadioLinkError("busy")
+    result = await _stick_menu(hass, STICK_FORM)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "nanocul"
-    assert result["errors"] == error
+    assert result["errors"] == {"base": "cannot_connect_nanocul"}
+
+
+async def test_old_stick_firmware_aborts_the_setup(
+    hass: HomeAssistant, stick: FakeRadio
+) -> None:
+    """Firmware that cannot detect the radio type must be updated first."""
+    stick.stick = ("nanocul-a1b2c3", False)
+    result = await _choose(hass, await _stick_menu(hass, STICK_FORM), "radio_discover")
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "nanocul_firmware_too_old"
+    assert not hass.config_entries.async_entries(DOMAIN)
 
 
 async def test_stick_step_aborts_for_a_configured_stick(
@@ -779,17 +792,6 @@ async def test_stick_step_aborts_for_a_configured_stick(
     result = await _stick_menu(hass, STICK_FORM)
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
-
-
-async def test_dialect_b_on_capable_firmware_is_accepted(
-    hass: HomeAssistant, stick: FakeRadio
-) -> None:
-    """Firmware that can switch dialects may use dialect B."""
-    stick.stick = (GATEWAY_ID, True)
-    menu = await _stick_menu(hass, {**STICK_FORM, "advanced": {"dialect": "B"}})
-    result = await _choose(hass, menu, "radio_discover")
-    assert result["data"]["dialect"] == "B"
-    assert "network_id" not in result["data"]  # learned after setup
 
 
 async def test_stick_lost_during_a_rescan_shows_the_reconfigure_form(
@@ -1286,7 +1288,7 @@ async def test_nanocul_form_preselects_the_likely_port(
     form = await _menu(hass, "nanocul")
     assert form["step_id"] == "nanocul"
     assert _default_device(form) == expected
-    assert {str(key) for key in form["data_schema"].schema} == {"device", "advanced"}
+    assert {str(key) for key in form["data_schema"].schema} == {"device"}
     assert radio.calls == []
 
 

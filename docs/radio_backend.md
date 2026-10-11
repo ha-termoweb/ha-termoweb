@@ -445,8 +445,10 @@ whose ids also match Zigbee sticks and other serial devices. Stock
 that the flow and the link detect from the `Q` line:
 
 - no `dialect=` field: the firmware only speaks dialect A. Connecting in
-  dialect B raises `UnsupportedDialectError`; discovery listens in dialect A
-  only, and a requested dialect B is refused (`dialect_unsupported_firmware`).
+  dialect B raises `UnsupportedDialectError`. **Add the gateway** with such
+  a stick aborts (`nanocul_firmware_too_old`: update the firmware); listen
+  only still works. Reconfiguring an entry that detected dialect B onto such
+  a stick aborts the same way.
 - no `mac=` field: the device id comes from the USB serial number of the
   chosen port (else a hash of the path) and is stored as `radio_device_id`;
   `list_devices` falls back to it.
@@ -456,9 +458,9 @@ Entry data for a stick: `radio_type: nanocul`, `device` (path or URL),
 entries store `radio_type: esp32`; entries without the key are ESP32
 entries. Reconfigure changes the port and can re-scan.
 
-The manual radio form asks only for the host. Port (2323) and dialect
-(`auto`, `A`, `B`) sit in a collapsed **Advanced settings** section
-(`advanced`); the nanoCUL forms keep the dialect there too.
+The manual radio form asks only for the host. The port (2323) sits in a
+collapsed **Advanced settings** section (`advanced`); the nanoCUL forms ask
+only for the port. There is no dialect choice: it is always detected.
 
 1. `probe_gateway` connects with auto-ack off (nothing is transmitted) and
    reads the gateway MAC from the `# Q` line. The MAC becomes the `dev_id`
@@ -477,9 +479,8 @@ The manual radio form asks only for the host. Port (2323) and dialect
 2. `radio_discover` ("Add the gateway") creates the
    entry at once, with no progress step and no heaters
    (`radio_new_entry_data`): `brand: radio`, the connection, `nodes: []`,
-   and the dialect only when the user chose one. Dialect A has a fixed
-   network id (`1B30`), so a dialect-A entry stores it too; otherwise
-   `network_id` is missing, which means "network still to be learned".
+   and no dialect: `network_id` is missing, which means "network still to
+   be learned".
    Heaters are found after setup, see
    [Background heater discovery](#background-heater-discovery).
 3. Once known, the entry stores `dialect`, `network_id` (hex) and `nodes` as
