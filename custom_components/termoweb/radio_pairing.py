@@ -2,7 +2,7 @@
 
 A factory reset wipes a heater's settings. Before the reset, the heater's last
 known settings are saved in the config entry options, so the automatic pairing
-gives them back when the heater is paired again. See ``docs/radio_protocol.md``.
+gives them back when the heater is paired again. See ``docs/research/protocol.md``.
 """
 
 from __future__ import annotations

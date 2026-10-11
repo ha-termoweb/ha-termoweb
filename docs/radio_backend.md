@@ -178,8 +178,9 @@ gateway. The gateway firmware sends the link-layer acks itself.
 | program report `56 B1 ..` | `57 55` | `prog` delta | 🟡 |
 | route probe (tag `06`), acks, unknown frames, frames from nodes not in the inventory | none | ignored | ✅ |
 
-Every `REFRESH_INTERVAL_S` (120 s; heaters need a clock sync at least every
-150 s) the listener, for each heater in the inventory:
+Every `REFRESH_INTERVAL_S` (120 s; a dialect-A heater shows its lost-link
+indication about 12 minutes after its last clock sync, see
+[research: keepalive](research/sessions.md#keepalive-and-the-link-indication)) the listener, for each heater in the inventory:
 
 1. sends the EB `52` keepalive clock sync and expects `53 55` (counts as a
    heartbeat);
@@ -219,7 +220,7 @@ reconnects; it does no harm.
 
 | Cloud feature | Radio | Notes |
 |---|---|---|
-| Climate entity: mode, target temperature, presets, schedule | 🟡 / ✅ | Dialect B, verified on a real heater: off / manual / program modes, the three presets, the weekly schedule, the target temperature (read and written as the heater's own setpoint) and the current room temperature. Dialect A: 🟡 (from ha-termoweb-local, not tested here). |
+| Climate entity: mode, target temperature, presets, schedule | 🟡 / ✅ | Dialect B, verified on a real heater: off / manual / program modes, the three presets, the weekly schedule, the target temperature (read and written as the heater's own setpoint) and the current room temperature. Dialect A: 🟡 (proven in the research, see [research/messages.md](research/messages.md); not tested with this integration). |
 | Climate HVAC action (heating / idle) | 🟡 / ✅ | Dialect A: full status record flags. Dialect B: power record byte 7, verified against a house meter. |
 | Temporary override (`modified_auto`) | 🟡 / ✅ | `B4 03` in dialect A; `B6 .. 03 <setpoint>` in dialect B (ended by the heater at the next program change). |
 | Child lock entity | 🟡 | `BA 01`/`BA 00`. A dialect-B heater acks it without a reply and does not report the lock, so the entity shows the last state written (unknown until first used). The keypad effect on dialect B is not yet confirmed. |
@@ -240,7 +241,10 @@ reconnects; it does no harm.
 The cloud gateway keeps an installation under its power limit. On the radio,
 a heater's `BE` power request is only acknowledged by `BF`: a dialect-B heater
 heats whether the answer is `BF 01` or `BF 00` (checked against a house meter:
-eleven 1.5 kW heating pulses after eleven `BF 00` answers). The station always
+eleven 1.5 kW heating pulses after eleven `BF 00` answers). In dialect A the
+vendor gateway's firmware treats `BF 00` as a refusal with a back-off, but
+only `BF 01` was ever seen on air
+([research](research/messages.md#power-request-be-and-verdict-bf)). The station always
 answers `BF 01`. The lever that does stop heating is the mode, so the local
 power manager (`backend/radio_power.py`) sheds load:
 
@@ -258,8 +262,10 @@ power manager (`backend/radio_power.py`) sheds load:
 Higher priority numbers win. While switched off, a heater shows as Off in Home
 Assistant.
 
-Energy: the heaters keep no energy counter on the radio, so the client
-estimates one (`EnergyEstimator`). Between two power records a heater draws
+Energy: dialect-B heaters keep no energy counter on the radio. Dialect-A
+heaters do (`BC` → `BD` + u32 Wh, the heater's own cumulative counter, see
+[research](research/messages.md#energy-counter-bc)), but the client does not
+read it yet. For both, the client estimates one (`EnergyEstimator`). Between two power records a heater draws
 its power × duty (byte 6 of the record, ≈ the measured pulse ratio) while its
 heating flag is set, and nothing otherwise; a gap longer than 15 minutes is
 cut off. The counter feeds the normal energy and power sensors through
@@ -295,7 +301,7 @@ its saved settings back when its serial is recognised. The network move
 (`radio_rehome`) runs the same pairing exchange internally. Pairing runs in
 the client (`async_pair`, then `async_restore`) and holds the exchange lock,
 so heater commands wait. Protocol details:
-[radio protocol §7-8](radio_protocol.md#7-pairing).
+[radio protocol §7-8](research/protocol.md#7-pairing).
 
 ### Automatic pairing (pairing window)
 
@@ -464,7 +470,7 @@ The manual radio form asks only for the host. Port (2323) and dialect
    (`radio_monitor`): an entry with `brand: radio_monitor`, no heaters and no
    network id, which never transmits and records traffic with the
    `radio_capture` service
-   ([radio protocol §10](radio_protocol.md#10-listening-only-and-frame-captures)).
+   ([radio protocol §10](research/protocol.md#10-listening-only-and-frame-captures)).
    It has its own unique id, `radio_monitor:<dev_id>`; only one entry can
    use the gateway's port at a time (the newest connection wins). A listen-only entry cannot be
    reconfigured (`monitor_reconfigure`): delete it and add it again.

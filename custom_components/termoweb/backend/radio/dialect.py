@@ -4,7 +4,7 @@ Both dialects share one logical layout after byte 0:
 ``net(2) src dst flags path(5) tag payload crc(2)``; an ack stops after
 ``flags``. They differ in sync word, the length rule for byte 0, whitening,
 CRC and network id: dialect A has a fixed network id, dialect B's is per
-installation and must be supplied. See ``docs/radio_protocol.md``.
+installation and must be supplied. See ``docs/research/protocol.md``.
 """
 
 from __future__ import annotations

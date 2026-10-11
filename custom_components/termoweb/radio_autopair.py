@@ -1,6 +1,6 @@
 """Pair radio heaters by themselves while the entry's pairing window is open.
 
-A heater in pairing mode announces itself (``docs/radio_protocol.md``, section
+A heater in pairing mode announces itself (``docs/research/protocol.md``, section
 7). The window is open for 30 minutes after a radio entry is created, and for
 10 minutes after the "Pair new heaters" button is pressed. Inside the window
 the integration answers the announcement; outside it, announcements are

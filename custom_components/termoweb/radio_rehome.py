@@ -3,7 +3,7 @@
 An entry set up by discovery keeps the network id of the gateway the heaters
 were sold with. Re-homing resets every heater (dialect B ``C8 01 D0``), moves
 the station to the site network id, pairs the heaters again and restores
-their settings. See ``docs/radio_protocol.md`` (section 9).
+their settings. See ``docs/research/protocol.md`` (section 9).
 """
 
 from __future__ import annotations

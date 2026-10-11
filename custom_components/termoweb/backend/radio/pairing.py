@@ -4,7 +4,7 @@ A heater in pairing mode (its owner pressed pairing on the panel) announces
 itself from the broadcast id ``FF``, sweeping the destination across the id
 range. The station answers with one id assignment: tag ``04``, payload the new
 id, sent to ``FF`` on the station's network id. The heater adopts both the id
-and the network id. See ``docs/radio_protocol.md`` (section 7).
+and the network id. See ``docs/research/protocol.md`` (section 7).
 
 - Dialect B announces with tag ``03`` and payload ``55``, without an identity,
   so heaters are paired one at a time: after an assignment, further sweeps are
