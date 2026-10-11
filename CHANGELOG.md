@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.4.0b1 (pre-release, 2026-10-11)
+
+Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
 
 ### Requirements
 - Home Assistant **2026.10.0** or newer is required (HACS enforces it).
