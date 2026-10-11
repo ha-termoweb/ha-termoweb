@@ -78,15 +78,16 @@ If your dashboard shows a preset label, **temporary override** means: “Use thi
 
 ## What you’ll need
 
-- A working TermoWeb setup (gateway connected to the router, heaters paired).
-- The **TermoWeb account email & password** (the same used in the mobile app / web).
-- Home Assistant **2026.10.0 or newer** (Core, OS, or Container) with internet access. HACS will not install the integration on an older version. Update Home Assistant first.
+- **Cloud account:** a working TermoWeb setup (gateway connected to the router, heaters paired) and the **account email & password** (the same used in the mobile app / web). Home Assistant needs internet access.
+- **Local radio (no cloud):** a nanoCUL USB stick (easiest) or a home-built ESP32 radio gateway. No account and no internet access needed.
+- Home Assistant **2026.10.0 or newer** (Core, OS, or Container). HACS will not install the integration on an older version. Update Home Assistant first.
 
 ---
 
 ## The bad news
 
-- This integration is **Internet dependent**, as all interaction with heaters is mediated by the cloud backend. This is not ideal, as part of the HA ethos is local data and control. Unfortunately, we cannot connect directly to the Wifi gateways that are in your home, as they are proprietary and a "black box".
+- With a **cloud account**, the integration is **Internet dependent**: all interaction with the heaters goes through the vendor's cloud backend. The vendor's Wi-Fi gateway is a proprietary "black box", so Home Assistant cannot talk to it directly.
+- **Local control without the cloud is possible** with your own radio: a **nanoCUL USB stick** (easiest, no soldering) or a home-built **ESP32 radio gateway** (advanced, needs soldering). See the setup steps below.
 
 ---
 
@@ -117,10 +118,10 @@ ha-termoweb/ha-termoweb
    [![Open your Home Assistant instance and start setting up the integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=termoweb)
 2) Choose how your heaters connect:
    - **Cloud account**: you use the TermoWeb, Ducaheat or Tevolve app. Go to step 3.
-   - **Local radio gateway**: you built the ESP32 radio gateway. Follow
-     [Radio gateway: build your own with an ESP32](docs/radio_gateway.md), step 5, then go to step 6.
-   - **Local radio: nanoCUL USB stick**: you have a nanoCUL plugged into the Home Assistant computer.
+   - **Local radio: nanoCUL USB stick** (easiest, no soldering): you have a nanoCUL plugged into the Home Assistant computer.
      Follow [Radio stick: use a nanoCUL USB stick](docs/radio_nanocul.md), step 3, then go to step 6.
+   - **Local radio gateway** (advanced, needs soldering): you built the ESP32 radio gateway. Follow
+     [Radio gateway: build your own with an ESP32](docs/radio_gateway.md), step 5, then go to step 6.
 3) Choose your **Brand**. This picks the correct backend automatically, so you do **not** need to enter a portal URL manually.
 4) Enter the account **Email** used for the TermoWeb / Ducaheat / Tevolve app.
 5) Enter the account **Password**.

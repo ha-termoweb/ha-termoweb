@@ -539,7 +539,7 @@ async def test_user_step_offers_cloud_or_radio(hass: HomeAssistant) -> None:
         DOMAIN, context={"source": SOURCE_USER}
     )
     assert result["type"] is FlowResultType.MENU
-    assert result["menu_options"] == ["cloud", "radio", "nanocul"]
+    assert result["menu_options"] == ["cloud", "nanocul", "radio"]
 
 
 async def test_radio_discovery_creates_entry(
