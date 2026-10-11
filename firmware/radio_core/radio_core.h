@@ -14,10 +14,11 @@
  * Dialects (the host picks one at runtime with 'Y'):
  *   A (default after every reset): sync 2DE5; byte 0 = total - 3; every
  *     byte PN9-scrambled; CRC-16/CCITT (poly 0x1021, init 0x1D0F, final
- *     XOR 0xFFFF) over the descrambled bytes [0, total-3]; network id 1B30.
+ *     XOR 0xFFFF) over the descrambled bytes [0, total-3]; network id set
+ *     with 'N'.
  *   B: sync 2DD4; byte 0 = total; bytes in the clear; CRC-16/MODBUS
- *     (reflected 0xA001, init 0xFFFF) over [0, total-3]; network id per
- *     installation (set with 'N').
+ *     (reflected 0xA001, init 0xFFFF) over [0, total-3]; network id set
+ *     with 'N'.
  *   In both, the CRC is sent high byte first, the bytes after byte 0 are
  *   net(2) src dst flags path(5) tag payload crc(2), and an ack is
  *   net, acker, acked sender, flags 0x80, CRC.
@@ -63,7 +64,7 @@ extern "C" {
 #define RC_SYNC1 0x2D
 #define RC_SYNC0_A 0xE5
 #define RC_SYNC0_B 0xD4
-#define RC_DEFAULT_NET 0x1B30
+#define RC_DEFAULT_NET 0x0000 /* none until the host sends 'N' */
 #define RC_DEFAULT_ID 0x01
 #define RC_DEFAULT_FREQ_KHZ 869525UL
 #define RC_FREQ_KHZ_MIN 779000UL /* the CC1101's 868/915 MHz synthesiser band */

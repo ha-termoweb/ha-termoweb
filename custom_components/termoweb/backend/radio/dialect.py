@@ -3,8 +3,8 @@
 Both dialects share one logical layout after byte 0:
 ``net(2) src dst flags path(5) tag payload crc(2)``; an ack stops after
 ``flags``. They differ in sync word, the length rule for byte 0, whitening,
-CRC and network id: dialect A has a fixed network id, dialect B's is per
-installation and must be supplied. See ``docs/radio_protocol.md``.
+CRC. Neither dialect has a default network id: every caller supplies it.
+See ``docs/radio_protocol.md``.
 """
 
 from __future__ import annotations
@@ -65,7 +65,6 @@ class Dialect:
 
     name: str
     sync: bytes
-    network_id: bytes | None  # None: per installation, the caller must supply it
     scrambled: bool
     length_offset: int  # total frame length = logical byte 0 + length_offset
     crc: Callable[[bytes], int] = field(repr=False)
@@ -79,7 +78,6 @@ class Dialect:
 DIALECT_A = Dialect(
     name="A",
     sync=bytes.fromhex("2DE5"),
-    network_id=bytes.fromhex("1B30"),
     scrambled=True,
     length_offset=3,
     crc=crc16_ccitt_a,
@@ -93,7 +91,6 @@ DIALECT_A = Dialect(
 DIALECT_B = Dialect(
     name="B",
     sync=bytes.fromhex("2DD4"),
-    network_id=None,
     scrambled=False,
     length_offset=0,
     crc=crc16_modbus,
@@ -205,22 +202,20 @@ def build_frame(
     flags: int = 0,
     tag: int = 0,
     path: Iterable[int] | None = None,
-    network_id: bytes | None = None,
+    network_id: bytes,
 ) -> bytes:
     """Return on-air bytes for a data frame; path defaults to (src, dst, 0, 0, 0)."""
     path_bytes = bytes((src, dst, 0, 0, 0) if path is None else path)
     if len(path_bytes) != PATH_LEN:
         raise ValueError("path must be exactly five bytes")
-    net = _network_id(dialect, network_id)
+    net = _check_network_id(network_id)
     body = net + bytes([src, dst, flags]) + path_bytes + bytes([tag]) + bytes(payload)
     return encode(dialect, body)
 
 
-def _network_id(dialect: Dialect, network_id: bytes | None) -> bytes:
-    """Return a validated two-byte network id, defaulting to the dialect's own."""
-    net = dialect.network_id if network_id is None else bytes(network_id)
-    if net is None:
-        raise ValueError(f"dialect {dialect.name} needs an explicit network_id")
+def _check_network_id(network_id: bytes) -> bytes:
+    """Return ``network_id`` as bytes; raise ValueError unless it is two bytes."""
+    net = bytes(network_id)
     if len(net) != 2:
         raise ValueError("network_id must be exactly two bytes")
     return net

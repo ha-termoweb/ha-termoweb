@@ -45,7 +45,13 @@ from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.identifiers import build_gateway_entity_unique_id
 from custom_components.termoweb.radio_pairing import async_site_network_id
 from custom_components.termoweb.runtime import require_runtime
-from tests.fakes.radio_link import REGISTRATION, STATUS_SHORT, FakeRadioLink, received
+from tests.fakes.radio_link import (
+    NET,
+    REGISTRATION,
+    STATUS_SHORT,
+    FakeRadioLink,
+    received,
+)
 from tests.fakes.radio_setup import record_reloads
 from tests.fakes.sensors import fake_radio_links, setup_entry
 
@@ -107,7 +113,7 @@ def announce_a(dst: int = 1, *, src: int = 0xFF) -> ReceivedFrame:
         dst,
         b"\x77" + IDENTITY_A,
         path=(0xFF, dst, 1, 1, 1),
-        network_id=DIALECT_A.network_id,
+        network_id=b"\x00\x00" if src == 0xFF else NET,  # unjoined: 00 00
     )
     return ReceivedFrame(decode(DIALECT_A, air), -60.0, 0, 1000)
 
@@ -121,7 +127,7 @@ def _entry(
         "host": "10.0.0.5",
         "port": 2323,
         "dialect": dialect,
-        "network_id": "1234" if dialect == "B" else "1B30",
+        "network_id": "1234",
         "nodes": [KNOWN] if nodes is None else nodes,
     }
     return MockConfigEntry(

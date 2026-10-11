@@ -42,8 +42,8 @@ ANNOUNCE_MARKER_A = 0x77
 ANNOUNCE_LEN_A = 13  # 77 + 12-byte identity
 MIN_NODE_ID = 0x02
 MAX_NODE_ID = 0x41  # the stock gateway's node tables stop here
-# 0000 and FFFF look like "no network"; 1B30 is the stock dialect-A network.
-RESERVED_NETWORK_IDS = frozenset({b"\x00\x00", b"\xff\xff", b"\x1b\x30"})
+# 0000 and FFFF look like "no network" (0000 is the unjoined pairing network).
+RESERVED_NETWORK_IDS = frozenset({b"\x00\x00", b"\xff\xff"})
 
 PAIR_WINDOW_S = 300.0  # how long the owner has to press pairing on a heater
 IDLE_STOP_S = 60.0  # after a pairing, stop this long after the last announcement

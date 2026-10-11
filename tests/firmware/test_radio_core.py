@@ -40,9 +40,9 @@ BANNER = (
 )
 QUERY = (
     f"# Q termoweb_rx {VERSION} freq=869.525 pa=C0 sync=2DE5 mode=dynamic "
-    "autoack=off id=01 dialect=A net=1B30"
+    "autoack=off id=01 dialect=A net=0000"
 )
-NET_B = bytes.fromhex("1234")  # synthetic network id
+NET_B = bytes.fromhex("1234")  # synthetic network id (both dialects)
 CC1101_PKTLEN, CC1101_PKTCTRL0 = 0x06, 0x08
 CC1101_SYNC0, CC1101_FREQ2, CC1101_FREQ1, CC1101_FREQ0 = 0x05, 0x0D, 0x0E, 0x0F
 CC1101_PATABLE, CC1101_SFRX, CC1101_SRX = 0x3E, 0x3A, 0x34
@@ -115,8 +115,8 @@ def test_crc_verdict_matches_decode(core_lib: Core, dialect, code: int) -> None:
 def test_acks_match_the_host_codec_byte_for_byte(core_lib: Core) -> None:
     """Both dialects' acks equal encode(net + acker + sender + 0x80)."""
     for acker, src in ((0x01, 0x04), (0x01, 0x06), (0x7E, 0x22), (0xFF, 0x00)):
-        assert c_ack(core_lib, 0, 0x1B30, acker, src) == ack_frame(
-            DIALECT_A, DIALECT_A.network_id, acker, src
+        assert c_ack(core_lib, 0, 0x1234, acker, src) == ack_frame(
+            DIALECT_A, NET_B, acker, src
         )
         assert c_ack(core_lib, 1, 0x1234, acker, src) == ack_frame(
             DIALECT_B, NET_B, acker, src
@@ -129,8 +129,8 @@ def test_acks_match_the_host_codec_byte_for_byte(core_lib: Core) -> None:
 def test_verify_ack_vectors(core_lib: Core) -> None:
     """termoweb_rx's verify_ack.py checks, plus the ESP32 boot self-test vectors."""
     # PROTOCOL.md 5.5 worked example: heater 04 acking gateway 01.
-    assert c_ack(core_lib, 0, 0x1B30, 0x04, 0x01) == bytes.fromhex("FA9C885DB621FBD1")
-    assert c_ack(core_lib, 0, 0x1B30, 0x01, 0x06) == bytes.fromhex("FA9C8858B12189B6")
+    assert c_ack(core_lib, 0, 0x1234, 0x04, 0x01) == bytes.fromhex("FA958C5DB621995C")
+    assert c_ack(core_lib, 0, 0x1234, 0x01, 0x06) == bytes.fromhex("FA958C58B121EB3B")
     assert c_ack(core_lib, 1, 0x1234, 0x01, 0x06) == bytes.fromhex("081234010680A0E4")
     assert core_lib.rc_self_test() == 1
 
@@ -363,7 +363,14 @@ def test_survey_lines_parse_on_the_host(core: Core) -> None:
 
 def poll_a(src: int = 0x06, dst: int = 0x01, flags: int = 0) -> bytes:
     """Return a dialect A data frame."""
-    return build_frame(DIALECT_A, src, dst, b"\x57\x55", flags=flags)
+    return build_frame(
+        DIALECT_A,
+        src,
+        dst,
+        b"\x57\x55",
+        flags=flags,
+        network_id=NET_B,
+    )
 
 
 def test_rx_line_dialect_a(core: Core) -> None:
@@ -390,14 +397,14 @@ def test_rx_line_dialect_a(core: Core) -> None:
 
 def test_long_frame_is_received_in_chunks(core: Core) -> None:
     """A 99-byte frame (past the 64-byte FIFO) arrives whole."""
-    air = build_frame(DIALECT_A, 6, 1, bytes(range(85)))
+    air = build_frame(DIALECT_A, 6, 1, bytes(range(85)), network_id=NET_B)
     assert len(air) == 99
     core.receive(air)
     assert core.lines() == [f"RX 5000 -52.0 21 1 {air.hex().upper()}"]
 
 
 @pytest.mark.parametrize(
-    ("dialect", "code", "net"), [(DIALECT_A, 0, b"\x1b\x30"), (DIALECT_B, 1, NET_B)]
+    ("dialect", "code", "net"), [(DIALECT_A, 0, NET_B), (DIALECT_B, 1, NET_B)]
 )
 def test_auto_ack(core: Core, dialect, code: int, net: bytes) -> None:
     """A CRC-valid data frame to our id is acked in the current dialect and net."""
@@ -424,7 +431,7 @@ def test_auto_ack_skips_bad_crc_other_ids_and_acks(core: Core) -> None:
     assert core.lines() == [f"RX 5000 -52.0 21 0 {bytes(bad).hex().upper()}"]
     core.receive(poll_a(dst=0x02))
     core.receive(poll_a(flags=0x40))
-    core.receive(ack_frame(DIALECT_A, b"\x1b\x30", 0x06, 0x01))
+    core.receive(ack_frame(DIALECT_A, NET_B, 0x06, 0x01))
     assert core.host_tx_count() == 0
     assert all(" 1 " in line for line in core.lines())
     # A dialect B frame heard while in dialect A: wrong CRC, never acked.

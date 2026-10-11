@@ -8,6 +8,8 @@
 
 ### Changed
 - Radio setup: the radio type is always detected by itself. The **Radio dialect** choice is gone from the ESP32 gateway and nanoCUL forms (the nanoCUL forms now ask only for the port). A nanoCUL with old firmware that cannot detect it stops the setup with "The firmware on this nanoCUL stick is too old": put the new firmware on the stick, then try again. Listen only still works with old firmware.
+- Radio, dialect A: Home Assistant no longer has a built-in dialect-A network id. A new dialect-A gateway learns its heaters' network from their radio traffic, the same way as dialect B, or uses its own network when you pair heaters. Gateways you already set up keep the network they have. A nanoCUL stick with the old firmware (3.5) cannot change its network: update it to the new firmware.
+- ESP32 gateway and nanoCUL firmware: after a restart the network id is empty until Home Assistant sets it (Home Assistant always sets it when it connects).
 
 ### Fixed
 - nanoCUL stick (new firmware): the stick acks only frames with a valid checksum, and letters inside a command's hex value (for example `NAFDA`) are no longer run as separate commands.

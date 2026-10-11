@@ -509,8 +509,10 @@ gateway backend, not listen-only entries).
    installation's site network (`async_site_network_id` of the gateway id in
    the entry's unique id) and the chosen dialect, else B. A nanoCUL with
    stock firmware (no runtime dialects, checked with `probe_nanocul`) can
-   only speak dialect A, whose network is fixed: `A`/`1B30` is stored at
-   once and the entry sets up normally. Heaters can be paired into the site
+   only speak dialect A, so it learns in dialect A. No network id is ever
+   assumed, in either dialect. The stock firmware has no `N` command, so its
+   auto-acks cannot follow a learned network: update such a stick to the
+   firmware in `firmware/nanocul`. Heaters can be paired into the site
    network meanwhile (see
    [Automatic pairing](#automatic-pairing-pairing-window)); the first pairing
    stores the site network as the entry's network, which ends learning.
@@ -525,7 +527,7 @@ gateway backend, not listen-only entries).
    - Every 10 minutes (`NETWORK_RETRY_S`) a 120 s raw survey runs through the
      client (gateway firmware 3.7-esp32+; without it, surveys stop). It
      decodes any dialect: a known dialect's first network id (not `0000`) is
-     adopted (dialect A: `1B30`). The survey holds the exchange lock, which
+     adopted; a survey that decodes no network id runs again later. The survey holds the exchange lock, which
      is safe: a learning entry has no heaters to keep alive (#1040). An
      unknown dialect saves the report file, shows a persistent notification
      ("TermoWeb heaters not recognised") with the file and the issue link,

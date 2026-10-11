@@ -80,7 +80,7 @@ async def async_learning_network(
     Such an entry runs on the installation's own network, so heaters can be
     paired into it while the heaters' existing network is still being
     learned. None when the network is known. A nanoCUL with stock firmware
-    only speaks dialect A, whose network is fixed: that is stored at once.
+    only speaks dialect A, so it learns in dialect A.
     """
 
     if not network_pending(entry):
@@ -90,8 +90,7 @@ async def async_learning_network(
         _dev_id, capable = await probe_nanocul(entry.data[CONF_DEVICE])
         if not capable:
             _LOGGER.info("This nanoCUL firmware speaks dialect A only")
-            _store_network(hass, entry, DIALECT_A.name, DIALECT_A.network_id)
-            return None
+            dialect = DIALECT_A.name
     network_id = await async_site_network_id(hass, gateway_id(entry))
     return dialect or LEARNING_DIALECT, network_id
 
@@ -191,8 +190,6 @@ class NetworkLearner:
             return
         dialect = DIALECTS[report.dialect]
         heard = [bytes.fromhex(net) for net in report.network_ids]
-        if dialect.network_id is not None:
-            heard.append(dialect.network_id)
         network_id = next((net for net in heard if net not in IGNORED_NETWORKS), None)
         if network_id is None:
             self.async_schedule_survey()

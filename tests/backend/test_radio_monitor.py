@@ -169,7 +169,7 @@ def test_factory_builds_listen_only_clients() -> None:
         device_id="nanocul-x",
         listen_only=True,
     )
-    normal = create_radio_client("10.0.0.5", 2323, "A", [], None)
+    normal = create_radio_client("10.0.0.5", 2323, "A", [], PLACEHOLDER_NET)
     for client in (tcp, stick):
         assert client.listen_only
         assert client._station_id == LISTEN_ONLY_STATION_ID

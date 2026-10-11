@@ -271,7 +271,7 @@ async def test_registration_power_request_and_reports(radio: Radio) -> None:
 
     link.deliver(received(HEATER, REGISTRATION))
     link.deliver(received(HEATER, POWER_REQUEST))  # dialect B: granted, no power
-    link.deliver(received(HEATER, bytes([p.OP_POWER_REQUEST, 0x1D, 0x66])))  # A form
+    link.deliver(received(HEATER, bytes([p.OP_POWER_REQUEST, 0x23, 0x28])))  # A form
     link.deliver(received(HEATER, bytes([p.OP_REPORT]) + STATUS_E6))
     wire = p._pack_slots([0] * 24 + DAY * 6)
     link.deliver(received(HEATER, bytes([p.OP_REPORT, 0xB1]) + wire))
@@ -283,7 +283,7 @@ async def test_registration_power_request_and_reports(radio: Radio) -> None:
     assert sent.count(b"\xbc") == 2  # then each heating state is read back
     assert sent.count(b"\x57\x55") == 2
     changes = radio.changes_for("6")
-    assert {"max_power": 752.6} in changes
+    assert {"max_power": 900.0} in changes
     assert {"state": "off", "mtemp": "22.0", "stemp": "22.0"} in changes
     assert any(
         c.get("mode") == "modified_auto" and c["mtemp"] == "20.4" for c in changes
@@ -291,7 +291,7 @@ async def test_registration_power_request_and_reports(radio: Radio) -> None:
     assert {"prog": DAY * 6 + [0] * 24} in changes
     # The noted power fills in later status reads that lack it.
     settings = await radio.client.get_node_settings(DEV_ID, ("htr", "6"))
-    assert settings["max_power"] == 752.6
+    assert settings["max_power"] == 900.0
 
 
 async def test_granted_heater_reports_heating(radio: Radio) -> None:

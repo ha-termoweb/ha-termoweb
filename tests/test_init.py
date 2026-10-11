@@ -595,7 +595,7 @@ RADIO_STICK = {
     "device": "/dev/ttyUSB0",
     "radio_device_id": "nanocul-a1b2c3",
     "dialect": "A",
-    "network_id": "1B30",
+    "network_id": "1234",
     "nodes": [],
 }
 MONITOR_ESP32 = {CONF_BRAND: "radio_monitor", "host": "10.0.0.5", "port": 2323}
@@ -632,7 +632,7 @@ class _UnreachableRadio:
         ),
         (
             RADIO_STICK,
-            ("/dev/ttyUSB0", 0, "A", [], bytes.fromhex("1B30")),
+            ("/dev/ttyUSB0", 0, "A", [], bytes.fromhex("1234")),
             {"power", "serial_url", "device_id"},
         ),
         (MONITOR_ESP32, ("10.0.0.5", 2323, "A", [], b"\x00\x00"), {"listen_only"}),

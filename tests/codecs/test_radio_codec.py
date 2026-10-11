@@ -98,8 +98,8 @@ def test_program_with_split_half_hours_is_omitted() -> None:
 def test_power_request_maps_max_power() -> None:
     """Only dialect A's BE carries the full-load power; dialect B's maps to nothing."""
 
-    request = p.decode_power_request(bytes([p.OP_POWER_REQUEST, 0x1D, 0x66]))
-    assert codec.settings_from_power_request(request) == {"max_power": 752.6}
+    request = p.decode_power_request(bytes([p.OP_POWER_REQUEST, 0x23, 0x28]))
+    assert codec.settings_from_power_request(request) == {"max_power": 900.0}
     request_b = p.decode_power_request(POWER_REQUEST)
     assert codec.settings_from_power_request(request_b) == {}
 

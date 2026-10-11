@@ -58,8 +58,7 @@ HEATER = 0x06
 def make_link(gw: FakeGateway, ft: FakeTime, **kwargs) -> RadioLink:
     """Return a RadioLink wired to the fake gateway and fake time."""
     kwargs.setdefault("dialect", gw.dialect)
-    if kwargs["dialect"].network_id is None:
-        kwargs.setdefault("network_id", NET)
+    kwargs.setdefault("network_id", NET)
     return RadioLink(
         "radio.local",
         clock=ft.clock,
@@ -130,10 +129,11 @@ def test_constructor_validation() -> None:
             RadioLink("h", dialect=DIALECT_B, station_id=bad)
     with pytest.raises(ValueError, match="network_id"):
         RadioLink("h", dialect=DIALECT_B, network_id=b"\x01")
-    with pytest.raises(ValueError, match="explicit network_id"):
-        RadioLink("h", dialect=DIALECT_B)
-    link = RadioLink("h", dialect=DIALECT_A)
-    assert link.network_id == DIALECT_A.network_id
+    for dialect in (DIALECT_A, DIALECT_B):
+        with pytest.raises(ValueError, match="network_id is required"):
+            RadioLink("h", dialect=dialect)
+    link = RadioLink("h", dialect=DIALECT_A, network_id=NET)
+    assert link.network_id == NET
     assert link.station_id == 1
     assert link.dialect is DIALECT_A
     assert not link.connected
@@ -244,6 +244,7 @@ async def test_connect_times_out_and_bad_urls_are_link_errors(monkeypatch) -> No
     link = RadioLink(
         "radio.local",
         dialect=DIALECT_A,
+        network_id=NET,
         clock=ft.clock,
         sleep=ft.sleep,
         open_connection=hang,
@@ -255,7 +256,9 @@ async def test_connect_times_out_and_bad_urls_are_link_errors(monkeypatch) -> No
     async def bad_url(host: str, port: int):
         raise ValueError("invalid URL, protocol 'sockt' not known")
 
-    link = RadioLink("radio.local", dialect=DIALECT_A, open_connection=bad_url)
+    link = RadioLink(
+        "radio.local", dialect=DIALECT_A, network_id=NET, open_connection=bad_url
+    )
     with pytest.raises(RadioLinkError, match="cannot connect"):
         await link.connect()
 
@@ -777,8 +780,8 @@ def listen_link(gw: FakeGateway, ft: FakeTime, **kwargs) -> RadioLink:
 def test_listen_only_link_cannot_auto_ack() -> None:
     """Asking for auto-acks on a listen-only link is a programming error."""
     with pytest.raises(ValueError, match="cannot auto-ack"):
-        RadioLink("radio.local", dialect=DIALECT_A, listen_only=True)
-    link = RadioLink("radio.local", dialect=DIALECT_A, auto_ack=False)
+        RadioLink("radio.local", dialect=DIALECT_A, network_id=NET, listen_only=True)
+    link = RadioLink("radio.local", dialect=DIALECT_A, network_id=NET, auto_ack=False)
     assert link.listen_only is False
 
 
@@ -833,7 +836,7 @@ async def test_line_listeners_get_every_line_that_is_not_a_frame() -> None:
     gw.feed("# uart overrun")
     gw.feed("RX 1 2 3 4 ZZ")
     gw.feed("RAWB 1 -80.0")
-    gw.feed(rx_line(build_frame(DIALECT_A, 6, 1, p.request_status())))
+    gw.feed(rx_line(build_frame(DIALECT_A, 6, 1, p.request_status(), network_id=NET)))
     await ft.sleep(0)
     assert "# uart overrun" in lines and "RX 1 2 3 4 ZZ" in lines
     assert lines[0].startswith("# termoweb_rx") and any(
@@ -969,7 +972,7 @@ async def test_list_devices_falls_back_to_the_configured_device_id() -> None:
         0,
         "A",
         [],
-        network_id=None,
+        network_id=NET,
         link_factory=lambda *a, **k: InfoLink(info),
         device_id="nanocul-a1b2c3",
         model=NANOCUL_MODEL,
@@ -983,7 +986,7 @@ async def test_list_devices_falls_back_to_the_configured_device_id() -> None:
         0,
         "A",
         [],
-        network_id=None,
+        network_id=NET,
         link_factory=lambda *a, **k: InfoLink(info),
     )
     with pytest.raises(RadioError, match="MAC"):
@@ -1007,7 +1010,7 @@ def test_factory_builds_a_serial_client() -> None:
     assert link_factory.func.__name__ == "RadioLink"
     assert "open_connection" in link_factory.keywords
     assert client.dialect.name == "B"
-    tcp = factory.create_radio_client("gw", 2323, "A", [], None)
+    tcp = factory.create_radio_client("gw", 2323, "A", [], NET)
     assert tcp._link_factory.__name__ == "RadioLink"
 
 
@@ -1150,7 +1153,7 @@ async def test_listen_once_never_takes_a_pairing_sweep_for_a_network() -> None:
 @pytest.mark.asyncio
 async def test_discover_network_alternates_dialects() -> None:
     """Dialect B is tried first; dialect A traffic is found on the next window."""
-    rig = Rig({"A": [registration(DIALECT_A, 4, DIALECT_A.network_id)]})
+    rig = Rig({"A": [registration(DIALECT_A, 4, NET)]})
     sighting = await d.discover_network(
         "gw",
         window_s=10,
@@ -1159,9 +1162,7 @@ async def test_discover_network_alternates_dialects() -> None:
         sleep=rig.sleep,
         clock=rig.ft.clock,
     )
-    assert sighting == d.NetworkSighting(
-        DIALECT_A, DIALECT_A.network_id, frozenset({4})
-    )
+    assert sighting == d.NetworkSighting(DIALECT_A, NET, frozenset({4}))
     assert [gw.dialect.name for gw in rig.gateways] == ["B", "A"]
 
 

@@ -168,8 +168,8 @@ class RadioClient:
         dialect = DIALECTS.get(str(dialect_name).strip().upper())
         if dialect is None:
             raise ValueError(f"unknown radio dialect {dialect_name!r}")
-        if network_id is None and dialect.network_id is None:
-            raise ValueError(f"dialect {dialect.name} needs an explicit network_id")
+        if network_id is None:
+            raise ValueError("network_id is required")
         self._network_id = network_id
         self._host = host
         self._port = int(port) if port else DEFAULT_PORT
