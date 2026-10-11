@@ -1,188 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "¿Cómo se conectan tus calefactores?",
+        "description": "Elige la cuenta en la nube si usas la app de TermoWeb, Ducaheat o Tevolve. Para controlar los calefactores en local, sin la nube, lo más fácil es un stick USB nanoCUL conectado a este equipo de Home Assistant (sin soldar). La pasarela de radio ESP32 es para usuarios avanzados: hay que montarla y soldarla.",
+        "menu_options": {
+          "cloud": "Cuenta en la nube (app de TermoWeb, Ducaheat o Tevolve)",
+          "nanocul": "Radio local: stick USB nanoCUL (lo más fácil, sin soldar)",
+          "radio": "Pasarela de radio local: ESP32 + CC1101 (avanzado, hay que soldar)"
+        }
+      },
       "cloud": {
-        "title": "Conéctate a los calentadores de la familia TermoWeb",
-        "description": "Versión: {version}\n\nElija su marca TermoWeb o Ducaheat e introduzca las credenciales de su cuenta.",
+        "title": "Conectar con calefactores de la familia TermoWeb",
+        "description": "Versión: {version}\n\nElige tu marca TermoWeb, Ducaheat o Tevolve e introduce los datos de tu cuenta. Tevolve usa el servidor de Ducaheat.",
         "data": {
           "brand": "Marca",
           "username": "Correo electrónico",
+          "password": "Contraseña"
+        }
+      },
+      "radio": {
+        "title": "Conectar con la pasarela de radio",
+        "description": "Home Assistant suele encontrar la pasarela de radio ESP32 por sí solo: búscala en **Descubierto** en la página Dispositivos y servicios. Usa este formulario solo si no aparece allí. Introduce la dirección IP de tu pasarela. En el siguiente paso eliges: añadir la pasarela y dejar que encuentre tus calefactores, o emparejar calefactores nuevos.",
+        "data": {
+          "host": "Dirección IP de la pasarela"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Ajustes avanzados",
+            "description": "No los cambies salvo que hayas modificado el firmware de la pasarela.",
+            "data": {
+              "port": "Puerto"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Pasarela de radio encontrada",
+        "description": "Se ha encontrado una pasarela de radio TermoWeb en {host}. ¿Quieres configurarla?\n\nEn el siguiente paso eliges: añadir la pasarela (encuentra y empareja tus calefactores) o solo escuchar."
+      },
+      "radio_method": {
+        "title": "Añadir tu pasarela",
+        "description": "Elige \"Añadir la pasarela\" para controlar tus calefactores. La configuración termina enseguida. Después:\n\n- Los calefactores que ya funcionan con una pasarela o la app de TermoWeb se encuentran solos, normalmente en unos minutos. Los calefactores envían datos cuando empiezan a calentar, así que ayuda subir la temperatura de uno.\n- Calefactores nuevos o restablecidos: pon cada calefactor en modo de emparejamiento en un plazo de 30 minutos. El manual del calefactor indica qué botones pulsar. Hazlo de uno en uno. Más adelante, pulsa primero **Emparejar calefactores nuevos** en el dispositivo de la pasarela.\n\nRecibirás una notificación por cada calefactor añadido.\n\nElige \"Solo escuchar\" para grabar el tráfico de radio como prueba, junto a una pasarela TermoWeb que siga funcionando. En este modo la integración nunca transmite y no añade calefactores.",
+        "menu_options": {
+          "radio_discover": "Añadir la pasarela",
+          "radio_monitor": "Solo escuchar (grabar el tráfico de radio, sin transmitir nunca)"
+        }
+      },
+      "radio_rescan": { "title": "Buscando tus calefactores" },
+      "reconfigure_radio": {
+        "title": "Cambiar la pasarela de radio",
+        "description": "Cambia la dirección de la pasarela. Marca \"Buscar calefactores de nuevo\" si has añadido o quitado un calefactor.",
+        "data": {
+          "host": "Dirección IP de la pasarela",
+          "port": "Puerto",
+          "rescan": "Buscar calefactores de nuevo"
+        }
+      },
+      "nanocul": {
+        "title": "Conectar con el stick USB nanoCUL",
+        "description": "Elige el puerto de tu stick nanoCUL. Si Home Assistant ha reconocido el stick, ya está seleccionado: solo pulsa Enviar. En el siguiente paso eliges: añadir la pasarela y dejar que encuentre tus calefactores, o emparejar calefactores nuevos.",
+        "data": {
+          "device": "Puerto USB"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Introducir el puerto del nanoCUL",
+        "description": "Escribe la ruta del puerto, por ejemplo /dev/serial/by-id/usb-..., o una dirección de red como socket://192.0.2.10:2323 si el stick se comparte por la red.",
+        "data": {
+          "device": "Ruta del puerto o URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Cambiar el puerto del nanoCUL",
+        "description": "Cambia la ruta del puerto o la URL del stick. Marca \"Buscar calefactores de nuevo\" si has añadido o quitado un calefactor.",
+        "data": {
+          "device": "Ruta del puerto o URL",
+          "rescan": "Buscar calefactores de nuevo"
+        }
+      },
+      "reconfigure": {
+        "title": "Cambiar los ajustes de la cuenta",
+        "description": "Versión: {version}\n\nIntroduce la nueva contraseña de esta cuenta. Aquí no puedes cambiar a otra cuenta: para eso, añade una entrada nueva.",
+        "data": {
+          "brand": "Marca",
+          "username": "Correo electrónico",
+          "password": "Contraseña"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Volver a iniciar sesión",
+        "description": "{brand} no ha aceptado la contraseña guardada para {username}. Introduce la contraseña actual.",
+        "data": {
           "password": "Contraseña"
         }
       }
     },
     "error": {
       "invalid_auth": "Nombre de usuario o contraseña (o clave de cliente) no válidos.",
-      "cannot_connect": "No se puede conectar a TermoWeb - error de red/DNS/SSL.",
-      "rate_limited": "Tarifa limitada temporalmente por la API. Vuelva a intentarlo más tarde.",
-      "unknown": "Error desconocido"
+      "cannot_connect": "No se puede conectar con TermoWeb: error de red/DNS/SSL.",
+      "rate_limited": "La API ha limitado temporalmente las solicitudes. Inténtalo de nuevo más tarde.",
+      "unknown": "Error desconocido",
+      "cannot_connect_radio": "No se puede conectar con la pasarela de radio. Comprueba la dirección IP y el puerto, y que la pasarela esté encendida.",
+      "no_gateway_mac": "La pasarela de radio no ha indicado su dirección MAC. Actualiza el firmware de la pasarela.",
+      "no_heaters": "Ningún calefactor ha respondido. Acerca la pasarela a los calefactores e inténtalo de nuevo.",
+      "cannot_connect_nanocul": "No se puede abrir el stick nanoCUL. Comprueba que esté conectado, que el puerto sea el correcto y que tenga el firmware termoweb_rx.",
+      "nanocul_radio_missing": "El stick responde, pero su módulo de radio no está conectado. Revisa el cableado.",
+      "gateway_radio_missing": "La pasarela responde, pero su módulo de radio no está conectado. Revisa el cableado."
+    },
+    "abort": {
+      "already_configured": "Esta pasarela ya está configurada.",
+      "reconfigure_successful": "Los ajustes se han guardado.",
+      "monitor_reconfigure": "Una entrada de solo escucha no se puede cambiar. Elimínala y vuelve a añadirla.",
+      "unique_id_mismatch": "Esta es otra cuenta u otro dispositivo. Para usarlo, añade una entrada nueva.",
+      "reauth_successful": "La nueva contraseña se ha guardado.",
+      "cannot_connect_radio": "No se puede conectar con la pasarela de radio. Comprueba que la pasarela esté encendida y conectada a tu red.",
+      "no_gateway_mac": "La pasarela de radio no ha indicado su dirección MAC. Actualiza el firmware de la pasarela.",
+      "gateway_radio_missing": "La pasarela responde, pero su módulo de radio no está conectado. Revisa el cableado.",
+      "not_ipv4_address": "La pasarela de radio solo ha anunciado una dirección IPv6. Añádela a mano con su dirección IPv4.",
+      "nanocul_firmware_too_old": "El firmware de este stick nanoCUL es demasiado antiguo. Instala en el stick el firmware termoweb_rx más reciente (consulta la guía del nanoCUL) e inténtalo de nuevo."
+    },
+    "progress": {
+      "radio_rescan": "Comprobando todos los calefactores de tu red de radio. Tarda hasta un minuto."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Opciones de TermoWeb"
+      "rehome": {
+        "title": "Mover los calefactores a la red propia de esta instalación",
+        "description": "Usa esto si tus calefactores siguen usando la red de radio de una pasarela TermoWeb antigua. Calefactores: {heaters}.\n\nQué ocurre:\n1. Cada calefactor se restablece a los ajustes de fábrica. Antes, Home Assistant guarda sus ajustes.\n2. Pones los calefactores en modo de emparejamiento, de uno en uno. El manual del calefactor indica qué botones pulsar. Espera unos 10 segundos entre calefactores. Tienes 5 minutos.\n3. Los calefactores reciben números nuevos, a partir del 2. Sus ID de entidad cambian. Los nombres de los calefactores se mantienen si Home Assistant reconoce el calefactor.\n4. Home Assistant devuelve a cada calefactor sus ajustes: modo, temperaturas de los preajustes, temperatura manual y programa semanal.\n\nEl control de los calefactores se pausa mientras dura el proceso. Algunos calefactores antiguos no se pueden restablecer por radio, así que no se pueden mover de esta forma. Pulsa **Enviar** para empezar y pon el primer calefactor en modo de emparejamiento unos 10 segundos después."
+      },
+      "rehome_run": { "title": "Moviendo tus calefactores" },
+      "rehome_done": {
+        "title": "Traslado terminado",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "La integración no está en marcha. Iníciala primero e inténtalo de nuevo."
+    },
+    "progress": {
+      "rehome": "Restableciendo los calefactores y esperando calefactores en modo de emparejamiento. Pon ahora un calefactor en modo de emparejamiento y después el siguiente. Esto termina 1 minuto después de emparejar el último calefactor, o a los 5 minutos."
     }
   },
   "device": {
     "heater": {
       "name": "Calefactor {addr}"
     },
+    "accumulator": {
+      "name": "Acumulador {addr}"
+    },
     "thermostat": {
       "name": "Termostato {addr}"
+    },
+    "power_monitor": {
+      "name": "Medidor de consumo {addr}"
     },
     "node": {
       "name": "Nodo {addr}"
     },
-    "power_monitor": {
-      "name": "Monitor de potencia {addr}"
+    "site": {
+      "name": "Casa"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Pasarela en línea"
+      "gateway_online": { "name": "Pasarela en línea" },
+      "pairing_open": {
+        "name": "Emparejamiento abierto",
+        "state_attributes": { "ends_at": { "name": "Termina a las" } }
       },
-      "boost_active": {
-        "name": "Impulso activo"
-      }
+      "boost_active": { "name": "Impulso activo" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Forzar actualización"
-      },
-      "accumulator_boost_start": {
-        "name": "Impulso inicial"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Cancelar impulso"
-      }
+      "force_refresh": { "name": "Forzar actualización" },
+      "pair_new_heaters": { "name": "Emparejar calefactores nuevos" },
+      "accumulator_boost_start": { "name": "Iniciar impulso" },
+      "accumulator_boost_cancel": { "name": "Cancelar impulso" },
+      "flash_display": { "name": "Hacer parpadear la pantalla" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Duración del impulso"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Aumento de la temperatura"
-      }
+      "accumulator_boost_duration": { "name": "Duración del impulso" },
+      "accumulator_boost_temperature": { "name": "Temperatura del impulso" },
+      "heater_priority": { "name": "Prioridad" },
+      "installation_power_limit": { "name": "Límite de potencia" },
+      "temperature_offset": { "name": "Corrección de temperatura" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatura"
+      "heater_temperature": { "name": "Temperatura" },
+      "heater_energy_total": { "name": "Energía" },
+      "heater_power": { "name": "Potencia" },
+      "radio_address": { "name": "Dirección de radio" },
+      "power_monitor_energy": { "name": "Energía" },
+      "power_monitor_power": { "name": "Potencia" },
+      "installation_total_energy": { "name": "Energía total" },
+      "frames_heard": { "name": "Tramas recibidas" },
+      "boost_minutes_remaining": { "name": "Minutos de impulso restantes" },
+      "boost_end": { "name": "Fin del impulso" },
+      "accumulator_charging": { "name": "Cargando" },
+      "accumulator_current_charge": { "name": "Carga actual" },
+      "accumulator_target_charge": { "name": "Carga objetivo" },
+      "installation_info": { "name": "Ubicación" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Ninguno",
+              "temporary_override": "Cambio temporal",
+              "boost": "Impulso"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Bloqueo infantil" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "Modo EASY" },
+      "open_window_detection": { "name": "Detección de ventana abierta" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Modo de control",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Histéresis 0,25 °C",
+          "hysteresis_0_35": "Histéresis 0,35 °C",
+          "hysteresis_0_5": "Histéresis 0,5 °C",
+          "hysteresis_0_75": "Histéresis 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energía"
-      },
-      "heater_power": {
-        "name": "Potencia"
-      },
-      "power_monitor_energy": {
-        "name": "Energía"
-      },
-      "power_monitor_power": {
-        "name": "Potencia"
-      },
-      "installation_total_energy": {
-        "name": "Energía total"
-      },
-      "boost_minutes_remaining": {
-        "name": "Minutos restantes"
-      },
-      "boost_end": {
-        "name": "Fin del impulso"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Unidad de temperatura del panel",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Configurar el preajuste de refuerzo del acumulador",
-      "description": "Actualice la duración y/o la temperatura de refuerzo por defecto para un acumulador TermoWeb. Los minutos deben estar entre 60 y 600 en incrementos de 60 minutos; omita un campo para mantener el valor existente.",
+      "name": "Configurar el impulso predeterminado del acumulador",
+      "description": "Actualiza la duración y/o la temperatura predeterminadas del impulso de un acumulador TermoWeb. Los minutos deben estar entre 60 y 600, en pasos de 60 minutos; deja un campo vacío para mantener el valor actual.",
       "fields": {
         "minutes": {
           "name": "Duración predeterminada del impulso",
-          "description": "Número de minutos que debe funcionar el refuerzo cuando no se proporciona anulación (60-600, paso 60).",
+          "description": "Minutos que dura el impulso cuando no se indica otra duración (60–600, en pasos de 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Aumento de la temperatura",
-          "description": "Valor de consigna de refuerzo opcional que se aplicará durante la sesión de refuerzo (°C o °F).",
+          "name": "Temperatura del impulso",
+          "description": "Temperatura objetivo opcional durante el impulso (°C o °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Acumulador de arranque",
-      "description": "Activar un aumento inmediato en un acumulador TermoWeb. Indique una duración para anular la predeterminada (60-600 minutos en incrementos de 60 minutos), u omítala para utilizar la predeterminada almacenada.",
+      "name": "Iniciar impulso",
+      "description": "Inicia ahora un impulso en un acumulador TermoWeb o en un calefactor de radio con función de impulso. Acumulador: indica una duración (60–600 minutos, en pasos de 60) o déjala vacía para usar el valor predeterminado guardado. Calefactor de radio: deja la duración vacía; el calefactor usa su propio tiempo de impulso.",
       "fields": {
         "minutes": {
           "name": "Duración del impulso",
-          "description": "Duración de la sesión de refuerzo en minutos (60-600, paso 60). Opcional.",
+          "description": "Duración del impulso en minutos (60–600, en pasos de 60). Opcional.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Cancelar el aumento del acumulador",
-      "description": "Cancelar la sesión de refuerzo activa en un acumulador TermoWeb."
+      "name": "Cancelar impulso",
+      "description": "Detiene el impulso de un acumulador TermoWeb o de un calefactor de radio."
     },
     "set_schedule": {
-      "name": "Establecer el horario semanal",
-      "description": "Configure el programa semanal 7×24 para un calentador TermoWeb. El programa es una lista de 168 enteros, donde cada valor corresponde a una hora de la semana a partir del lunes a las 00:00. Utilice 0 para la preselección de frío, 1 para la preselección de noche y 2 para la preselección de día.",
+      "name": "Establecer programa semanal",
+      "description": "Establece el programa semanal de 7×24 de un calefactor TermoWeb. El programa es una lista de 168 números enteros, donde cada valor corresponde a una hora de la semana empezando el lunes a las 00:00. Usa 0 para el preajuste frío, 1 para el preajuste noche y 2 para el preajuste día.",
       "fields": {
         "prog": {
           "name": "Programa",
-          "description": "Una lista de 168 enteros (0, 1 ó 2) que representan el horario semanal del calefactor. El índice 0 es el lunes a las 00:00, el índice 1 es el lunes a las 01:00, y así sucesivamente.",
+          "description": "Lista de 168 números enteros (0, 1 o 2) con el programa semanal del calefactor. El índice 0 es el lunes a las 00:00, el índice 1 es el lunes a las 01:00, y así sucesivamente.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Fijar temperaturas preestablecidas",
-      "description": "Establezca las temperaturas prefijadas de frío, noche y día para un calefactor TermoWeb. Puede indicar las tres temperaturas en una sola lista (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Establecer temperaturas de los preajustes",
+      "description": "Establece las temperaturas de los preajustes frío, noche y día de un calefactor TermoWeb. Puedes indicar las tres temperaturas en una sola lista (``ptemp``) o cada una por separado (``cold``, ``night`` y ``day``). Los preajustes que dejes vacíos mantienen su valor actual.",
       "fields": {
         "ptemp": {
-          "name": "Temperaturas preestablecidas",
-          "description": "Una lista de tres temperaturas [frío, noche, día] en las mismas unidades que el calefactor (°C o °F). Si se proporciona, anulará los valores individuales de frío, noche y día.",
+          "name": "Temperaturas de los preajustes",
+          "description": "Lista de tres temperaturas [frío, noche, día] en las mismas unidades que el calefactor (°C o °F). Si se indica, sustituye a los valores individuales de frío, noche y día.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Preajuste en frío",
-          "description": "Temperatura para la preselección de frío (°C o °F).",
+          "name": "Preajuste frío",
+          "description": "Temperatura del preajuste frío (°C o °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Preajuste nocturno",
-          "description": "Temperatura para la preselección nocturna (°C o °F).",
+          "name": "Preajuste noche",
+          "description": "Temperatura del preajuste noche (°C o °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Día predefinido",
-          "description": "Temperatura prefijada para el día (°C o °F).",
+          "name": "Preajuste día",
+          "description": "Temperatura del preajuste día (°C o °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Historial de importación de energía",
-      "description": "Importe los contadores históricos de energía por hora de los calefactores TermoWeb de hasta un año atrás en las estadísticas del Asistente doméstico para cada calefactor configurado.",
+      "name": "Importar historial de energía",
+      "description": "Importa el consumo de energía por horas de cada calefactor y medidor de consumo a las estadísticas de Home Assistant (el panel de Energía). El progreso se guarda: si la importación se detiene, vuelve a ejecutarla para continuar.",
       "fields": {
         "reset_progress": {
           "name": "Restablecer progreso",
-          "description": "Borre el progreso almacenado y vuelva a importar el historial desde cero."
+          "description": "Olvida el progreso guardado e importa de nuevo todo el periodo. Las estadísticas existentes se sobrescriben, no se eliminan."
         },
         "max_history_retrieval": {
-          "name": "Días de historia máxima",
-          "description": "Número de días de historial a recuperar. Anula el valor predeterminado configurado solo para esta importación."
+          "name": "Días máximos de historial",
+          "description": "Cuántos días hacia atrás importar (de 1 a 3650, 7 por defecto). Si ya importaste menos días, solo se obtienen los días más antiguos."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Captura de radio",
+      "description": "Graba durante un tiempo cada trama de radio que oye la pasarela o el nanoCUL y la guarda como archivo JSON en la carpeta de configuración de Home Assistant. Nunca transmite. En una entrada de radio normal, las órdenes a los calefactores esperan hasta que termina la captura.",
+      "fields": {
+        "entry_id": {
+          "name": "ID de la entrada de configuración",
+          "description": "La entrada de configuración de la pasarela de radio o del nanoCUL que se usará, normalmente la de solo escucha.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Duración",
+          "description": "Cuánto tiempo grabar, de 10 a 1800 segundos."
+        },
+        "redact": {
+          "name": "Ocultar datos privados",
+          "description": "Sustituye en el archivo los ID de red y los números de serie de los calefactores. Sin esta opción, el archivo contiene el ID de tu red: compártelo solo en privado."
+        },
+        "note": {
+          "name": "Nota",
+          "description": "Texto opcional que se guarda en el archivo, por ejemplo qué calefactor usaste.",
+          "example": "subí el calefactor del salón"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Sondeo de radio",
+      "description": "Escucha durante un tiempo todo el tráfico de radio en la banda de los calefactores, también el que esta integración no entiende, y guarda un archivo de informe en la carpeta de configuración de Home Assistant. Adjunta el archivo a una incidencia de GitHub para pedir compatibilidad con un nuevo tipo de calefactor.",
+      "fields": {
+        "entry_id": {
+          "name": "ID de la entrada de configuración",
+          "description": "La entrada de configuración de la pasarela de radio o del nanoCUL que se usará.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Duración",
+          "description": "Cuánto tiempo escuchar. Los calefactores envían más datos cuando empiezan o dejan de calentar."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Restablecimiento de fábrica por radio",
+      "description": "DESTRUCTIVO. Restablece un calefactor de radio a los ajustes de fábrica. El calefactor pierde todos sus ajustes, su reloj, su programa semanal y su emparejamiento de radio, y deja de comunicarse con Home Assistant. Antes se guardan sus últimos ajustes conocidos. Para volver a usar el calefactor, pulsa \"Emparejar calefactores nuevos\" en el dispositivo de la pasarela y pon el calefactor en modo de emparejamiento. Sus ajustes guardados se restauran cuando se reconoce. Algunos calefactores antiguos no se pueden restablecer por radio: restablécelos a mano (consulta el manual del calefactor).",
+      "fields": {
+        "entry_id": {
+          "name": "ID de la entrada de configuración",
+          "description": "La entrada de configuración de la pasarela de radio o del nanoCUL que se usará.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Número del calefactor",
+          "description": "El número de radio del calefactor (el número de \"Calefactor 6\")."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Mover calefactores de radio a la red propia",
+      "description": "Mueve todos los calefactores de una entrada de radio a la red de radio propia de esta instalación. Primero se restablece cada calefactor (sus ajustes se guardan) y después pones los calefactores en modo de emparejamiento de uno en uno. Los calefactores reciben números nuevos a partir del 2 y se restauran sus ajustes. Algunos calefactores antiguos no se pueden restablecer por radio, así que no se pueden mover de esta forma. El control de los calefactores se pausa mientras dura el proceso.",
+      "fields": {
+        "entry_id": {
+          "name": "ID de la entrada de configuración",
+          "description": "La entrada de configuración de la pasarela de radio o del nanoCUL que se usará.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Tiempo de espera",
+          "description": "Cuánto tiempo esperar a que se pulsen los botones de emparejamiento de los calefactores."
         }
       }
     }

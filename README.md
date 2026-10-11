@@ -59,7 +59,7 @@ With a **local radio**, Home Assistant talks to your heaters **directly**. Nothi
 | Internet needed | yes, always | no | no (only your home Wi-Fi) |
 | Account needed | yes | no | no |
 | Privacy | data goes to the vendor's cloud | stays at home | stays at home |
-| Setup effort | easy (app + sign in) | easy: put our firmware on the stick once, in your browser (about 10 min), plug in | advanced: wiring, soldering, put our firmware on the board in your browser (1 to 2 hours) |
+| Setup effort | easy (app + sign in) | easy: put our firmware on the stick once, in your browser (about 10 min), plug in | advanced: wiring, soldering, build our firmware with the ESPHome app in Home Assistant (1 to 2 hours) |
 | Where it sits | next to your router | in a USB port of the Home Assistant computer | anywhere with Wi-Fi and power |
 | Guide | below: [Set up the integration](#set-up-the-integration) | [Radio stick: use a nanoCUL USB stick](docs/radio_nanocul.md) | [Radio gateway: build your own with an ESP32](docs/radio_gateway.md) |
 
@@ -75,7 +75,7 @@ Both radios work with the same heaters. You do not need to know how your heaters
 **How to start with a local radio:**
 
 1. **Buy** the hardware. The guides list what to buy and where.
-2. **Put our firmware on it.** Everyone does this once: no shop sells the stick or the board with our firmware on it. The easiest way is in your web browser (Chrome or Edge), with a few clicks. The guides show every step.
+2. **Put our firmware on it.** Everyone does this once. The nanoCUL stick: download the ready-made file and write it in your web browser (Chrome or Edge), with a few clicks. The ESP32 gateway: build the firmware with the **ESPHome Device Builder** app in Home Assistant, and install it over USB the first time. The guides show every step.
 3. **Plug it in.** The nanoCUL goes into a USB port of the Home Assistant computer. The ESP32 gateway needs a USB power supply and your Wi-Fi.
 4. **Add it in Home Assistant** (see [Set up the integration](#set-up-the-integration)). Your heaters are then found by themselves.
 

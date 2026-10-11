@@ -1,162 +1,301 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Jak jsou vaše topidla připojena?",
+        "description": "Pokud používáte aplikaci TermoWeb, Ducaheat nebo Tevolve, zvolte cloudový účet. Chcete-li topidla ovládat místně bez cloudu, nejjednodušší je USB klíčenka nanoCUL zapojená do tohoto počítače s Home Assistant (bez pájení). Rádiová brána ESP32 je pro pokročilé uživatele: je nutné ji sestavit a zapájet.",
+        "menu_options": {
+          "cloud": "Cloudový účet (aplikace TermoWeb, Ducaheat nebo Tevolve)",
+          "nanocul": "Místní rádio: USB klíčenka nanoCUL (nejjednodušší, bez pájení)",
+          "radio": "Místní rádiová brána: ESP32 + CC1101 (pokročilé, nutné pájení)"
+        }
+      },
       "cloud": {
-        "title": "Připojení k ohřívačům rodiny TermoWeb",
-        "description": "Verze: {version}\n\nVyberte si značku TermoWeb nebo Ducaheat a zadejte přihlašovací údaje k účtu.",
+        "title": "Připojení k topidlům rodiny TermoWeb",
+        "description": "Verze: {version}\n\nVyberte značku TermoWeb, Ducaheat nebo Tevolve a zadejte přihlašovací údaje k účtu. Tevolve používá server Ducaheat.",
         "data": {
           "brand": "Značka",
           "username": "E-mail",
           "password": "Heslo"
         }
+      },
+      "radio": {
+        "title": "Připojení k rádiové bráně",
+        "description": "Home Assistant rádiovou bránu ESP32 obvykle najde sám: hledejte ji v sekci **Objevené** na stránce Zařízení a služby. Tento formulář použijte, jen pokud se tam nezobrazí. Zadejte IP adresu brány. V dalším kroku si vyberete: přidat bránu a nechat ji najít vaše topidla, nebo spárovat nová topidla.",
+        "data": {
+          "host": "IP adresa brány"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Pokročilá nastavení",
+            "description": "Ponechte beze změny, pokud jste neměnili firmware brány.",
+            "data": {
+              "port": "Port"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Nalezena rádiová brána",
+        "description": "Na adrese {host} byla nalezena rádiová brána TermoWeb. Nastavit ji?\n\nV dalším kroku si vyberete: přidat bránu (najde a spáruje vaše topidla), nebo pouze naslouchat."
+      },
+      "radio_method": {
+        "title": "Přidání brány",
+        "description": "Zvolte „Přidat bránu“, chcete-li ovládat svá topidla. Nastavení se dokončí okamžitě. Potom:\n\n- Topidla, která už fungují s bránou nebo aplikací TermoWeb, se najdou sama, obvykle během několika minut. Topidla vysílají, když začnou topit, takže pomůže zvýšit teplotu na jednom z nich.\n- Nová nebo resetovaná topidla: do 30 minut přepněte každé topidlo do režimu párování. Které tlačítko stisknout, najdete v návodu k topidlu. Párujte vždy jen jedno topidlo. Později nejprve stiskněte **Spárovat nová topidla** na zařízení brány.\n\nO každém přidaném topidle dostanete oznámení.\n\nZvolte „Pouze naslouchat“, chcete-li pro test zaznamenat rádiový provoz vedle brány TermoWeb, která stále běží. V tomto režimu integrace nikdy nevysílá a nepřidává žádná topidla.",
+        "menu_options": {
+          "radio_discover": "Přidat bránu",
+          "radio_monitor": "Pouze naslouchat (zaznamenávat rádiový provoz, nikdy nevysílat)"
+        }
+      },
+      "radio_rescan": { "title": "Hledání vašich topidel" },
+      "reconfigure_radio": {
+        "title": "Změna rádiové brány",
+        "description": "Změňte adresu brány. Pokud jste přidali nebo odebrali topidlo, zaškrtněte „Znovu vyhledat topidla“.",
+        "data": {
+          "host": "IP adresa brány",
+          "port": "Port",
+          "rescan": "Znovu vyhledat topidla"
+        }
+      },
+      "nanocul": {
+        "title": "Připojení k USB klíčence nanoCUL",
+        "description": "Vyberte port klíčenky nanoCUL. Pokud ji Home Assistant rozpoznal, je už vybraná: stačí stisknout Odeslat. V dalším kroku si vyberete: přidat bránu a nechat ji najít vaše topidla, nebo spárovat nová topidla.",
+        "data": {
+          "device": "USB port"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Zadání portu nanoCUL",
+        "description": "Zadejte cestu k portu, například /dev/serial/by-id/usb-..., nebo síťovou adresu, například socket://192.0.2.10:2323, pro klíčenku sdílenou po síti.",
+        "data": {
+          "device": "Cesta k portu nebo URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Změna portu nanoCUL",
+        "description": "Změňte cestu k portu nebo URL klíčenky. Pokud jste přidali nebo odebrali topidlo, zaškrtněte „Znovu vyhledat topidla“.",
+        "data": {
+          "device": "Cesta k portu nebo URL",
+          "rescan": "Znovu vyhledat topidla"
+        }
+      },
+      "reconfigure": {
+        "title": "Změna nastavení účtu",
+        "description": "Verze: {version}\n\nZadejte nové heslo k tomuto účtu. Na jiný účet zde přejít nelze: pro něj přidejte novou položku.",
+        "data": {
+          "brand": "Značka",
+          "username": "E-mail",
+          "password": "Heslo"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Znovu se přihlaste",
+        "description": "{brand} nepřijal uložené heslo pro {username}. Zadejte aktuální heslo.",
+        "data": {
+          "password": "Heslo"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Nesprávné uživatelské jméno nebo heslo (nebo klientský klíč).",
-      "cannot_connect": "Nelze se připojit k TermoWebu - chyba sítě/DNS/SSL.",
-      "rate_limited": "Dočasně omezená sazba podle API. Zkuste to později.",
-      "unknown": "Neznámá chyba"
+      "invalid_auth": "Neplatné uživatelské jméno nebo heslo (nebo klientský klíč).",
+      "cannot_connect": "Nelze se připojit k TermoWeb – chyba sítě/DNS/SSL.",
+      "rate_limited": "API dočasně omezilo počet požadavků. Zkuste to později.",
+      "unknown": "Neznámá chyba",
+      "cannot_connect_radio": "Nelze se připojit k rádiové bráně. Zkontrolujte IP adresu a port a zda je brána zapnutá.",
+      "no_gateway_mac": "Rádiová brána nenahlásila svou MAC adresu. Aktualizujte firmware brány.",
+      "no_heaters": "Žádné topidlo neodpovědělo. Přesuňte bránu blíže k topidlům a zkuste to znovu.",
+      "cannot_connect_nanocul": "Klíčenku nanoCUL nelze otevřít. Zkontrolujte, zda je zapojená, zda je port správný a zda na ní běží firmware termoweb_rx.",
+      "nanocul_radio_missing": "Klíčenka odpovídá, ale její rádiový modul není připojen. Zkontrolujte zapojení.",
+      "gateway_radio_missing": "Brána odpovídá, ale její rádiový modul není připojen. Zkontrolujte zapojení."
+    },
+    "abort": {
+      "already_configured": "Tato brána je již nastavena.",
+      "reconfigure_successful": "Nastavení bylo uloženo.",
+      "monitor_reconfigure": "Položku pouze pro naslouchání nelze změnit. Odstraňte ji a přidejte znovu.",
+      "unique_id_mismatch": "Jedná se o jiný účet nebo zařízení. Chcete-li ho použít, přidejte místo toho novou položku.",
+      "reauth_successful": "Nové heslo bylo uloženo.",
+      "cannot_connect_radio": "Nelze se připojit k rádiové bráně. Zkontrolujte, zda je brána zapnutá a připojená k vaší síti.",
+      "no_gateway_mac": "Rádiová brána nenahlásila svou MAC adresu. Aktualizujte firmware brány.",
+      "gateway_radio_missing": "Brána odpovídá, ale její rádiový modul není připojen. Zkontrolujte zapojení.",
+      "not_ipv4_address": "Rádiová brána ohlásila pouze adresu IPv6. Přidejte ji ručně pomocí její adresy IPv4.",
+      "nanocul_firmware_too_old": "Firmware v této klíčence nanoCUL je příliš starý. Nahrajte do klíčenky nejnovější firmware termoweb_rx (viz návod k nanoCUL) a zkuste to znovu."
+    },
+    "progress": {
+      "radio_rescan": "Kontroluji každé topidlo ve vaší rádiové síti. Trvá to až minutu."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Možnosti TermoWebu"
+      "rehome": {
+        "title": "Přesun topidel do vlastní sítě této instalace",
+        "description": "Použijte, pokud vaše topidla stále používají rádiovou síť staré brány TermoWeb. Topidla: {heaters}.\n\nCo se stane:\n1. Každé topidlo se obnoví do továrního nastavení. Home Assistant nejprve uloží jeho nastavení.\n2. Topidla jedno po druhém přepnete do režimu párování. Které tlačítko stisknout, najdete v návodu k topidlu. Mezi topidly počkejte asi 10 sekund. Máte na to 5 minut.\n3. Topidla dostanou nová čísla, od 2 výše. Jejich ID entit se změní. Názvy topidel zůstanou stejné, pokud Home Assistant topidlo rozpozná.\n4. Home Assistant vrátí každému topidlu jeho nastavení: režim, teploty předvoleb, ruční teplotu a týdenní program.\n\nBěhem přesunu je ovládání topidel pozastaveno. Některá starší topidla nelze resetovat přes rádio, takže je tímto způsobem přesunout nelze. Stisknutím **Odeslat** začněte a asi po 10 sekundách přepněte první topidlo do režimu párování."
+      },
+      "rehome_run": { "title": "Přesouvání vašich topidel" },
+      "rehome_done": {
+        "title": "Přesun dokončen",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Integrace neběží. Nejprve ji spusťte a pak to zkuste znovu."
+    },
+    "progress": {
+      "rehome": "Resetování topidel a poté čekání na topidla v režimu párování. Nyní přepněte jedno topidlo do režimu párování, pak další. Proces skončí 1 minutu po spárování posledního topidla nebo po 5 minutách."
     }
   },
   "device": {
     "heater": {
       "name": "Topidlo {addr}"
     },
+    "accumulator": {
+      "name": "Akumulační kamna {addr}"
+    },
     "thermostat": {
       "name": "Termostat {addr}"
+    },
+    "power_monitor": {
+      "name": "Měřič výkonu {addr}"
     },
     "node": {
       "name": "Uzel {addr}"
     },
-    "power_monitor": {
-      "name": "Monitor energie {addr}"
+    "site": {
+      "name": "Domov"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Brána online"
+      "gateway_online": { "name": "Brána online" },
+      "pairing_open": {
+        "name": "Párování otevřeno",
+        "state_attributes": { "ends_at": { "name": "Končí v" } }
       },
-      "boost_active": {
-        "name": "Boost active"
-      }
+      "boost_active": { "name": "Boost aktivní" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Vynutit obnovení"
-      },
-      "accumulator_boost_start": {
-        "name": "Start boost"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Zrušit podporu"
-      }
+      "force_refresh": { "name": "Vynutit obnovení" },
+      "pair_new_heaters": { "name": "Spárovat nová topidla" },
+      "accumulator_boost_start": { "name": "Spustit boost" },
+      "accumulator_boost_cancel": { "name": "Zrušit boost" },
+      "flash_display": { "name": "Bliknout displejem" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Doba trvání boostu"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Zvýšení teploty"
-      }
+      "accumulator_boost_duration": { "name": "Doba trvání boostu" },
+      "accumulator_boost_temperature": { "name": "Teplota boostu" },
+      "heater_priority": { "name": "Priorita" },
+      "installation_power_limit": { "name": "Limit výkonu" },
+      "temperature_offset": { "name": "Korekce teploty" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Teplota"
+      "heater_temperature": { "name": "Teplota" },
+      "heater_energy_total": { "name": "Energie" },
+      "heater_power": { "name": "Výkon" },
+      "radio_address": { "name": "Rádiová adresa" },
+      "power_monitor_energy": { "name": "Energie" },
+      "power_monitor_power": { "name": "Výkon" },
+      "installation_total_energy": { "name": "Celková energie" },
+      "frames_heard": { "name": "Přijaté rámce" },
+      "boost_minutes_remaining": { "name": "Zbývající minuty boostu" },
+      "boost_end": { "name": "Konec boostu" },
+      "accumulator_charging": { "name": "Nabíjení" },
+      "accumulator_current_charge": { "name": "Aktuální nabití" },
+      "accumulator_target_charge": { "name": "Cílové nabití" },
+      "installation_info": { "name": "Umístění" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Žádná",
+              "temporary_override": "Dočasná změna",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Dětský zámek" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "Režim EASY" },
+      "open_window_detection": { "name": "Detekce otevřeného okna" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Režim regulace",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Hystereze 0,25 °C",
+          "hysteresis_0_35": "Hystereze 0,35 °C",
+          "hysteresis_0_5": "Hystereze 0,5 °C",
+          "hysteresis_0_75": "Hystereze 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energie"
-      },
-      "heater_power": {
-        "name": "Power"
-      },
-      "power_monitor_energy": {
-        "name": "Energie"
-      },
-      "power_monitor_power": {
-        "name": "Power"
-      },
-      "installation_total_energy": {
-        "name": "Celková energie"
-      },
-      "boost_minutes_remaining": {
-        "name": "Zbývající minuty na zvýšení"
-      },
-      "boost_end": {
-        "name": "Konec zvýšení"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Jednotka teploty na panelu",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Konfigurace předvolby zvýšení výkonu akumulátoru",
-      "description": "Aktualizujte výchozí dobu trvání posilování a/nebo teplotu pro akumulátor TermoWeb. Počet minut musí být v rozmezí 60 až 600 v 60minutových krocích; pokud chcete zachovat stávající hodnotu, pole vynechte.",
+      "name": "Nastavit předvolbu boostu akumulačních kamen",
+      "description": "Aktualizuje výchozí dobu trvání a/nebo teplotu boostu pro akumulační kamna TermoWeb. Počet minut musí být mezi 60 a 600 v krocích po 60 minutách; vynechte pole, chcete-li zachovat stávající hodnotu.",
       "fields": {
         "minutes": {
           "name": "Výchozí doba trvání boostu",
-          "description": "Počet minut, po které má posilovač běžet, pokud není k dispozici žádné ovládání (60-600, krok 60).",
+          "description": "Počet minut, po který má boost běžet, pokud není zadána jiná hodnota (60–600, krok 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Zvýšení teploty",
-          "description": "Volitelná požadovaná hodnota zvýšení, která se použije během relace zvýšení (°C nebo °F).",
+          "name": "Teplota boostu",
+          "description": "Volitelná cílová teplota během boostu (°C nebo °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Spuštění akumulační náplně",
-      "description": "Spusťte okamžité posílení akumulátoru TermoWeb. Zadejte dobu trvání, abyste přepsali výchozí nastavení (60-600 minut v 60minutových krocích), nebo ji vynechejte, abyste použili uloženou předvolbu.",
+      "name": "Spustit boost",
+      "description": "Okamžitě spustí boost na akumulačních kamnech TermoWeb nebo na rádiovém topidle, které boost podporuje. Akumulační kamna: zadejte dobu trvání (60–600 minut, v krocích po 60), nebo ji vynechte pro použití uložené předvolby. Rádiové topidlo: dobu trvání vynechte; topidlo použije svou vlastní dobu boostu.",
       "fields": {
         "minutes": {
           "name": "Doba trvání boostu",
-          "description": "Doba trvání relace boostu v minutách (60-600, krok 60). Volitelné.",
+          "description": "Doba trvání boostu v minutách (60–600, krok 60). Volitelné.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Zrušení zvýšení výkonu akumulátoru",
-      "description": "Zrušení aktivní relace boostu na akumulátoru TermoWeb."
+      "name": "Zrušit boost",
+      "description": "Zastaví boost na akumulačních kamnech TermoWeb nebo rádiovém topidle."
     },
     "set_schedule": {
-      "name": "Nastavení týdenního plánu",
-      "description": "Nastavte týdenní program 7×24 pro ohřívač TermoWeb. Program je seznam 168 celých čísel, kde každá hodnota odpovídá jedné hodině v týdnu počínaje pondělkem 00:00. Použijte 0 pro studenou předvolbu, 1 pro noční předvolbu a 2 pro denní předvolbu.",
+      "name": "Nastavit týdenní plán",
+      "description": "Nastaví týdenní program 7×24 pro topidlo TermoWeb. Program je seznam 168 celých čísel, kde každá hodnota odpovídá jedné hodině týdne počínaje pondělím 00:00. Použijte 0 pro studenou předvolbu, 1 pro noční předvolbu a 2 pro denní předvolbu.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "Seznam 168 celých čísel (0, 1 nebo 2) představující týdenní plán topení. Index 0 je pondělí 00:00, index 1 je pondělí 01:00 atd.",
+          "description": "Seznam 168 celých čísel (0, 1 nebo 2) představující týdenní plán topidla. Index 0 je pondělí 00:00, index 1 je pondělí 01:00 a tak dále.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Nastavení přednastavených teplot",
-      "description": "Nastavení přednastavené studené, noční a denní teploty pro ohřívač TermoWeb. Všechny tři teploty můžete zadat buď jako jeden seznam (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Nastavit teploty předvoleb",
+      "description": "Nastaví teploty studené, noční a denní předvolby pro topidlo TermoWeb. Můžete zadat všechny tři teploty jako jeden seznam (``ptemp``), nebo každou zvlášť (``cold``, ``night`` a ``day``). Předvolby, které vynecháte, si ponechají svou aktuální hodnotu.",
       "fields": {
         "ptemp": {
-          "name": "Přednastavené teploty",
-          "description": "Seznam tří teplot [studená, noční, denní] ve stejných jednotkách jako ohřívač (°C nebo °F). Pokud je zadán, bude mít přednost před jednotlivými hodnotami studené, noční a denní teploty.",
+          "name": "Teploty předvoleb",
+          "description": "Seznam tří teplot [studená, noční, denní] ve stejných jednotkách jako topidlo (°C nebo °F). Pokud je zadán, má přednost před jednotlivými hodnotami pro studenou, noční a denní předvolbu.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Přednastavení za studena",
+          "name": "Studená předvolba",
           "description": "Teplota pro studenou předvolbu (°C nebo °F).",
           "example": "10.0"
         },
@@ -166,23 +305,92 @@
           "example": "16.0"
         },
         "day": {
-          "name": "Předvolba dne",
-          "description": "Přednastavená teplota pro daný den (°C nebo °F).",
+          "name": "Denní předvolba",
+          "description": "Teplota pro denní předvolbu (°C nebo °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Historie dovozu energie",
-      "description": "Importujte historické hodinové počítadla spotřeby energie pro ohřívače TermoWeb až do doby před jedním rokem do statistik aplikace Home Assistant pro každý nakonfigurovaný ohřívač.",
+      "name": "Importovat historii energie",
+      "description": "Importuje minulou hodinovou spotřebu energie všech topidel a měřičů výkonu do statistik Home Assistant (panel Energie). Průběh se ukládá: pokud se import zastaví, spusťte ho znovu a bude pokračovat.",
       "fields": {
         "reset_progress": {
-          "name": "Obnovení postupu",
-          "description": "Vymazat uložený průběh a znovu importovat historii od začátku."
+          "name": "Obnovit průběh",
+          "description": "Zapomene uložený průběh a znovu importuje celé období. Stávající statistiky se přepíší, nesmažou."
         },
         "max_history_retrieval": {
           "name": "Max. počet dnů historie",
-          "description": "Počet dnů historie k načtení. Přepisuje nakonfigurované výchozí nastavení pouze pro tento import."
+          "description": "Kolik dní zpět importovat (1 až 3650, výchozí 7). Pokud jste už importovali méně dní, načtou se jen starší dny."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Záznam rádia",
+      "description": "Po určitou dobu zaznamenává každý rádiový rámec, který brána nebo nanoCUL zachytí, a uloží ho jako soubor JSON do konfigurační složky Home Assistant. Nikdy nevysílá. U běžné rádiové položky čekají příkazy pro topidla, dokud záznam neskončí.",
+      "fields": {
+        "entry_id": {
+          "name": "ID položky konfigurace",
+          "description": "Položka konfigurace rádiové brány nebo nanoCUL, která se má použít, obvykle ta pouze pro naslouchání.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Doba trvání",
+          "description": "Jak dlouho zaznamenávat, 10 až 1800 sekund."
+        },
+        "redact": {
+          "name": "Skrýt soukromá data",
+          "description": "Nahradí v souboru ID sítí a sériová čísla topidel. Bez toho soubor obsahuje ID vaší sítě: sdílejte ho jen soukromě."
+        },
+        "note": {
+          "name": "Poznámka",
+          "description": "Volitelný text uložený v souboru, například které topidlo jste použili.",
+          "example": "zvýšena teplota topidla v obývacím pokoji"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Průzkum rádia",
+      "description": "Po určitou dobu naslouchá veškerému rádiovému provozu v pásmu topidel, i provozu, kterému tato integrace nerozumí, a uloží soubor se zprávou do konfigurační složky Home Assistant. Přiložte soubor k issue na GitHubu a požádejte o podporu nového druhu topidla.",
+      "fields": {
+        "entry_id": {
+          "name": "ID položky konfigurace",
+          "description": "Položka konfigurace rádiové brány nebo nanoCUL, která se má použít.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Doba trvání",
+          "description": "Jak dlouho naslouchat. Topidla vysílají nejvíce, když začínají nebo přestávají topit."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Rádiové obnovení továrního nastavení",
+      "description": "DESTRUKTIVNÍ. Obnoví jedno rádiové topidlo do továrního nastavení. Topidlo ztratí všechna nastavení, hodiny, týdenní program i rádiové spárování a přestane komunikovat s Home Assistant. Jeho poslední známé nastavení se nejprve uloží. Chcete-li topidlo znovu používat, stiskněte „Spárovat nová topidla“ na zařízení brány a přepněte topidlo do režimu párování. Uložené nastavení se obnoví, jakmile je topidlo rozpoznáno. Některá starší topidla nelze resetovat přes rádio: resetujte je ručně (viz návod k topidlu).",
+      "fields": {
+        "entry_id": {
+          "name": "ID položky konfigurace",
+          "description": "Položka konfigurace rádiové brány nebo nanoCUL, která se má použít.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Číslo topidla",
+          "description": "Rádiové číslo topidla (číslo v „Topidlo 6“)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Rádiový přesun topidel do vlastní sítě",
+      "description": "Přesune všechna topidla rádiové položky do vlastní rádiové sítě této instalace. Každé topidlo se nejprve resetuje (jeho nastavení se uloží), pak topidla jedno po druhém přepnete do režimu párování. Topidla dostanou nová čísla od 2 výše a jejich nastavení se obnoví. Některá starší topidla nelze resetovat přes rádio, takže je tímto způsobem přesunout nelze. Během přesunu je ovládání topidel pozastaveno.",
+      "fields": {
+        "entry_id": {
+          "name": "ID položky konfigurace",
+          "description": "Položka konfigurace rádiové brány nebo nanoCUL, která se má použít.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Doba čekání",
+          "description": "Jak dlouho čekat na stisknutí párovacích tlačítek topidel."
         }
       }
     }

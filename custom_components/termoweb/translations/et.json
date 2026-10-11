@@ -1,144 +1,297 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Kuidas su kütteseadmed on ühendatud?",
+        "description": "Vali pilvekonto, kui kasutad TermoWebi, Ducaheati või Tevolve rakendust. Kütteseadmete kohalikuks juhtimiseks ilma pilveta on kõige lihtsam nanoCUL USB-pulk, mis on ühendatud selle Home Assistanti arvutiga (jootmist pole vaja). ESP32 raadiolüüs on edasijõudnud kasutajatele: see tuleb ise kokku panna ja joota.",
+        "menu_options": {
+          "cloud": "Pilvekonto (TermoWebi, Ducaheati või Tevolve rakendus)",
+          "nanocul": "Kohalik raadio: nanoCUL USB-pulk (kõige lihtsam, jootmist pole vaja)",
+          "radio": "Kohalik raadiolüüs: ESP32 + CC1101 (edasijõudnutele, vaja joota)"
+        }
+      },
       "cloud": {
-        "title": "Ühendage TermoWebi perekonna kütteseadmetega",
-        "description": "Versioon: {version}\n\nValige oma TermoWeb või Ducaheat kaubamärk ja sisestage oma konto andmed.",
+        "title": "Ühenda TermoWebi pere kütteseadmetega",
+        "description": "Versioon: {version}\n\nVali oma bränd TermoWeb, Ducaheat või Tevolve ja sisesta oma konto andmed. Tevolve kasutab Ducaheati serverit.",
         "data": {
           "brand": "Bränd",
           "username": "E-post",
-          "password": "Parool"
+          "password": "Salasõna"
+        }
+      },
+      "radio": {
+        "title": "Ühenda raadiolüüsiga",
+        "description": "Home Assistant leiab ESP32 raadiolüüsi tavaliselt ise: otsi seda lehel Seadmed ja teenused jaotisest **Avastatud**. Kasuta seda vormi ainult siis, kui lüüsi seal ei ole. Sisesta oma lüüsi IP-aadress. Järgmises etapis valid: lisa lüüs ja lase tal sinu kütteseadmed leida või paarita uued kütteseadmed.",
+        "data": {
+          "host": "Lüüsi IP-aadress"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Täpsemad sätted",
+            "description": "Ära muuda neid, kui sa pole lüüsi püsivara muutnud.",
+            "data": {
+              "port": "Port"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Raadiolüüs leitud",
+        "description": "Aadressilt {host} leiti TermoWebi raadiolüüs. Kas seadistada see?\n\nJärgmises etapis valid: lisa lüüs (see leiab ja paaritab sinu kütteseadmed) või ainult kuula."
+      },
+      "radio_method": {
+        "title": "Lisa oma lüüs",
+        "description": "Vali „Lisa lüüs“, et oma kütteseadmeid juhtida. Seadistamine lõpeb kohe. Seejärel:\n\n- Kütteseadmed, mis juba töötavad TermoWebi lüüsi või rakendusega, leitakse iseenesest, tavaliselt mõne minuti jooksul. Kütteseadmed saadavad andmeid, kui hakkavad kütma, seega aitab, kui keerad ühe kütteseadme temperatuuri üles.\n- Uued või lähtestatud kütteseadmed: pane iga kütteseade 30 minuti jooksul paaritusrežiimi. Kütteseadme kasutusjuhendist leiad, milliseid nuppe vajutada. Üks kütteseade korraga. Hiljem vajuta lüüsi seadmel kõigepealt **Paarita uued kütteseadmed**.\n\nIga lisatud kütteseadme kohta saad teavituse.\n\nVali „Ainult kuulamine“, et salvestada testi jaoks raadioliiklust endiselt töötava TermoWebi lüüsi kõrval. Selles režiimis sidumine ei saada kunagi midagi ega lisa kütteseadmeid.",
+        "menu_options": {
+          "radio_discover": "Lisa lüüs",
+          "radio_monitor": "Ainult kuulamine (salvestab raadioliiklust, ei saada kunagi)"
+        }
+      },
+      "radio_rescan": { "title": "Sinu kütteseadmete otsimine" },
+      "reconfigure_radio": {
+        "title": "Muuda raadiolüüsi",
+        "description": "Muuda lüüsi aadressi. Märgi „Otsi kütteseadmeid uuesti“, kui lisasid või eemaldasid kütteseadme.",
+        "data": {
+          "host": "Lüüsi IP-aadress",
+          "port": "Port",
+          "rescan": "Otsi kütteseadmeid uuesti"
+        }
+      },
+      "nanocul": {
+        "title": "Ühenda nanoCUL USB-pulgaga",
+        "description": "Vali oma nanoCUL-pulga port. Kui Home Assistant tundis pulga ära, on see juba valitud: vajuta lihtsalt Esita. Järgmises etapis valid: lisa lüüs ja lase tal sinu kütteseadmed leida või paarita uued kütteseadmed.",
+        "data": {
+          "device": "USB-port"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Sisesta nanoCUL-i port",
+        "description": "Kirjuta pordi tee, näiteks /dev/serial/by-id/usb-..., või võrguaadress, näiteks socket://192.0.2.10:2323, kui pulka jagatakse üle võrgu.",
+        "data": {
+          "device": "Pordi tee või URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Muuda nanoCUL-i porti",
+        "description": "Muuda pulga pordi teed või URL-i. Märgi „Otsi kütteseadmeid uuesti“, kui lisasid või eemaldasid kütteseadme.",
+        "data": {
+          "device": "Pordi tee või URL",
+          "rescan": "Otsi kütteseadmeid uuesti"
+        }
+      },
+      "reconfigure": {
+        "title": "Muuda konto sätteid",
+        "description": "Versioon: {version}\n\nSisesta selle konto uus salasõna. Siin ei saa teisele kontole üle minna: selleks lisa uus kirje.",
+        "data": {
+          "brand": "Bränd",
+          "username": "E-post",
+          "password": "Salasõna"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Logi uuesti sisse",
+        "description": "{brand} ei aktsepteerinud kasutaja {username} salvestatud salasõna. Sisesta praegune salasõna.",
+        "data": {
+          "password": "Salasõna"
         }
       }
     },
     "error": {
-      "invalid_auth": "Vale kasutajanimi või salasõna (või kliendi võti).",
-      "cannot_connect": "TermoWebiga ei saa ühendust - võrgu/DNS/SSL viga.",
-      "rate_limited": "Ajutiselt piiratud kiirusega API poolt. Proovige hiljem uuesti.",
-      "unknown": "Teadmata viga"
+      "invalid_auth": "Vale kasutajanimi või salasõna (või kliendivõti).",
+      "cannot_connect": "TermoWebiga ei saa ühendust – võrgu-, DNS- või SSL-viga.",
+      "rate_limited": "API piiras ajutiselt päringute arvu. Proovi hiljem uuesti.",
+      "unknown": "Tundmatu viga",
+      "cannot_connect_radio": "Raadiolüüsiga ei saa ühendust. Kontrolli IP-aadressi ja porti ning et lüüs on sisse lülitatud.",
+      "no_gateway_mac": "Raadiolüüs ei teatanud oma MAC-aadressi. Uuenda lüüsi püsivara.",
+      "no_heaters": "Ükski kütteseade ei vastanud. Vii lüüs kütteseadmetele lähemale ja proovi uuesti.",
+      "cannot_connect_nanocul": "nanoCUL-pulka ei saa avada. Kontrolli, et see on ühendatud, port on õige ja pulgal on termoweb_rx püsivara.",
+      "nanocul_radio_missing": "Pulk vastab, kuid selle raadiomoodul pole ühendatud. Kontrolli juhtmeid.",
+      "gateway_radio_missing": "Lüüs vastab, kuid selle raadiomoodul pole ühendatud. Kontrolli juhtmeid."
+    },
+    "abort": {
+      "already_configured": "See lüüs on juba seadistatud.",
+      "reconfigure_successful": "Sätted salvestati.",
+      "monitor_reconfigure": "Ainult kuulamise kirjet ei saa muuta. Kustuta see ja lisa uuesti.",
+      "unique_id_mismatch": "See on teine konto või seade. Selle kasutamiseks lisa hoopis uus kirje.",
+      "reauth_successful": "Uus salasõna salvestati.",
+      "cannot_connect_radio": "Raadiolüüsiga ei saa ühendust. Kontrolli, et lüüs on sisse lülitatud ja sinu võrgus.",
+      "no_gateway_mac": "Raadiolüüs ei teatanud oma MAC-aadressi. Uuenda lüüsi püsivara.",
+      "gateway_radio_missing": "Lüüs vastab, kuid selle raadiomoodul pole ühendatud. Kontrolli juhtmeid.",
+      "not_ipv4_address": "Raadiolüüs teatas ainult IPv6-aadressi. Lisa see käsitsi selle IPv4-aadressiga.",
+      "nanocul_firmware_too_old": "Selle nanoCUL-pulga püsivara on liiga vana. Laadi pulgale uusim termoweb_rx püsivara (vaata nanoCUL-i juhendit) ja proovi siis uuesti."
+    },
+    "progress": {
+      "radio_rescan": "Kontrollin kõiki sinu raadiovõrgu kütteseadmeid. See võtab kuni minuti."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "TermoWebi valikud"
+      "rehome": {
+        "title": "Vii kütteseadmed selle paigalduse oma võrku",
+        "description": "Kasuta seda, kui sinu kütteseadmed kasutavad endiselt vana TermoWebi lüüsi raadiovõrku. Kütteseadmed: {heaters}.\n\nMis juhtub:\n1. Iga kütteseade lähtestatakse tehaseseadetele. Home Assistant salvestab enne selle sätted.\n2. Paned kütteseadmed ükshaaval paaritusrežiimi. Kütteseadme kasutusjuhendist leiad, milliseid nuppe vajutada. Oota kütteseadmete vahel umbes 10 sekundit. Aega on 5 minutit.\n3. Kütteseadmed saavad uued numbrid, alates 2-st. Nende olemi ID-d muutuvad. Kütteseadmete nimed jäävad samaks, kui Home Assistant kütteseadme ära tunneb.\n4. Home Assistant taastab iga kütteseadme sätted: režiimi, eelseadistuste temperatuurid, käsitsi temperatuuri ja nädalaprogrammi.\n\nKütteseadmete juhtimine on selle aja peatatud. Mõnda vanemat kütteseadet ei saa raadio kaudu lähtestada, seega ei saa neid sel viisil üle viia. Alustamiseks vajuta **Esita** ja pane umbes 10 sekundi pärast esimene kütteseade paaritusrežiimi."
+      },
+      "rehome_run": { "title": "Sinu kütteseadmete üleviimine" },
+      "rehome_done": {
+        "title": "Üleviimine lõpetatud",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Sidumine ei tööta. Käivita see esmalt ja proovi siis uuesti."
+    },
+    "progress": {
+      "rehome": "Kütteseadmete lähtestamine, seejärel paaritusrežiimis kütteseadmete ootamine. Pane nüüd üks kütteseade paaritusrežiimi, siis järgmine. See lõpeb 1 minut pärast viimase kütteseadme paaritamist või 5 minuti pärast."
+    }
+  },
+  "device": {
+    "heater": {
+      "name": "Kütteseade {addr}"
+    },
+    "accumulator": {
+      "name": "Soojussalvesti {addr}"
+    },
+    "thermostat": {
+      "name": "Termostaat {addr}"
+    },
+    "power_monitor": {
+      "name": "Energiamõõtur {addr}"
+    },
+    "node": {
+      "name": "Sõlm {addr}"
+    },
+    "site": {
+      "name": "Kodu"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway online"
+      "gateway_online": { "name": "Lüüs võrgus" },
+      "pairing_open": {
+        "name": "Paaritamine avatud",
+        "state_attributes": { "ends_at": { "name": "Lõpeb" } }
       },
-      "boost_active": {
-        "name": "Boost aktiivne"
-      }
+      "boost_active": { "name": "Turbo aktiivne" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Force refresh"
-      },
-      "accumulator_boost_start": {
-        "name": "Start boost"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Tühista boost"
-      }
+      "force_refresh": { "name": "Sunnitud värskendus" },
+      "pair_new_heaters": { "name": "Paarita uued kütteseadmed" },
+      "accumulator_boost_start": { "name": "Käivita turbo" },
+      "accumulator_boost_cancel": { "name": "Tühista turbo" },
+      "flash_display": { "name": "Vilguta ekraani" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Boost kestus"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Temperatuuri tõstmine"
-      }
+      "accumulator_boost_duration": { "name": "Turbo kestus" },
+      "accumulator_boost_temperature": { "name": "Turbo temperatuur" },
+      "heater_priority": { "name": "Prioriteet" },
+      "installation_power_limit": { "name": "Võimsuspiirang" },
+      "temperature_offset": { "name": "Temperatuuri parandus" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatuur"
+      "heater_temperature": { "name": "Temperatuur" },
+      "heater_energy_total": { "name": "Energia" },
+      "heater_power": { "name": "Võimsus" },
+      "radio_address": { "name": "Raadioaadress" },
+      "power_monitor_energy": { "name": "Energia" },
+      "power_monitor_power": { "name": "Võimsus" },
+      "installation_total_energy": { "name": "Koguenergia" },
+      "frames_heard": { "name": "Vastuvõetud kaadrid" },
+      "boost_minutes_remaining": { "name": "Turbot jäänud (min)" },
+      "boost_end": { "name": "Turbo lõpp" },
+      "accumulator_charging": { "name": "Laadimine" },
+      "accumulator_current_charge": { "name": "Praegune laetus" },
+      "accumulator_target_charge": { "name": "Sihtlaetus" },
+      "installation_info": { "name": "Asukoht" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Puudub",
+              "temporary_override": "Ajutine muudatus",
+              "boost": "Turbo"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Lapselukk" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "EASY-režiim" },
+      "open_window_detection": { "name": "Avatud akna tuvastus" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Juhtimisrežiim",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Hüsterees 0,25 °C",
+          "hysteresis_0_35": "Hüsterees 0,35 °C",
+          "hysteresis_0_5": "Hüsterees 0,5 °C",
+          "hysteresis_0_75": "Hüsterees 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energia"
-      },
-      "heater_power": {
-        "name": "Võimsus"
-      },
-      "power_monitor_energy": {
-        "name": "Energia"
-      },
-      "power_monitor_power": {
-        "name": "Võimsus"
-      },
-      "installation_total_energy": {
-        "name": "Kogu energia"
-      },
-      "boost_minutes_remaining": {
-        "name": "Boost minutit jäänud"
-      },
-      "boost_end": {
-        "name": "Boost otsa"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Paneeli temperatuuriühik",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Akumulaatori võimenduse eelseadistuse konfigureerimine",
-      "description": "TermoWebi aku vaikimisi võimenduse kestuse ja/või temperatuuri ajakohastamine. Minutid peavad olema vahemikus 60 kuni 600 60-minutiliste sammude kaupa; olemasoleva väärtuse säilitamiseks jäta väli ära.",
+      "name": "Seadista soojussalvesti vaiketurbo",
+      "description": "Uuendab TermoWebi soojussalvesti turbo vaikimisi kestust ja/või temperatuuri. Minutid peavad olema vahemikus 60 kuni 600, 60-minutiliste sammudega; olemasoleva väärtuse säilitamiseks jäta väli tühjaks.",
       "fields": {
         "minutes": {
-          "name": "Vaikimisi võimenduse kestus",
-          "description": "Minutite arv, mille jooksul peaks võimendus töötama, kui ei ole ette nähtud ületoomist (60-600, samm 60).",
+          "name": "Turbo vaikekestus",
+          "description": "Mitu minutit turbo kestab, kui muud kestust pole antud (60–600, samm 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Temperatuuri tõstmine",
-          "description": "Valikuline võimendussihi seadepunkt, mida rakendatakse võimendussessiooni ajal (°C või °F).",
+          "name": "Turbo temperatuur",
+          "description": "Valikuline sihttemperatuur turbo ajaks (°C või °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Akumulaatori võimenduse käivitamine",
-      "description": "Lülitage TermoWebi akumulaatorile kohene võimendus. Sisestage kestus, et tühistada vaikimisi (60-600 minutit 60-minutiliste sammudega), või jätke see ära, et kasutada salvestatud eelseadistust.",
+      "name": "Käivita turbo",
+      "description": "Käivitab kohe turbo TermoWebi soojussalvestil või raadiokütteseadmel, millel on turbo. Soojussalvesti: anna kestus (60–600 minutit, 60-minutiliste sammudega) või jäta see tühjaks, et kasutada salvestatud vaikeväärtust. Raadiokütteseade: jäta kestus tühjaks; kütteseade kasutab oma turbo aega.",
       "fields": {
         "minutes": {
-          "name": "Boost kestus",
-          "description": "Boostingu kestus minutites (60-600, samm 60). Vabatahtlik.",
+          "name": "Turbo kestus",
+          "description": "Turbo kestus minutites (60–600, samm 60). Valikuline.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Tühista akumulaatori võimendus",
-      "description": "TermoWebi aku aktiivse võimendussessiooni tühistamine."
+      "name": "Tühista turbo",
+      "description": "Peatab TermoWebi soojussalvesti või raadiokütteseadme turbo."
     },
     "set_schedule": {
-      "name": "Määrake iganädalane ajakava",
-      "description": "Seadistage TermoWebi kütteseadme 7×24 nädala programm. Programm on 168 täisarvu nimekiri, kus iga väärtus vastab ühele tunnile nädalas alates esmaspäevast 00:00. Kasutage 0 külma eelseadistuse jaoks, 1 öise eelseadistuse jaoks ja 2 päevase eelseadistuse jaoks.",
+      "name": "Määra nädalaprogramm",
+      "description": "Määrab TermoWebi kütteseadme 7×24 nädalaprogrammi. Programm on 168 täisarvust koosnev loend, kus iga väärtus vastab ühele nädala tunnile alates esmaspäevast kell 00:00. Kasuta 0 külma eelseadistuse, 1 öise eelseadistuse ja 2 päevase eelseadistuse jaoks.",
       "fields": {
         "prog": {
           "name": "Programm",
-          "description": "168 täisarvu (0, 1 või 2) loetelu, mis tähistab kütteseadme nädalaplaani. Indeks 0 on esmaspäev 00:00, indeks 1 on esmaspäev 01:00 jne.",
+          "description": "168 täisarvust (0, 1 või 2) koosnev loend kütteseadme nädalaprogrammiga. Indeks 0 on esmaspäev kell 00:00, indeks 1 on esmaspäev kell 01:00 ja nii edasi.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Eelseadistatud temperatuuride seadistamine",
-      "description": "Seadistage TermoWebi kütteseadme külma-, öö- ja päevatemperatuuri eelseaded. Võite anda kõik kolm temperatuuri kas ühe loeteluna (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Määra eelseadistuste temperatuurid",
+      "description": "Määrab TermoWebi kütteseadme külma, öise ja päevase eelseadistuse temperatuurid. Võid anda kõik kolm temperatuuri ühe loendina (``ptemp``) või igaühe eraldi (``cold``, ``night`` ja ``day``). Eelseadistused, mille jätad tühjaks, säilitavad praeguse väärtuse.",
       "fields": {
         "ptemp": {
-          "name": "Eelseadistatud temperatuurid",
-          "description": "Kolmest temperatuurist [külm, öö, päev] koosnev loetelu, mille mõõtühikud on samad kui kütteallikal (°C või °F). Kui see on esitatud, siis see tühistab üksikud külma, öise ja päevase temperatuuri väärtused.",
+          "name": "Eelseadistuste temperatuurid",
+          "description": "Kolme temperatuuri loend [külm, öö, päev] samades ühikutes nagu kütteseade (°C või °F). Kui see on antud, asendab see eraldi külma, öise ja päevase väärtuse.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
@@ -148,27 +301,96 @@
         },
         "night": {
           "name": "Öine eelseadistus",
-          "description": "Temperatuur ööseks eelseadistatud (°C või °F).",
+          "description": "Öise eelseadistuse temperatuur (°C või °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Päeva eelseadistus",
-          "description": "Päeva eelseadistatud temperatuur (°C või °F).",
+          "name": "Päevane eelseadistus",
+          "description": "Päevase eelseadistuse temperatuur (°C või °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Energia impordi ajalugu",
-      "description": "Importige TermoWebi kütteseadmete ajaloolised tunnipõhised energiaarvestid kuni aasta tagasi iga seadistatud kütteseadme kohta Home Assistant'i statistikasse.",
+      "name": "Impordi energiaajalugu",
+      "description": "Impordib iga kütteseadme ja energiamõõturi varasema tunnipõhise energiatarbimise Home Assistanti statistikasse (energia töölauale). Edenemine salvestatakse: kui import peatub, käivita see jätkamiseks uuesti.",
       "fields": {
         "reset_progress": {
-          "name": "Progressi lähtestamine",
-          "description": "Tühjendage salvestatud edusammud ja importige ajalugu uuesti nullist."
+          "name": "Lähtesta edenemine",
+          "description": "Unusta salvestatud edenemine ja impordi kogu periood uuesti. Olemasolev statistika kirjutatakse üle, mitte ei kustutata."
         },
         "max_history_retrieval": {
-          "name": "Maksimaalne ajaloopäevad",
-          "description": "Ajaloo päevade arv, mis tuleb välja otsida. Kõrvaldab ainult selle impordi puhul seadistatud vaikimisi väärtuse."
+          "name": "Ajaloo päevade arv",
+          "description": "Mitu päeva tagasi importida (1 kuni 3650, vaikimisi 7). Kui oled juba importinud vähem päevi, laaditakse ainult vanemad päevad."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Raadio salvestus",
+      "description": "Salvestab teatud aja jooksul iga raadiokaadri, mida lüüs või nanoCUL kuuleb, ja talletab need JSON-failina Home Assistanti seadistuste kausta. Ei saada kunagi midagi. Tavalise raadiokirje puhul ootavad kütteseadmete käsud, kuni salvestus lõpeb.",
+      "fields": {
+        "entry_id": {
+          "name": "Seadistuskirje ID",
+          "description": "Kasutatav raadiolüüsi või nanoCUL-i seadistuskirje, tavaliselt ainult kuulamise kirje.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Kestus",
+          "description": "Kui kaua salvestada, 10 kuni 1800 sekundit."
+        },
+        "redact": {
+          "name": "Peida privaatsed andmed",
+          "description": "Asendab failis võrgu ID-d ja kütteseadmete seerianumbrid. Ilma selleta sisaldab fail sinu võrgu ID-d: jaga seda ainult privaatselt."
+        },
+        "note": {
+          "name": "Märkus",
+          "description": "Valikuline tekst, mis salvestatakse faili, näiteks millist kütteseadet kasutasid.",
+          "example": "elutoa kütteseade keerati üles"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Raadiouuring",
+      "description": "Kuulab teatud aja jooksul kogu raadioliiklust kütteseadmete sagedusalas, ka sellist, mida see sidumine ei mõista, ja salvestab aruandefaili Home Assistanti seadistuste kausta. Lisa fail GitHubi probleemiteatele, et küsida uut tüüpi kütteseadme tuge.",
+      "fields": {
+        "entry_id": {
+          "name": "Seadistuskirje ID",
+          "description": "Kasutatav raadiolüüsi või nanoCUL-i seadistuskirje.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Kestus",
+          "description": "Kui kaua kuulata. Kütteseadmed saadavad kõige rohkem siis, kui nad alustavad või lõpetavad kütmist."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Raadio tehaseseadetele lähtestamine",
+      "description": "PÖÖRDUMATU. Lähtestab ühe raadiokütteseadme tehaseseadetele. Kütteseade kaotab kõik sätted, kella, nädalaprogrammi ja raadiopaarituse ning lõpetab Home Assistantiga suhtlemise. Selle viimased teadaolevad sätted salvestatakse enne. Kütteseadme uuesti kasutamiseks vajuta lüüsi seadmel „Paarita uued kütteseadmed“ ja pane kütteseade paaritusrežiimi. Salvestatud sätted taastuvad, kui kütteseade ära tuntakse. Mõnda vanemat kütteseadet ei saa raadio kaudu lähtestada: lähtesta need käsitsi (vaata kütteseadme kasutusjuhendit).",
+      "fields": {
+        "entry_id": {
+          "name": "Seadistuskirje ID",
+          "description": "Kasutatav raadiolüüsi või nanoCUL-i seadistuskirje.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Kütteseadme number",
+          "description": "Kütteseadme raadionumber (number nimes „Kütteseade 6“)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Raadio: vii kütteseadmed oma võrku",
+      "description": "Viib raadiokirje kõik kütteseadmed selle paigalduse oma raadiovõrku. Iga kütteseade lähtestatakse esmalt (selle sätted salvestatakse), seejärel paned kütteseadmed ükshaaval paaritusrežiimi. Kütteseadmed saavad uued numbrid alates 2-st ja nende sätted taastatakse. Mõnda vanemat kütteseadet ei saa raadio kaudu lähtestada, seega ei saa neid sel viisil üle viia. Kütteseadmete juhtimine on selle aja peatatud.",
+      "fields": {
+        "entry_id": {
+          "name": "Seadistuskirje ID",
+          "description": "Kasutatav raadiolüüsi või nanoCUL-i seadistuskirje.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Ooteaeg",
+          "description": "Kui kaua oodata kütteseadmete paaritusnuppude vajutamist."
         }
       }
     }

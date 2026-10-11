@@ -20,9 +20,9 @@ You need about one to two hours:
 1. Buy the parts.
 2. Prepare and solder.
 3. Connect the wires.
-4. Put our firmware on the ESP32. **Everyone must do this once.** No shop
-   sells the board with our firmware on it.
-5. Connect the gateway to your Wi-Fi and to Home Assistant.
+4. Put our firmware on the ESP32, with the **ESPHome Device Builder** app in
+   Home Assistant. **Everyone must do this once.**
+5. Connect the gateway to Home Assistant.
 6. Connect the TermoWeb integration.
 7. Pair your heaters.
 
@@ -251,142 +251,177 @@ helps more than anything else.
 
 ## Step 4: put the firmware on the ESP32
 
-You do this once. Choose **one** of the three ways below. Way A is the
-easiest.
+You build the firmware yourself, with the **ESPHome Device Builder** app in
+Home Assistant. There is no ready-made firmware file for the ESP32: the
+firmware holds your own Wi-Fi password and your own key.
 
-For ways A and B, first download the firmware file:
+You do this once. Later updates go over Wi-Fi (see
+[Update the gateway firmware](#update-the-gateway-firmware) below).
+
+You need:
+
+- Home Assistant with apps, for example Home Assistant OS. (Apps were
+  called "add-ons" before Home Assistant 2026.2.)
+- A computer with **Google Chrome** or **Microsoft Edge** for the first
+  install. Other browsers (Firefox, Safari) and phones cannot do it.
+- The USB cable from step 1.
+
+### 4.1 Install the ESPHome Device Builder app
+
+1. In Home Assistant, go to **Settings → Apps → Install app**.
+2. Search for **ESPHome Device Builder** and click it.
+3. Click **Install**. Then click **Start**.
+4. Turn on **Show in sidebar**. Click **Open Web UI**.
+
+If you already use ESPHome, skip this part.
+
+### 4.2 Download the two firmware files
 
 1. Open the [releases page of this project](https://github.com/ha-termoweb/ha-termoweb/releases).
-2. Open the newest release and click **Assets** to see the files.
-3. Download the file for your board:
-   - **ESP32-S3 board** (N16R8, N8R8 or N8): `termoweb-radio-esp32s3.factory.bin`
-   - **Plain ESP32 board**: `termoweb-radio-esp32.factory.bin`
+2. Open the release that matches your TermoWeb integration version. Click
+   **Assets** and download **Source code (zip)**.
+3. Unpack the zip. Open its `esphome` folder. You need these two files:
+   - `termoweb-radio.yaml`: the device settings.
+   - `termoweb_radio.h`: the radio program. The settings file loads it.
 
-Connect the ESP32 with the USB cable to your computer. If the board has two
-USB ports, use the one marked **UART** (or **COM**).
+### 4.3 Copy the radio program to Home Assistant
+
+ESPHome keeps its files in the `esphome` folder of your Home Assistant
+configuration folder (the folder with `configuration.yaml`). Put
+`termoweb_radio.h` there.
+
+1. Install the **File editor** app or the **Samba share** app
+   (**Settings → Apps → Install app**), if you do not have one of them.
+2. With **File editor**: click the **folder** icon, open the `esphome`
+   folder, then click the **upload** icon and choose `termoweb_radio.h`.
+   With **Samba share**: open the `config` share on your computer, open the
+   `esphome` folder, and copy `termoweb_radio.h` into it.
+
+The file must sit **directly** in the `esphome` folder, next to the `.yaml`
+files, not in a subfolder. Keep the name `termoweb_radio.h` exactly.
+
+### 4.4 Add your Wi-Fi and key to the ESPHome secrets
+
+The firmware reads your Wi-Fi name, your Wi-Fi password and its API key from
+the ESPHome secrets.
+
+1. Get a key: open <https://esphome.io/components/api/> and copy the random
+   key shown on that page. Each refresh of the page shows a new one.
+2. In the ESPHome Device Builder, click **Secrets** (top right). If you do
+   not see it, open the file `secrets.yaml` in the `esphome` folder with the
+   File editor app.
+3. Add these three lines, with your own values. Keep the names on the left
+   exactly as they are:
+
+   ```yaml
+   wifi_ssid: "your Wi-Fi name"
+   wifi_password: "your Wi-Fi password"
+   api_encryption_key: "paste the key here"
+   ```
+
+4. Click **Save**.
+
+If the secrets already have `wifi_ssid` and `wifi_password`, add only the
+`api_encryption_key` line. Keep the key: Home Assistant may ask for it in
+step 5.
+
+The gateway needs a **2.4 GHz** Wi-Fi network. The ESP32 cannot use 5 GHz.
+
+### 4.5 Create the gateway device in ESPHome
+
+1. In the ESPHome Device Builder, click **+ Create device** (bottom right; in
+   older versions: **+ New device**).
+2. Choose **Import from File** and choose `termoweb-radio.yaml`.
+
+   If your version has no **Import from File**: create a new project with
+   the name `termoweb-radio`, choose **ESP32-S3** (or **ESP32** for a plain
+   board), and skip the install it offers. Click **Edit** on the new device,
+   delete everything in the editor, paste the whole content of
+   `termoweb-radio.yaml`, and click **Save**.
+3. The device **termoweb-radio** appears. Click **Edit** on it.
+4. Look at the `substitutions:` section at the top. Change it to match your
+   board:
+   - **ESP32-S3 with N16R8:** change nothing.
+   - **ESP32-S3 with 8 MB flash (N8R8, N8):** change `flash_size: 16MB` to
+     `flash_size: 8MB`.
+   - **Plain ESP32:** change these values, as the comment in the file
+     explains: `board: esp32dev`, `variant: esp32`, `flash_size: 4MB`, and
+     the six pins (`sck_pin: "18"`, `mosi_pin: "23"`, `miso_pin: "19"`,
+     `csn_pin: "5"`, `gdo0_pin: "4"`, `gdo2_pin: "16"`).
+5. Click **Save**.
+
+Do not change anything else. The wiring in step 3 matches these values.
+
+### 4.6 Install the firmware over USB (first time)
+
+1. Connect the ESP32 with the USB cable to your computer. If the board has
+   two USB ports, use the one marked **UART** (or **COM**).
+2. On this computer, open Home Assistant in **Chrome** or **Edge**, and open
+   the ESPHome Device Builder.
+3. On the **termoweb-radio** device, click **Install**. Choose **Plug into
+   this computer**.
+4. ESPHome builds the firmware. The first build takes several minutes.
+5. The browser shows a list of ports. Choose your board (often "USB
+   JTAG/serial", "CP2102" or "USB Serial") and click **Connect**.
+6. Wait until it says the installation is complete. Do not unplug the board.
+
+The gateway restarts and joins your Wi-Fi. Go to step 5.
+
+**The board is plugged into the Home Assistant computer?** Then choose
+**Plug into your Home Assistant server** in point 3, and choose its port.
+
+**"Plug into this computer" does not work?** For example, Home Assistant
+says that it needs a secure (HTTPS) connection. Then do this:
+
+1. Click **Install** and choose the download option (**Download** or
+   **Manual download**, depending on the version). Wait for the build, then
+   download the **factory** file (its name ends in `.factory.bin`). Do not use
+   the `.ota.bin` file for the first install.
+2. In Chrome or Edge, open **ESPHome Web**: <https://web.esphome.io>. This is
+   the web installer of the ESPHome project. Nothing is installed.
+3. Click **Connect**, choose your board, and click **Connect** in the list.
+4. Click **Install**, choose the `.bin` file you saved, and click
+   **Install** again. Wait until it says the installation is complete.
+
+**The browser finds no port, or the install does not start?** Hold the
+**BOOT** button on the board, press and release **RESET** (or **EN**), then
+release **BOOT**. Try again.
 
 **Windows:** if the computer does not find the board, install the driver for
 its USB chip (CP2102 or CH340).
 
-### Way A (recommended): flash in your web browser
+### Update the gateway firmware
 
-You need **Google Chrome** or **Microsoft Edge** on a computer. Other browsers
-(Firefox, Safari) and phones cannot do this.
+Later updates go over Wi-Fi. You do not need the USB cable.
 
-1. Open **ESPHome Web**: <https://web.esphome.io>. This is the free web
-   installer of the ESPHome project. Nothing is installed.
-2. Click **Connect**. The browser shows a list of ports. Choose your board
-   (often "USB JTAG/serial", "CP2102" or "USB Serial"). Click **Connect** in
-   that list.
-3. Click **Install**. Choose the `.factory.bin` file you downloaded. Click
-   **Install** again.
-4. Wait until it says the installation is complete. This takes 1 to 2
-   minutes. Do not unplug the board.
-5. Then set up Wi-Fi: click the **three dots** (⋮) and choose **Configure
-   Wi-Fi**. Choose your Wi-Fi network, type the password and click
-   **Connect**. Go to step 5.
+1. Download the two files of the new release (4.2).
+2. Replace `termoweb_radio.h` in the `esphome` folder with the new file
+   (4.3).
+3. Click **Edit** on the **termoweb-radio** device. Replace everything with
+   the content of the new `termoweb-radio.yaml`. Set your board values again
+   (4.5, point 4). Click **Save**.
+4. Click **Install** on the device and choose **On the network** (in older
+   versions: **Wirelessly**).
 
-If **Connect** finds no port, or the install does not start: hold the
-**BOOT** button on the board, press and release **RESET** (or **EN**), then
-release **BOOT**. Try again.
+## Step 5: connect the gateway to Home Assistant
 
-### Way B: flash with a desktop program (Windows)
+**Home Assistant.** Home Assistant finds the new device by itself. Go to
+**Settings → Devices & Services**. Under **Discovered** you see **ESPHome**
+with **Termoweb Radio**. Click **Add**. If Home Assistant asks for the
+encryption key, paste the `api_encryption_key` from step 4.4.
 
-Espressif, the maker of the ESP32, has a free Windows program: the **Flash
-Download Tool**.
+You do not need to note the gateway's IP address. The TermoWeb integration
+finds the gateway by itself, and follows it when the address changes.
 
-1. Download it from
-   <https://www.espressif.com/en/support/download/other-tools> (look for
-   **Flash Download Tools**). Unpack the zip and start the `.exe` file.
-2. Set **ChipType** to **ESP32-S3** (or **ESP32** for a plain board),
-   **WorkMode** to **Develop**, and **LoadMode** to **UART**. Click **OK**.
-3. In the first row, click **...** and choose the `.factory.bin` file. Type
-   `0x0` in the address box after the **@**. Tick the box at the start of
-   that row.
-4. Choose your board's port in **COM** (see **Device Manager → Ports (COM &
-   LPT)**). Set **BAUD** to **460800**.
-5. Click **START**. Wait until it says **FINISH**.
-6. Unplug the board and plug it in again. Then set up Wi-Fi (step 5).
+**Check that the radio works (optional).** The gateway writes these lines
+only when it starts, so read the log over USB:
 
-If it stays at "waiting for power-on sync": hold the **BOOT** button on the
-board, press and release **RESET** (or **EN**), then release **BOOT**.
+1. Keep the board connected to your computer with the USB cable.
+2. In the ESPHome Device Builder, click **Logs** on the **termoweb-radio**
+   device. Choose **Plug into this computer** and choose the board's port.
+3. Press the **RESET** (or **EN**) button on the board.
 
-### Way C: build and flash with ESPHome (for experienced users)
-
-Use this way if you want to change the firmware, for example other pins.
-You build the firmware yourself from the configuration file in this
-repository.
-
-You need the **ESPHome Device Builder** add-on in Home Assistant
-(**Settings → Add-ons → Add-on store → ESPHome Device Builder**).
-
-1. Download two files from the
-   [`esphome/` folder of this repository](https://github.com/ha-termoweb/ha-termoweb/tree/main/esphome):
-   `termoweb-radio.yaml` and `termoweb_radio.h`.
-2. Open the ESPHome add-on. Click **Secrets** (top right). Add these three
-   lines, with your own values, and click **Save**:
-
-   ```yaml
-   wifi_ssid: "your WiFi name"
-   wifi_password: "your WiFi password"
-   api_encryption_key: "paste a key here"
-   ```
-
-   To get a key, open <https://esphome.io/components/api/> and copy the random
-   key shown on that page. Each refresh of the page shows a new one. Keep the
-   key: Home Assistant may ask for it in step 5.
-3. Copy `termoweb_radio.h` into the ESPHome configuration folder
-   (`/config/esphome/` on your Home Assistant). You can use the **File
-   editor** or **Samba share** add-on for this. The file must sit directly in
-   that folder, next to the YAML files, not in a subfolder.
-4. In the ESPHome add-on, click **+ New device**, then **Continue**. Give it
-   the name `termoweb-radio`, and choose **ESP32-S3** (or **ESP32** for a
-   plain board). Skip the install step it offers.
-5. Click **Edit** on the new device. Delete everything in the editor. Paste
-   the whole content of `termoweb-radio.yaml`. Click **Save**.
-6. Change the board settings if needed, in the `substitutions:` section at
-   the top:
-   - **ESP32-S3 with N16R8:** change nothing.
-   - **ESP32-S3 with 8 MB flash (N8R8, N8):** change `flash_size: 16MB` to
-     `flash_size: 8MB`.
-   - **Plain ESP32:** change the values as the comment in the file explains:
-     `board: esp32dev`, `variant: esp32`, `flash_size: 4MB`, and the six pins
-     (`sck_pin: "18"`, `mosi_pin: "23"`, `miso_pin: "19"`, `csn_pin: "5"`,
-     `gdo0_pin: "4"`, `gdo2_pin: "16"`).
-
-   Click **Save**.
-7. Connect the ESP32 with the USB cable to the computer where you use Home
-   Assistant in the browser.
-8. Click **Install**, then **Plug into this computer**, and follow the
-   instructions. This needs the **Chrome** or **Edge** browser. The first
-   build takes several minutes. Later updates can use **Wirelessly**.
-
-   If **Plug into this computer** does not work: click **Install → Manual
-   download** and save the file. Then flash it with way A or way B above.
-
-The firmware gets your Wi-Fi from the secrets, so you can skip the Wi-Fi part
-of step 5.
-
-Other command-line tools work too: `esphome run termoweb-radio.yaml` with the
-[ESPHome command line](https://esphome.io/guides/cli/), or
-`esptool -p <port> write-flash 0x0 <file>.factory.bin` with
-[esptool](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/).
-
-## Step 5: connect the gateway to Wi-Fi and Home Assistant
-
-**Wi-Fi.** After way A or B, the gateway does not know your Wi-Fi yet. Set it
-up in one of these two ways:
-
-- In Chrome or Edge, open <https://web.esphome.io>, click **Connect**, choose
-  the board, then click the **three dots** (⋮) → **Configure Wi-Fi**.
-- Or, about one minute after power-on, the gateway opens its own Wi-Fi
-  network called **termoweb-radio**. Connect your phone to it. A page opens
-  (if not, open `http://192.168.4.1` in the phone's browser). Choose your
-  Wi-Fi network, type the password and click **Save**.
-
-**Check that the radio works (optional).** In ESPHome Web, click **Logs**
-(or, with way C, click **Logs** in the ESPHome add-on). You should see these
-lines:
+You should see these lines:
 
 ```
 self-test passed
@@ -397,13 +432,6 @@ listening on TCP port 2323
 If you see `unexpected CC1101 id` or `MISO stayed high`, check the wiring
 (step 3) and that VCC goes to 3V3.
 
-**Home Assistant.** Home Assistant finds the new device by itself. Go to
-**Settings → Devices & Services**, and accept the new **ESPHome** device.
-With way C, enter the API key from step 4 if asked.
-
-You do not need to note the gateway's IP address. The TermoWeb integration
-finds the gateway by itself, and follows it when the address changes.
-
 The device page also shows:
 
 - **Home Assistant link**: on while the TermoWeb integration is connected.
@@ -412,6 +440,19 @@ The device page also shows:
   your heaters: move it closer, and check that the module is the 868 MHz
   version.
 - **Restart**: restarts the gateway.
+
+### If the gateway does not join your Wi-Fi
+
+1. Check the Wi-Fi name and password in the ESPHome secrets (4.4). The
+   network must be 2.4 GHz.
+2. If the gateway cannot connect, it opens its own Wi-Fi network after about
+   one minute. The network is called **Termoweb Radio Fallback**.
+3. Connect your phone to **Termoweb Radio Fallback**. A page opens. If not,
+   open `http://192.168.4.1` in the phone's browser.
+4. Choose your Wi-Fi network, type the password and click **Save**.
+
+The gateway restarts and joins your Wi-Fi. To keep the change after the
+next firmware update, also correct the ESPHome secrets.
 
 ## Step 6: connect the TermoWeb integration
 
@@ -509,11 +550,15 @@ when it talks. If you removed a heater, open the integration, choose
 |---|---|
 | Logs: `unexpected CC1101 id` or `MISO stayed high` | Check the wiring (step 3). Check that VCC goes to 3V3. Check the solder joints. |
 | The board does not start after you connect the radio (plain ESP32) | You used GPIO 6 to 11. Use the "Plain ESP32 pin" column. |
-| The board restarts again and again after the first install | You used the file for the wrong board. Flash the file for your board again (step 4). With way C: set `flash_size` to match your board (step 4, way C, point 6) and install again. |
+| ESPHome stops the build: `termoweb_radio.h` not found | Copy `termoweb_radio.h` directly into the `esphome` folder, not into a subfolder (step 4.3). Check the name. Then click **Install** again. |
+| ESPHome stops the build: a secret is not defined (`wifi_ssid`, `wifi_password` or `api_encryption_key`) | Add the missing line to the ESPHome secrets (step 4.4). Check the spelling of the name. |
+| The board restarts again and again after the first install | The board values do not match your board. Set `board`, `variant` and `flash_size` for your board (step 4.5, point 4) and install again over USB. |
+| The gateway does not join your Wi-Fi | Check the Wi-Fi name and password in the ESPHome secrets. Use a 2.4 GHz network. Or use the **Termoweb Radio Fallback** network (step 5, "If the gateway does not join your Wi-Fi"). |
 | **Frames received** stays at 0 | Move the gateway closer to a heater. Turn a heater's temperature up. Check that the module and antenna are the **868 MHz** version. Check that the antenna is soldered on. |
 | The gateway is not under **Discovered** | Wait a few minutes. Or add it by hand (step 6). |
 | A heater often shows **unavailable** | The signal is weak. Move the gateway to a more central place, away from metal and the Wi-Fi router. |
 | The browser does not find the board | Use Chrome or Edge. Use a USB data cable, not a charge-only cable. Try the other USB port on the board. Some boards need a driver for their USB chip (CP2102 or CH340). Hold **BOOT** while you press **RESET**. |
+| **Plug into this computer** does not work | Download the factory file and use ESPHome Web (step 4.6). |
 
 ### If no heater is found
 
@@ -564,7 +609,8 @@ heater does not show up, or when a developer asks for a report.
 5. The response shows the result and the name of the report file. The
    integration's diagnostics download also shows the last result.
 
-The survey needs gateway firmware 3.7-esp32 or newer (step 4), or nanoCUL
+The survey needs gateway firmware 3.7-esp32 or newer (see
+[Update the gateway firmware](#update-the-gateway-firmware)), or nanoCUL
 firmware 3.7-nanocul or newer. The ESP32 records more of each signal than
 the nanoCUL.
 

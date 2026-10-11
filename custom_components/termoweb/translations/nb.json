@@ -1,174 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Hvordan er varmeovnene dine koblet til?",
+        "description": "Velg skykonto hvis du bruker TermoWeb-, Ducaheat- eller Tevolve-appen. For å styre varmeovnene lokalt uten skyen er det enklest med en nanoCUL USB-pinne satt inn i denne Home Assistant-maskinen (ingen lodding). ESP32-radiogatewayen er for erfarne brukere: den må bygges og loddes.",
+        "menu_options": {
+          "cloud": "Skykonto (TermoWeb-, Ducaheat- eller Tevolve-appen)",
+          "nanocul": "Lokal radio: nanoCUL USB-pinne (enklest, ingen lodding)",
+          "radio": "Lokal radiogateway: ESP32 + CC1101 (avansert, krever lodding)"
+        }
+      },
       "cloud": {
-        "title": "Koble til TermoWeb-familiens varmeovner",
-        "description": "Versjon: {version}\n\nVelg TermoWeb- eller Ducaheat-merke, og skriv inn kontoinformasjonen din.",
+        "title": "Koble til varmeovner i TermoWeb-familien",
+        "description": "Versjon: {version}\n\nVelg merket TermoWeb, Ducaheat eller Tevolve, og skriv inn kontoopplysningene dine. Tevolve bruker Ducaheat-serveren.",
         "data": {
-          "brand": "Merkevare",
+          "brand": "Merke",
           "username": "E-post",
+          "password": "Passord"
+        }
+      },
+      "radio": {
+        "title": "Koble til radiogatewayen",
+        "description": "Home Assistant finner vanligvis ESP32-radiogatewayen selv: se etter den under **Oppdaget** på siden Enheter og tjenester. Bruk dette skjemaet bare hvis den ikke vises der. Skriv inn IP-adressen til gatewayen. I neste trinn velger du: legge til gatewayen og la den finne varmeovnene, eller pare nye varmeovner.",
+        "data": {
+          "host": "Gatewayens IP-adresse"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Avanserte innstillinger",
+            "description": "La disse være som de er, med mindre du har endret fastvaren på gatewayen.",
+            "data": {
+              "port": "Port"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Radiogateway funnet",
+        "description": "Fant en TermoWeb-radiogateway på {host}. Vil du sette den opp?\n\nI neste trinn velger du: legge til gatewayen (den finner og parer varmeovnene dine), eller bare lytte."
+      },
+      "radio_method": {
+        "title": "Legg til gatewayen",
+        "description": "Velg «Legg til gatewayen» for å styre varmeovnene. Oppsettet fullføres med en gang. Deretter:\n\n- Varmeovner som allerede fungerer med en TermoWeb-gateway eller -app, blir funnet av seg selv, vanligvis i løpet av noen minutter. Varmeovnene sender når de begynner å varme, så det hjelper å skru opp temperaturen på én ovn.\n- Nye eller tilbakestilte varmeovner: sett hver varmeovn i paringsmodus innen 30 minutter. Bruksanvisningen for ovnen forteller hvilke knapper du skal trykke på. Ta én varmeovn om gangen. Senere trykker du først på **Par nye varmeovner** på gateway-enheten.\n\nDu får et varsel for hver varmeovn som legges til.\n\nVelg «Bare lytt» for å ta opp radiotrafikk som en test, ved siden av en TermoWeb-gateway som fortsatt er i drift. I denne modusen sender integrasjonen aldri og legger ikke til varmeovner.",
+        "menu_options": {
+          "radio_discover": "Legg til gatewayen",
+          "radio_monitor": "Bare lytt (ta opp radiotrafikk, send aldri)"
+        }
+      },
+      "radio_rescan": { "title": "Søker etter varmeovnene dine" },
+      "reconfigure_radio": {
+        "title": "Endre radiogatewayen",
+        "description": "Endre adressen til gatewayen. Kryss av for «Søk etter varmeovner på nytt» hvis du har lagt til eller fjernet en varmeovn.",
+        "data": {
+          "host": "Gatewayens IP-adresse",
+          "port": "Port",
+          "rescan": "Søk etter varmeovner på nytt"
+        }
+      },
+      "nanocul": {
+        "title": "Koble til nanoCUL USB-pinnen",
+        "description": "Velg porten til nanoCUL-pinnen. Hvis Home Assistant har gjenkjent pinnen, er den allerede valgt: trykk bare på Send inn. I neste trinn velger du: legge til gatewayen og la den finne varmeovnene, eller pare nye varmeovner.",
+        "data": {
+          "device": "USB-port"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Skriv inn nanoCUL-porten",
+        "description": "Skriv inn portbanen, for eksempel /dev/serial/by-id/usb-..., eller en nettverksadresse som socket://192.0.2.10:2323 for en pinne som deles over nettverket.",
+        "data": {
+          "device": "Portbane eller URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Endre nanoCUL-porten",
+        "description": "Endre portbanen eller URL-en til pinnen. Kryss av for «Søk etter varmeovner på nytt» hvis du har lagt til eller fjernet en varmeovn.",
+        "data": {
+          "device": "Portbane eller URL",
+          "rescan": "Søk etter varmeovner på nytt"
+        }
+      },
+      "reconfigure": {
+        "title": "Endre kontoinnstillingene",
+        "description": "Versjon: {version}\n\nSkriv inn det nye passordet for denne kontoen. Du kan ikke bytte til en annen konto her: legg til en ny oppføring for det.",
+        "data": {
+          "brand": "Merke",
+          "username": "E-post",
+          "password": "Passord"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Logg inn på nytt",
+        "description": "{brand} godtok ikke det lagrede passordet for {username}. Skriv inn det gjeldende passordet.",
+        "data": {
           "password": "Passord"
         }
       }
     },
     "error": {
       "invalid_auth": "Ugyldig brukernavn eller passord (eller klientnøkkel).",
-      "cannot_connect": "Kan ikke koble til TermoWeb - nettverks-/DNS/SSL-feil.",
-      "rate_limited": "Midlertidig hastighetsbegrenset av API. Prøv igjen senere.",
-      "unknown": "Ukjent feil"
+      "cannot_connect": "Kan ikke koble til TermoWeb – nettverks-/DNS-/SSL-feil.",
+      "rate_limited": "API-et begrenser forespørslene midlertidig. Prøv igjen senere.",
+      "unknown": "Ukjent feil",
+      "cannot_connect_radio": "Kan ikke koble til radiogatewayen. Sjekk IP-adressen og porten, og at gatewayen er slått på.",
+      "no_gateway_mac": "Radiogatewayen oppga ikke MAC-adressen sin. Oppdater fastvaren på gatewayen.",
+      "no_heaters": "Ingen varmeovn svarte. Flytt gatewayen nærmere varmeovnene og prøv igjen.",
+      "cannot_connect_nanocul": "Kan ikke åpne nanoCUL-pinnen. Sjekk at den er satt inn, at porten er riktig, og at den kjører termoweb_rx-fastvaren.",
+      "nanocul_radio_missing": "Pinnen svarer, men radiomodulen er ikke tilkoblet. Sjekk koblingene.",
+      "gateway_radio_missing": "Gatewayen svarer, men radiomodulen er ikke tilkoblet. Sjekk koblingene."
+    },
+    "abort": {
+      "already_configured": "Denne gatewayen er allerede satt opp.",
+      "reconfigure_successful": "Innstillingene ble lagret.",
+      "monitor_reconfigure": "En oppføring som bare lytter, kan ikke endres. Slett den og legg den til på nytt.",
+      "unique_id_mismatch": "Dette er en annen konto eller enhet. For å bruke den, legg heller til en ny oppføring.",
+      "reauth_successful": "Det nye passordet ble lagret.",
+      "cannot_connect_radio": "Kan ikke koble til radiogatewayen. Sjekk at gatewayen er slått på og koblet til nettverket ditt.",
+      "no_gateway_mac": "Radiogatewayen oppga ikke MAC-adressen sin. Oppdater fastvaren på gatewayen.",
+      "gateway_radio_missing": "Gatewayen svarer, men radiomodulen er ikke tilkoblet. Sjekk koblingene.",
+      "not_ipv4_address": "Radiogatewayen annonserte bare en IPv6-adresse. Legg den til manuelt med IPv4-adressen.",
+      "nanocul_firmware_too_old": "Fastvaren på denne nanoCUL-pinnen er for gammel. Last den nyeste termoweb_rx-fastvaren inn på pinnen (se nanoCUL-veiledningen), og prøv igjen."
+    },
+    "progress": {
+      "radio_rescan": "Sjekker alle varmeovnene på radionettverket ditt. Dette tar opptil ett minutt."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Alternativer for TermoWeb"
+      "rehome": {
+        "title": "Flytt varmeovnene til installasjonens eget nettverk",
+        "description": "Bruk dette når varmeovnene dine fortsatt bruker radionettverket til en gammel TermoWeb-gateway. Varmeovner: {heaters}.\n\nDette skjer:\n1. Hver varmeovn tilbakestilles til fabrikkinnstillinger. Home Assistant lagrer innstillingene først.\n2. Du setter varmeovnene i paringsmodus, én om gangen. Bruksanvisningen for ovnen forteller hvilke knapper du skal trykke på. Vent omtrent 10 sekunder mellom hver ovn. Du har 5 minutter.\n3. Varmeovnene får nye numre, fra 2 og oppover. Entitets-ID-ene deres endres. Navnene på varmeovnene beholdes når Home Assistant gjenkjenner ovnen.\n4. Home Assistant gir hver varmeovn innstillingene tilbake: modus, forhåndsinnstilte temperaturer, manuell temperatur og ukeprogram.\n\nStyringen av varmeovnene settes på pause mens dette pågår. Noen eldre varmeovner kan ikke tilbakestilles over radio, så de kan ikke flyttes på denne måten. Trykk på **Send inn** for å starte, og sett deretter den første varmeovnen i paringsmodus etter omtrent 10 sekunder."
+      },
+      "rehome_run": { "title": "Flytter varmeovnene dine" },
+      "rehome_done": {
+        "title": "Flyttingen er fullført",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Integrasjonen kjører ikke. Start den først, og prøv igjen."
+    },
+    "progress": {
+      "rehome": "Tilbakestiller varmeovnene og venter deretter på varmeovner i paringsmodus. Sett én varmeovn i paringsmodus nå, deretter den neste. Dette stopper 1 minutt etter at den siste varmeovnen ble paret, eller etter 5 minutter."
+    }
+  },
+  "device": {
+    "heater": {
+      "name": "Varmeovn {addr}"
+    },
+    "accumulator": {
+      "name": "Magasinovn {addr}"
+    },
+    "thermostat": {
+      "name": "Termostat {addr}"
+    },
+    "power_monitor": {
+      "name": "Effektmåler {addr}"
+    },
+    "node": {
+      "name": "Node {addr}"
+    },
+    "site": {
+      "name": "Hjem"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway online"
+      "gateway_online": { "name": "Gateway tilkoblet" },
+      "pairing_open": {
+        "name": "Paring åpen",
+        "state_attributes": { "ends_at": { "name": "Slutter" } }
       },
-      "boost_active": {
-        "name": "Boost aktiv"
-      }
+      "boost_active": { "name": "Boost aktiv" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Tving oppdatering"
-      },
-      "accumulator_boost_start": {
-        "name": "Start boost"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Avbryt boost"
-      }
+      "force_refresh": { "name": "Tving oppdatering" },
+      "pair_new_heaters": { "name": "Par nye varmeovner" },
+      "accumulator_boost_start": { "name": "Start boost" },
+      "accumulator_boost_cancel": { "name": "Avbryt boost" },
+      "flash_display": { "name": "Blink skjermen" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Boost-varighet"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Øk temperaturen"
-      }
+      "accumulator_boost_duration": { "name": "Boost-varighet" },
+      "accumulator_boost_temperature": { "name": "Boost-temperatur" },
+      "heater_priority": { "name": "Prioritet" },
+      "installation_power_limit": { "name": "Effektgrense" },
+      "temperature_offset": { "name": "Temperaturjustering" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatur"
+      "heater_temperature": { "name": "Temperatur" },
+      "heater_energy_total": { "name": "Energi" },
+      "heater_power": { "name": "Effekt" },
+      "radio_address": { "name": "Radioadresse" },
+      "power_monitor_energy": { "name": "Energi" },
+      "power_monitor_power": { "name": "Effekt" },
+      "installation_total_energy": { "name": "Total energi" },
+      "frames_heard": { "name": "Mottatte rammer" },
+      "boost_minutes_remaining": { "name": "Gjenstående boost-minutter" },
+      "boost_end": { "name": "Boost slutter" },
+      "accumulator_charging": { "name": "Lading" },
+      "accumulator_current_charge": { "name": "Nåværende lading" },
+      "accumulator_target_charge": { "name": "Mållading" },
+      "installation_info": { "name": "Plassering" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Ingen",
+              "temporary_override": "Midlertidig overstyring",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Barnesikring" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "EASY-modus" },
+      "open_window_detection": { "name": "Registrering av åpent vindu" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Reguleringsmodus",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Hysterese 0,25 °C",
+          "hysteresis_0_35": "Hysterese 0,35 °C",
+          "hysteresis_0_5": "Hysterese 0,5 °C",
+          "hysteresis_0_75": "Hysterese 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energi"
-      },
-      "heater_power": {
-        "name": "Strøm"
-      },
-      "power_monitor_energy": {
-        "name": "Energi"
-      },
-      "power_monitor_power": {
-        "name": "Strøm"
-      },
-      "installation_total_energy": {
-        "name": "Total energi"
-      },
-      "boost_minutes_remaining": {
-        "name": "Boost minutter igjen"
-      },
-      "boost_end": {
-        "name": "Boost-slutt"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Temperaturenhet på panelet",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Konfigurer forhåndsinnstillingen for akkumulatorøkning",
-      "description": "Oppdater standard boost-varighet og/eller -temperatur for en TermoWeb-akkumulator. Minutter må være mellom 60 og 600 i intervaller på 60 minutter; utelat et felt for å beholde den eksisterende verdien.",
+      "name": "Konfigurer boost-forhåndsinnstilling for magasinovn",
+      "description": "Oppdater standard boost-varighet og/eller -temperatur for en TermoWeb-magasinovn. Minutter må være mellom 60 og 600 i trinn på 60 minutter; utelat et felt for å beholde gjeldende verdi.",
       "fields": {
         "minutes": {
           "name": "Standard boost-varighet",
-          "description": "Antall minutter boost skal kjøre når ingen overstyring er angitt (60-600, trinn 60).",
+          "description": "Antall minutter boost skal vare når ingen annen verdi er oppgitt (60–600, trinn på 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Øk temperaturen",
-          "description": "Valgfritt boost-settpunkt som skal brukes under boost-økten (°C eller °F).",
+          "name": "Boost-temperatur",
+          "description": "Valgfri måltemperatur under boost (°C eller °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Start akkumulator boost",
-      "description": "Utløser en umiddelbar boost på en TermoWeb-akkumulator. Angi en varighet for å overstyre standardinnstillingen (60-600 minutter i intervaller på 60 minutter), eller utelat den for å bruke den lagrede forhåndsinnstillingen.",
+      "name": "Start boost",
+      "description": "Start boost nå på en TermoWeb-magasinovn, eller på en radiovarmeovn som har boost. Magasinovn: oppgi en varighet (60–600 minutter, i trinn på 60), eller utelat den for å bruke den lagrede forhåndsinnstillingen. Radiovarmeovn: utelat varigheten; ovnen bruker sin egen boost-tid.",
       "fields": {
         "minutes": {
           "name": "Boost-varighet",
-          "description": "Varighet av boost-økten i minutter (60-600, trinn 60). Valgfritt.",
+          "description": "Varighet for boost i minutter (60–600, trinn på 60). Valgfritt.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Avbryt akkumulatorforsterkning",
-      "description": "Avbryt den aktive boost-økten på en TermoWeb-akkumulator."
+      "name": "Avbryt boost",
+      "description": "Stopp boost på en TermoWeb-magasinovn eller radiovarmeovn."
     },
     "set_schedule": {
-      "name": "Sett opp en ukeplan",
-      "description": "Still inn 7×24-ukeprogrammet for en TermoWeb-varmer. Programmet er en liste med 168 heltall, der hver verdi tilsvarer en time i uken fra mandag kl. 00.00. Bruk 0 for kuldeforhåndsinnstilling, 1 for nattforhåndsinnstilling og 2 for dagforhåndsinnstilling.",
+      "name": "Angi ukeprogram",
+      "description": "Angi 7×24-ukeprogrammet for en TermoWeb-varmeovn. Programmet er en liste med 168 heltall, der hver verdi tilsvarer én time i uken, med start mandag kl. 00:00. Bruk 0 for kald-forhåndsinnstillingen, 1 for natt-forhåndsinnstillingen og 2 for dag-forhåndsinnstillingen.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "En liste med 168 heltall (0, 1 eller 2) som representerer varmeapparatets ukeplan. Indeks 0 er mandag 00:00, indeks 1 er mandag 01:00, og så videre.",
+          "description": "En liste med 168 heltall (0, 1 eller 2) som beskriver ukeprogrammet til varmeovnen. Indeks 0 er mandag 00:00, indeks 1 er mandag 01:00, og så videre.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Still inn forhåndsinnstilte temperaturer",
-      "description": "Angi de forhåndsinnstilte temperaturene for kulde, natt og dag for en TermoWeb-varmer. Du kan enten angi alle tre temperaturene som en enkelt liste (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Angi forhåndsinnstilte temperaturer",
+      "description": "Angi de forhåndsinnstilte temperaturene for kald, natt og dag for en TermoWeb-varmeovn. Du kan enten oppgi alle tre temperaturene som én liste (``ptemp``) eller hver for seg (``cold``, ``night`` og ``day``). Forhåndsinnstillinger du utelater, beholder gjeldende verdi.",
       "fields": {
         "ptemp": {
           "name": "Forhåndsinnstilte temperaturer",
-          "description": "En liste med tre temperaturer [kald, natt, dag] i samme enhet som varmeren (°C eller °F). Hvis den oppgis, overstyrer den individuelle kulde-, natt- og dagverdier.",
+          "description": "En liste med tre temperaturer [kald, natt, dag] i samme enhet som varmeovnen (°C eller °F). Hvis den oppgis, overstyrer den de enkelte verdiene for kald, natt og dag.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Kald forhåndsinnstilling",
-          "description": "Temperatur for forhåndsinnstilt kulde (°C eller °F).",
+          "name": "Kald-forhåndsinnstilling",
+          "description": "Temperatur for kald-forhåndsinnstillingen (°C eller °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Forhåndsinnstilling natt",
-          "description": "Temperatur for forhåndsinnstilt natt (°C eller °F).",
+          "name": "Natt-forhåndsinnstilling",
+          "description": "Temperatur for natt-forhåndsinnstillingen (°C eller °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Forhåndsinnstilt dag",
-          "description": "Temperatur for den forhåndsinnstilte dagen (°C eller °F).",
+          "name": "Dag-forhåndsinnstilling",
+          "description": "Temperatur for dag-forhåndsinnstillingen (°C eller °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Import av energihistorikk",
-      "description": "Importer historiske energitellere per time for TermoWeb-varmere for opptil ett år siden til Home Assistant-statistikken for hver konfigurerte varmeovn.",
+      "name": "Importer energihistorikk",
+      "description": "Importer tidligere energiforbruk per time for alle varmeovner og effektmålere til statistikken i Home Assistant (Energi-dashbordet). Fremdriften lagres: hvis importen stopper, kjør den igjen for å fortsette.",
       "fields": {
         "reset_progress": {
           "name": "Tilbakestill fremdrift",
-          "description": "Slett lagret fremdrift og importer historikken på nytt fra bunnen av."
+          "description": "Glem lagret fremdrift og importer hele perioden på nytt. Eksisterende statistikk overskrives, ikke slettes."
         },
         "max_history_retrieval": {
-          "name": "Maks historikk dager",
-          "description": "Antall dager med historikk som skal hentes. Overstyrer den konfigurerte standardinnstillingen kun for denne importen."
+          "name": "Maks antall dager med historikk",
+          "description": "Hvor mange dager tilbake som skal importeres (1 til 3650, standard 7). Hvis du allerede har importert færre dager, hentes bare de eldre dagene."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Radioopptak",
+      "description": "Ta opp alle radiorammer som gatewayen eller nanoCUL hører i en periode, og lagre dem som en JSON-fil i konfigurasjonsmappen til Home Assistant. Sender aldri. På en vanlig radiooppføring venter kommandoer til varmeovnene til opptaket er ferdig.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurasjonsoppførings-ID",
+          "description": "Konfigurasjonsoppføringen for radiogatewayen eller nanoCUL som skal brukes, vanligvis den som bare lytter.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Varighet",
+          "description": "Hvor lenge opptaket skal vare, 10 til 1800 sekunder."
+        },
+        "redact": {
+          "name": "Skjul private data",
+          "description": "Erstatt nettverks-ID-er og serienumre for varmeovner i filen. Uten dette inneholder filen nettverks-ID-en din: del den bare privat."
+        },
+        "note": {
+          "name": "Notat",
+          "description": "Valgfri tekst som lagres i filen, for eksempel hvilken varmeovn du brukte.",
+          "example": "skrudde opp varmeovnen i stua"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Radiokartlegging",
+      "description": "Lytt til all radiotrafikk på frekvensbåndet til varmeovnene i en periode, også trafikk denne integrasjonen ikke forstår, og lagre en rapportfil i konfigurasjonsmappen til Home Assistant. Legg ved filen i en GitHub-sak (issue) for å be om støtte for en ny type varmeovn.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurasjonsoppførings-ID",
+          "description": "Konfigurasjonsoppføringen for radiogatewayen eller nanoCUL som skal brukes.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Varighet",
+          "description": "Hvor lenge det skal lyttes. Varmeovner sender mest når de begynner eller slutter å varme."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Fabrikktilbakestilling over radio",
+      "description": "KAN IKKE ANGRES. Tilbakestill én radiovarmeovn til fabrikkinnstillinger. Varmeovnen mister alle innstillinger, klokken, ukeprogrammet og radioparingen, og slutter å kommunisere med Home Assistant. De sist kjente innstillingene lagres først. For å bruke varmeovnen igjen, trykk på «Par nye varmeovner» på gateway-enheten og sett varmeovnen i paringsmodus. De lagrede innstillingene kommer tilbake når den gjenkjennes. Noen eldre varmeovner kan ikke tilbakestilles over radio: tilbakestill dem for hånd (se bruksanvisningen for ovnen).",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurasjonsoppførings-ID",
+          "description": "Konfigurasjonsoppføringen for radiogatewayen eller nanoCUL som skal brukes.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Varmeovnnummer",
+          "description": "Radionummeret til varmeovnen (tallet i «Varmeovn 6»)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radio: flytt varmeovner til eget nettverk",
+      "description": "Flytt alle varmeovnene i en radiooppføring til installasjonens eget radionettverk. Hver varmeovn tilbakestilles først (innstillingene lagres), deretter setter du varmeovnene i paringsmodus én om gangen. Varmeovnene får nye numre fra 2 og oppover, og innstillingene gjenopprettes. Noen eldre varmeovner kan ikke tilbakestilles over radio, så de kan ikke flyttes på denne måten. Styringen av varmeovnene settes på pause mens dette pågår.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurasjonsoppførings-ID",
+          "description": "Konfigurasjonsoppføringen for radiogatewayen eller nanoCUL som skal brukes.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Ventetid",
+          "description": "Hvor lenge det skal ventes på paringsknappene på varmeovnene."
         }
       }
     }

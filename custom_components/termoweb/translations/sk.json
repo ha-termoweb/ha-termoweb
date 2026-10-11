@@ -1,188 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Ako sú vaše ohrievače pripojené?",
+        "description": "Vyberte cloudový účet, ak používate aplikáciu TermoWeb, Ducaheat alebo Tevolve. Ak chcete ohrievače ovládať lokálne bez cloudu, najjednoduchší spôsob je USB kľúč nanoCUL zapojený do tohto počítača s Home Assistant (bez spájkovania). Rádiová brána ESP32 je pre pokročilých používateľov: treba ju zostaviť a spájkovať.",
+        "menu_options": {
+          "cloud": "Cloudový účet (aplikácia TermoWeb, Ducaheat alebo Tevolve)",
+          "nanocul": "Lokálne rádio: USB kľúč nanoCUL (najjednoduchšie, bez spájkovania)",
+          "radio": "Lokálna rádiová brána: ESP32 + CC1101 (pokročilé, treba spájkovať)"
+        }
+      },
       "cloud": {
         "title": "Pripojenie k ohrievačom rodiny TermoWeb",
-        "description": "Verzia: {version}\n\nVyberte si značku TermoWeb alebo Ducaheat a zadajte prihlasovacie údaje k účtu.",
+        "description": "Verzia: {version}\n\nVyberte značku TermoWeb, Ducaheat alebo Tevolve a zadajte prihlasovacie údaje k účtu. Tevolve používa server Ducaheat.",
         "data": {
           "brand": "Značka",
           "username": "E-mail",
           "password": "Heslo"
         }
+      },
+      "radio": {
+        "title": "Pripojenie k rádiovej bráne",
+        "description": "Home Assistant rádiovú bránu ESP32 zvyčajne nájde sám: hľadajte ju v časti **Objavené** na stránke Zariadenia a služby. Tento formulár použite, len ak sa tam nezobrazí. Zadajte IP adresu brány. V ďalšom kroku si vyberiete: pridať bránu a nechať ju nájsť ohrievače, alebo spárovať nové ohrievače.",
+        "data": {
+          "host": "IP adresa brány"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Rozšírené nastavenia",
+            "description": "Nemeňte ich, pokiaľ ste nemenili firmvér brány.",
+            "data": {
+              "port": "Port"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Rádiová brána nájdená",
+        "description": "Na adrese {host} bola nájdená rádiová brána TermoWeb. Nastaviť ju?\n\nV ďalšom kroku si vyberiete: pridať bránu (nájde a spáruje vaše ohrievače), alebo len počúvať."
+      },
+      "radio_method": {
+        "title": "Pridanie brány",
+        "description": "Ak chcete ovládať ohrievače, vyberte „Pridať bránu“. Nastavenie sa dokončí okamžite. Potom:\n\n- Ohrievače, ktoré už fungujú s bránou alebo aplikáciou TermoWeb, sa nájdu samy, zvyčajne do niekoľkých minút. Ohrievače vysielajú, keď začnú kúriť, preto pomôže zvýšiť teplotu na jednom ohrievači.\n- Nové alebo resetované ohrievače: do 30 minút prepnite každý ohrievač do režimu párovania. Ktoré tlačidlá stlačiť, nájdete v návode k ohrievaču. Vždy len jeden ohrievač naraz. Neskôr najprv stlačte **Spárovať nové ohrievače** na zariadení brány.\n\nO každom pridanom ohrievači dostanete upozornenie.\n\nVyberte „Len počúvať“, ak chcete na test zaznamenať rádiovú komunikáciu popri bráne TermoWeb, ktorá stále beží. Integrácia v tomto režime nikdy nevysiela a nepridáva žiadne ohrievače.",
+        "menu_options": {
+          "radio_discover": "Pridať bránu",
+          "radio_monitor": "Len počúvať (zaznamenávať rádiovú komunikáciu, nikdy nevysielať)"
+        }
+      },
+      "radio_rescan": { "title": "Hľadanie vašich ohrievačov" },
+      "reconfigure_radio": {
+        "title": "Zmena rádiovej brány",
+        "description": "Zmeňte adresu brány. Ak ste pridali alebo odobrali ohrievač, zaškrtnite „Znova vyhľadať ohrievače“.",
+        "data": {
+          "host": "IP adresa brány",
+          "port": "Port",
+          "rescan": "Znova vyhľadať ohrievače"
+        }
+      },
+      "nanocul": {
+        "title": "Pripojenie k USB kľúču nanoCUL",
+        "description": "Vyberte port kľúča nanoCUL. Ak Home Assistant kľúč rozpoznal, port je už vybraný: stačí stlačiť Odoslať. V ďalšom kroku si vyberiete: pridať bránu a nechať ju nájsť ohrievače, alebo spárovať nové ohrievače.",
+        "data": {
+          "device": "USB port"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Zadajte port nanoCUL",
+        "description": "Zadajte cestu k portu, napríklad /dev/serial/by-id/usb-..., alebo sieťovú adresu, napríklad socket://192.0.2.10:2323, ak je kľúč zdieľaný cez sieť.",
+        "data": {
+          "device": "Cesta k portu alebo URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Zmena portu nanoCUL",
+        "description": "Zmeňte cestu k portu alebo URL kľúča. Ak ste pridali alebo odobrali ohrievač, zaškrtnite „Znova vyhľadať ohrievače“.",
+        "data": {
+          "device": "Cesta k portu alebo URL",
+          "rescan": "Znova vyhľadať ohrievače"
+        }
+      },
+      "reconfigure": {
+        "title": "Zmena nastavení účtu",
+        "description": "Verzia: {version}\n\nZadajte nové heslo k tomuto účtu. Na iný účet sa tu prepnúť nedá: na to pridajte novú položku.",
+        "data": {
+          "brand": "Značka",
+          "username": "E-mail",
+          "password": "Heslo"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Znova sa prihláste",
+        "description": "{brand} neprijal uložené heslo pre {username}. Zadajte aktuálne heslo.",
+        "data": {
+          "password": "Heslo"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Nesprávne používateľské meno alebo heslo (alebo klientsky kľúč).",
-      "cannot_connect": "Nemožno sa pripojiť k TermoWebu - chyba siete/DNS/SSL.",
-      "rate_limited": "Dočasne obmedzená rýchlosť podľa API. Skúste to neskôr.",
-      "unknown": "Neznáma chyba"
+      "invalid_auth": "Nesprávne používateľské meno alebo heslo (alebo kľúč klienta).",
+      "cannot_connect": "Nedá sa pripojiť k TermoWeb – chyba siete/DNS/SSL.",
+      "rate_limited": "API dočasne obmedzilo počet požiadaviek. Skúste to neskôr.",
+      "unknown": "Neznáma chyba",
+      "cannot_connect_radio": "Nedá sa pripojiť k rádiovej bráne. Skontrolujte IP adresu a port a či je brána zapnutá.",
+      "no_gateway_mac": "Rádiová brána neoznámila svoju MAC adresu. Aktualizujte firmvér brány.",
+      "no_heaters": "Neodpovedal žiadny ohrievač. Presuňte bránu bližšie k ohrievačom a skúste to znova.",
+      "cannot_connect_nanocul": "Kľúč nanoCUL sa nedá otvoriť. Skontrolujte, či je zapojený, či je port správny a či beží firmvér termoweb_rx.",
+      "nanocul_radio_missing": "Kľúč odpovedá, ale jeho rádiový modul nie je pripojený. Skontrolujte zapojenie.",
+      "gateway_radio_missing": "Brána odpovedá, ale jej rádiový modul nie je pripojený. Skontrolujte zapojenie."
+    },
+    "abort": {
+      "already_configured": "Táto brána je už nastavená.",
+      "reconfigure_successful": "Nastavenia boli uložené.",
+      "monitor_reconfigure": "Položku len na počúvanie nie je možné zmeniť. Odstráňte ju a pridajte znova.",
+      "unique_id_mismatch": "Toto je iný účet alebo zariadenie. Ak ho chcete použiť, pridajte radšej novú položku.",
+      "reauth_successful": "Nové heslo bolo uložené.",
+      "cannot_connect_radio": "Nedá sa pripojiť k rádiovej bráne. Skontrolujte, či je brána zapnutá a pripojená k vašej sieti.",
+      "no_gateway_mac": "Rádiová brána neoznámila svoju MAC adresu. Aktualizujte firmvér brány.",
+      "gateway_radio_missing": "Brána odpovedá, ale jej rádiový modul nie je pripojený. Skontrolujte zapojenie.",
+      "not_ipv4_address": "Rádiová brána oznámila len adresu IPv6. Pridajte ju ručne pomocou jej adresy IPv4.",
+      "nanocul_firmware_too_old": "Firmvér v tomto kľúči nanoCUL je príliš starý. Nahrajte do kľúča najnovší firmvér termoweb_rx (pozrite návod k nanoCUL) a skúste to znova."
+    },
+    "progress": {
+      "radio_rescan": "Kontrolujú sa všetky ohrievače vo vašej rádiovej sieti. Trvá to najviac minútu."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Možnosti TermoWeb"
+      "rehome": {
+        "title": "Presunúť ohrievače do vlastnej siete tejto inštalácie",
+        "description": "Použite to, ak vaše ohrievače stále používajú rádiovú sieť starej brány TermoWeb. Ohrievače: {heaters}.\n\nČo sa stane:\n1. Každý ohrievač sa obnoví na výrobné nastavenia. Home Assistant si predtým uloží jeho nastavenia.\n2. Ohrievače postupne prepnete do režimu párovania, jeden po druhom. Ktoré tlačidlá stlačiť, nájdete v návode k ohrievaču. Medzi ohrievačmi počkajte asi 10 sekúnd. Máte 5 minút.\n3. Ohrievače dostanú nové čísla, od 2 vyššie. Zmenia sa ich ID entít. Názvy ohrievačov zostanú rovnaké, keď Home Assistant ohrievač rozpozná.\n4. Home Assistant vráti každému ohrievaču jeho nastavenia: režim, teploty predvolieb, manuálnu teplotu a týždenný program.\n\nPočas toho je ovládanie ohrievačov pozastavené. Niektoré staršie ohrievače sa nedajú resetovať cez rádio, preto ich takto presunúť nemožno. Stlačte **Odoslať** na spustenie a po asi 10 sekundách prepnite prvý ohrievač do režimu párovania."
+      },
+      "rehome_run": { "title": "Presúvanie vašich ohrievačov" },
+      "rehome_done": {
+        "title": "Presun dokončený",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Integrácia nebeží. Najprv ju spustite a potom to skúste znova."
+    },
+    "progress": {
+      "rehome": "Ohrievače sa resetujú a potom sa čaká na ohrievače v režime párovania. Teraz prepnite jeden ohrievač do režimu párovania, potom ďalší. Skončí sa 1 minútu po spárovaní posledného ohrievača alebo po 5 minútach."
     }
   },
   "device": {
     "heater": {
       "name": "Ohrievač {addr}"
     },
+    "accumulator": {
+      "name": "Akumulátor {addr}"
+    },
     "thermostat": {
       "name": "Termostat {addr}"
+    },
+    "power_monitor": {
+      "name": "Merač výkonu {addr}"
     },
     "node": {
       "name": "Uzol {addr}"
     },
-    "power_monitor": {
-      "name": "Monitor energie {addr}"
+    "site": {
+      "name": "Domov"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Brána online"
+      "gateway_online": { "name": "Brána online" },
+      "pairing_open": {
+        "name": "Párovanie otvorené",
+        "state_attributes": { "ends_at": { "name": "Končí o" } }
       },
-      "boost_active": {
-        "name": "Zvýšenie aktívneho"
-      }
+      "boost_active": { "name": "Boost aktívny" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Vynútiť obnovenie"
-      },
-      "accumulator_boost_start": {
-        "name": "Spustenie posilnenia"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Zrušiť podporu"
-      }
+      "force_refresh": { "name": "Vynútiť obnovenie" },
+      "pair_new_heaters": { "name": "Spárovať nové ohrievače" },
+      "accumulator_boost_start": { "name": "Spustiť boost" },
+      "accumulator_boost_cancel": { "name": "Zrušiť boost" },
+      "flash_display": { "name": "Bliknúť displejom" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Trvanie zvýšenia"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Zvýšenie teploty"
-      }
+      "accumulator_boost_duration": { "name": "Trvanie boostu" },
+      "accumulator_boost_temperature": { "name": "Teplota boostu" },
+      "heater_priority": { "name": "Priorita" },
+      "installation_power_limit": { "name": "Obmedzenie výkonu" },
+      "temperature_offset": { "name": "Korekcia teploty" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Teplota"
+      "heater_temperature": { "name": "Teplota" },
+      "heater_energy_total": { "name": "Energia" },
+      "heater_power": { "name": "Výkon" },
+      "radio_address": { "name": "Rádiová adresa" },
+      "power_monitor_energy": { "name": "Energia" },
+      "power_monitor_power": { "name": "Výkon" },
+      "installation_total_energy": { "name": "Celková energia" },
+      "frames_heard": { "name": "Prijaté rámce" },
+      "boost_minutes_remaining": { "name": "Zostávajúce minúty boostu" },
+      "boost_end": { "name": "Koniec boostu" },
+      "accumulator_charging": { "name": "Nabíjanie" },
+      "accumulator_current_charge": { "name": "Aktuálne nabitie" },
+      "accumulator_target_charge": { "name": "Cieľové nabitie" },
+      "installation_info": { "name": "Umiestnenie" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Žiadna",
+              "temporary_override": "Dočasná zmena",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Detská zámka" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "Režim EASY" },
+      "open_window_detection": { "name": "Detekcia otvoreného okna" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Režim regulácie",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Hysterézia 0,25 °C",
+          "hysteresis_0_35": "Hysterézia 0,35 °C",
+          "hysteresis_0_5": "Hysterézia 0,5 °C",
+          "hysteresis_0_75": "Hysterézia 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energia"
-      },
-      "heater_power": {
-        "name": "Napájanie"
-      },
-      "power_monitor_energy": {
-        "name": "Energia"
-      },
-      "power_monitor_power": {
-        "name": "Napájanie"
-      },
-      "installation_total_energy": {
-        "name": "Celková energia"
-      },
-      "boost_minutes_remaining": {
-        "name": "Zostávajúce minúty na zvýšenie"
-      },
-      "boost_end": {
-        "name": "Zvýšenie koncovej hodnoty"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Jednotka teploty na paneli",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Konfigurácia predvoľby zvýšenia akumulátora",
-      "description": "Aktualizácia predvoleného trvania zvyšovania a/alebo teploty pre akumulátor TermoWeb. Minúty musia byť v rozmedzí od 60 do 600 v 60-minútových prírastkoch; vynechajte pole, ak chcete zachovať existujúcu hodnotu.",
+      "name": "Nastaviť predvoľbu boostu akumulátora",
+      "description": "Zmení predvolené trvanie a/alebo teplotu boostu pre akumulátor TermoWeb. Minúty musia byť od 60 do 600 v krokoch po 60 minút; ak pole vynecháte, zostane súčasná hodnota.",
       "fields": {
         "minutes": {
-          "name": "Predvolené trvanie posilnenia",
-          "description": "Počet minút, počas ktorých by malo zvýšenie tlaku bežať, ak nie je k dispozícii žiadne ovládanie (60-600, krok 60).",
+          "name": "Predvolené trvanie boostu",
+          "description": "Počet minút, koľko má boost trvať, ak nie je zadané iné trvanie (60–600, krok 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Zvýšenie teploty",
-          "description": "Voliteľná nastavená hodnota zvýšenia, ktorá sa použije počas relácie zvýšenia (°C alebo °F).",
+          "name": "Teplota boostu",
+          "description": "Voliteľná cieľová teplota počas boostu (°C alebo °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Spustenie akumulátora boost",
-      "description": "Spustite okamžité zvýšenie na akumulátore TermoWeb. Zadajte trvanie, aby ste zrušili predvolené nastavenie (60-600 minút v 60-minútových krokoch), alebo ho vynechajte, aby ste použili uloženú predvoľbu.",
+      "name": "Spustiť boost",
+      "description": "Okamžite spustí boost na akumulátore TermoWeb alebo na rádiovom ohrievači, ktorý boost podporuje. Akumulátor: zadajte trvanie (60–600 minút, v krokoch po 60), alebo ho vynechajte a použije sa uložená predvoľba. Rádiový ohrievač: trvanie vynechajte; ohrievač použije vlastný čas boostu.",
       "fields": {
         "minutes": {
-          "name": "Trvanie zvýšenia",
-          "description": "Trvanie relácie posilňovania v minútach (60-600, krok 60). Voliteľné.",
+          "name": "Trvanie boostu",
+          "description": "Trvanie boostu v minútach (60–600, krok 60). Voliteľné.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Zrušiť zvýšenie akumulátora",
-      "description": "Zrušenie aktívnej relácie boostu na akumulátore TermoWeb."
+      "name": "Zrušiť boost",
+      "description": "Zastaví boost na akumulátore TermoWeb alebo rádiovom ohrievači."
     },
     "set_schedule": {
-      "name": "Nastavenie týždenného plánu",
-      "description": "Nastavenie týždenného programu 7×24 pre ohrievač TermoWeb. Program je zoznam 168 celých čísel, kde každá hodnota zodpovedá jednej hodine v týždni počnúc pondelkom 00:00. Pre studenú predvoľbu použite 0, pre nočnú predvoľbu 1 a pre dennú predvoľbu 2.",
+      "name": "Nastaviť týždenný program",
+      "description": "Nastaví týždenný program 7×24 pre ohrievač TermoWeb. Program je zoznam 168 celých čísel, kde každá hodnota zodpovedá jednej hodine týždňa, začínajúc pondelkom 00:00. Použite 0 pre predvoľbu chlad, 1 pre predvoľbu noc a 2 pre predvoľbu deň.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "Zoznam 168 celých čísel (0, 1 alebo 2), ktoré predstavujú týždenný plán ohrievača. Index 0 je pondelok 00:00, index 1 je pondelok 01:00 atď.",
+          "description": "Zoznam 168 celých čísel (0, 1 alebo 2), ktorý predstavuje týždenný program ohrievača. Index 0 je pondelok 00:00, index 1 je pondelok 01:00 a tak ďalej.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Nastavenie prednastavených teplôt",
-      "description": "Nastavenie prednastavených studených, nočných a denných teplôt pre ohrievač TermoWeb. Všetky tri teploty môžete zadať buď ako jeden zoznam (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Nastaviť teploty predvolieb",
+      "description": "Nastaví teploty predvolieb chlad, noc a deň pre ohrievač TermoWeb. Môžete zadať všetky tri teploty ako jeden zoznam (``ptemp``) alebo každú zvlášť (``cold``, ``night`` a ``day``). Predvoľby, ktoré vynecháte, si ponechajú súčasnú hodnotu.",
       "fields": {
         "ptemp": {
-          "name": "Prednastavené teploty",
-          "description": "Zoznam troch teplôt [chlad, noc, deň] v rovnakých jednotkách ako ohrievač (°C alebo °F). Ak je uvedený, potlačí jednotlivé hodnoty studenej, nočnej a dennej teploty.",
+          "name": "Teploty predvolieb",
+          "description": "Zoznam troch teplôt [chlad, noc, deň] v rovnakých jednotkách ako ohrievač (°C alebo °F). Ak je zadaný, prepíše jednotlivé hodnoty chlad, noc a deň.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Prednastavenie za studena",
-          "description": "Teplota pre studenú predvoľbu (°C alebo °F).",
+          "name": "Predvoľba chlad",
+          "description": "Teplota pre predvoľbu chlad (°C alebo °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Nočná predvoľba",
-          "description": "Teplota pre nočnú predvoľbu (°C alebo °F).",
+          "name": "Predvoľba noc",
+          "description": "Teplota pre predvoľbu noc (°C alebo °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Prednastavený deň",
-          "description": "Prednastavená teplota pre daný deň (°C alebo °F).",
+          "name": "Predvoľba deň",
+          "description": "Teplota pre predvoľbu deň (°C alebo °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "História dovozu energie",
-      "description": "Importujte historické hodinové počítadlá energie pre ohrievače TermoWeb až rok dozadu do štatistík Home Assistant pre každý nakonfigurovaný ohrievač.",
+      "name": "Importovať históriu energie",
+      "description": "Importuje minulú hodinovú spotrebu energie každého ohrievača a merača výkonu do štatistík Home Assistant (panel Energia). Priebeh sa ukladá: ak sa import zastaví, spustite ho znova a bude pokračovať.",
       "fields": {
         "reset_progress": {
-          "name": "Obnovenie postupu",
-          "description": "Vymazať uložený priebeh a znovu importovať históriu od začiatku."
+          "name": "Vynulovať priebeh",
+          "description": "Zabudne uložený priebeh a importuje celé obdobie znova. Existujúce štatistiky sa prepíšu, nevymažú."
         },
         "max_history_retrieval": {
-          "name": "Maximálny počet dní histórie",
-          "description": "Počet dní histórie na načítanie. Prepíše nakonfigurované predvolené nastavenie len pre tento import."
+          "name": "Max. počet dní histórie",
+          "description": "Koľko dní dozadu importovať (1 až 3650, predvolene 7). Ak ste už importovali menej dní, načítajú sa len staršie dni."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Záznam rádiovej komunikácie",
+      "description": "Istý čas zaznamenáva každý rádiový rámec, ktorý brána alebo nanoCUL zachytí, a uloží ho ako súbor JSON do konfiguračného priečinka Home Assistant. Nikdy nevysiela. Pri bežnej rádiovej položke čakajú príkazy pre ohrievače, kým záznam neskončí.",
+      "fields": {
+        "entry_id": {
+          "name": "ID položky konfigurácie",
+          "description": "Položka konfigurácie rádiovej brány alebo nanoCUL, ktorá sa má použiť, zvyčajne tá len na počúvanie.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Trvanie",
+          "description": "Ako dlho zaznamenávať, 10 až 1800 sekúnd."
+        },
+        "redact": {
+          "name": "Skryť súkromné údaje",
+          "description": "Nahradí ID siete a sériové čísla ohrievačov v súbore. Bez toho súbor obsahuje ID vašej siete: zdieľajte ho len súkromne."
+        },
+        "note": {
+          "name": "Poznámka",
+          "description": "Voliteľný text uložený v súbore, napríklad ktorý ohrievač ste použili.",
+          "example": "zvýšená teplota ohrievača v obývačke"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Prieskum rádiovej komunikácie",
+      "description": "Istý čas počúva všetku rádiovú komunikáciu v pásme ohrievačov, aj tú, ktorej táto integrácia nerozumie, a uloží súbor so správou do konfiguračného priečinka Home Assistant. Priložte súbor k issue na GitHube, ak chcete požiadať o podporu nového typu ohrievača.",
+      "fields": {
+        "entry_id": {
+          "name": "ID položky konfigurácie",
+          "description": "Položka konfigurácie rádiovej brány alebo nanoCUL, ktorá sa má použiť.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Trvanie",
+          "description": "Ako dlho počúvať. Ohrievače vysielajú najviac, keď začnú alebo prestanú kúriť."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Rádiový reset na výrobné nastavenia",
+      "description": "DEŠTRUKTÍVNE. Obnoví jeden rádiový ohrievač na výrobné nastavenia. Ohrievač stratí všetky nastavenia, hodiny, týždenný program aj rádiové spárovanie a prestane komunikovať s Home Assistant. Jeho posledné známe nastavenia sa predtým uložia. Ak chcete ohrievač znova používať, stlačte „Spárovať nové ohrievače“ na zariadení brány a prepnite ohrievač do režimu párovania. Uložené nastavenia sa vrátia, keď ho integrácia rozpozná. Niektoré staršie ohrievače sa nedajú resetovať cez rádio: resetujte ich ručne (pozrite návod k ohrievaču).",
+      "fields": {
+        "entry_id": {
+          "name": "ID položky konfigurácie",
+          "description": "Položka konfigurácie rádiovej brány alebo nanoCUL, ktorá sa má použiť.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Číslo ohrievača",
+          "description": "Rádiové číslo ohrievača (číslo v názve „Ohrievač 6“)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Rádio: presunúť ohrievače do vlastnej siete",
+      "description": "Presunie všetky ohrievače rádiovej položky do vlastnej rádiovej siete tejto inštalácie. Každý ohrievač sa najprv resetuje (jeho nastavenia sa uložia), potom ohrievače postupne prepnete do režimu párovania. Ohrievače dostanú nové čísla od 2 vyššie a ich nastavenia sa obnovia. Niektoré staršie ohrievače sa nedajú resetovať cez rádio, preto ich takto presunúť nemožno. Počas toho je ovládanie ohrievačov pozastavené.",
+      "fields": {
+        "entry_id": {
+          "name": "ID položky konfigurácie",
+          "description": "Položka konfigurácie rádiovej brány alebo nanoCUL, ktorá sa má použiť.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Čas čakania",
+          "description": "Ako dlho čakať na stlačenie párovacích tlačidiel ohrievačov."
         }
       }
     }

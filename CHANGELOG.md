@@ -1,122 +1,62 @@
 # Changelog
 
-## 2.4.0b8 (pre-release, 2026-10-11)
+## 2.4.0b9 (pre-release, 2026-10-11)
 
-Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
+Release candidate for 2.4.0. HACS shows it only when "Show beta versions" is enabled for this repository.
 
-### Changed
-- Heaters without boost no longer show a preset choice. Before, they offered only **None**, which did nothing useful. To end a temporary temperature change while in Auto, select **Auto** again. Accumulators and heaters with boost keep their presets.
+The big change: you can now control your heaters **locally, without the cloud and without the vendor gateway**, through a small 868 MHz radio. Use a nanoCUL USB stick (easiest, no soldering) or a home-built ESP32 radio gateway. Cloud accounts (TermoWeb, Ducaheat, Tevolve) work as before.
 
-## 2.4.0b7 (pre-release, 2026-10-11)
-
-Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
-
-### Added
-- nanoCUL stick: new firmware **3.7-nanocul** in this repository (`firmware/nanocul`). The stick now works with the same heaters as the ESP32 gateway, and has the same commands: radio survey, frequency setting and network id. Download the ready-made file from the release page, or build it yourself; see [Radio stick: use a nanoCUL USB stick](docs/radio_nanocul.md), step 2.
-- The radio survey (**TermoWeb: Radio survey**) also works with a nanoCUL stick that has the new firmware.
-- Radio: heaters that keep their own energy meter now report it. The **Energy** sensor now shows that meter, read every 10 minutes, instead of an estimate. The first reading after this update is the heater's total so far, so the Energy Dashboard can show one large step that day. Heaters without a meter keep the estimate.
-- Radio: heaters that support it can **boost**. Choose the **Boost** preset on the heater, or use the **Start boost** and **Cancel boost** actions. The heater boosts for its own boost time, so leave the duration out. The heater shows when the boost ends.
-- Radio: heaters that support it get two switches, **Runback** and **EASY mode**. When you turn Runback off, the heater gets back the mode and temperature it had before.
-- Radio: heater advanced settings under the device's **Configuration**: **Temperature offset**, **Control mode**, **Panel temperature unit**, **Open window detection** and **True radiant**. The heater cannot report them, so they show **Unknown** until you set them in Home Assistant. When you set one, the others are sent too (unknown ones as the factory defaults). Heaters that do not support these settings show them as unavailable.
-
-### Changed
-- The **Start accumulator boost** and **Cancel accumulator boost** actions are now called **Start boost** and **Cancel boost**, because they also work for radio heaters.
-- Radio setup: the radio type is always detected by itself. The radio type choice is gone from the ESP32 gateway and nanoCUL forms (the nanoCUL forms now ask only for the port). A nanoCUL with old firmware that cannot detect it stops the setup with "The firmware on this nanoCUL stick is too old": put the new firmware on the stick, then try again. Listen only still works with old firmware.
-- Radio: Home Assistant no longer has a built-in network id for any heater. A new gateway learns its heaters' network from their radio traffic, or uses its own network when you pair heaters. Gateways you already set up keep the network they have. A nanoCUL stick with the old firmware (3.5) cannot change its network: update it to the new firmware.
-- ESP32 gateway and nanoCUL firmware: after a restart the network id is empty until Home Assistant sets it (Home Assistant always sets it when it connects).
-- Docs: the README and the radio guides are rewritten for local-first use: why a local radio is cheaper and more private, a comparison of the nanoCUL stick and the ESP32 gateway, shopping lists, and step-by-step firmware flashing (in the browser first, then a desktop program, then the command line).
-
-### Fixed
-- nanoCUL stick (new firmware): the stick now notices when its radio module (CC1101) is missing or not wired. It says so when it starts, refuses to send, and the setup stops with "The stick answers, but its radio module is not connected. Check the wiring." Before, it acted as if it had sent.
-- nanoCUL stick (new firmware): the stick acks only frames with a valid checksum, and letters inside a command's hex value (for example `NAFDA`) are no longer run as separate commands.
-
-## 2.4.0b6 (pre-release, 2026-10-11)
-
-Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
-
-### Added
-- Radio: **Download diagnostics** now includes the last 200 radio messages the gateway heard and sent, with counts per kind (own network, other networks, pairing announcements, acks, sent). Heater serial numbers and network ids are hidden. This helps us find out why a heater does not pair.
-
-### Removed
-- Radio: the separate ways to pair heaters are gone, because heaters now pair by themselves. The setup menu offers **Add the gateway** and **Listen only**; the **Pair new heaters** menu choice and the **TermoWeb: Radio pair** action were removed. To pair a heater, put it into pairing mode within 30 minutes of adding the gateway, or press **Pair new heaters** on the gateway device first. A heater you reset gets its saved settings back when it is recognised.
-
-## 2.4.0b5 (pre-release, 2026-10-11)
-
-Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
-
-### Added
-- Radio: heaters pair by themselves. Put the heater into pairing mode within 30 minutes of adding the gateway, or press **Pair new heaters** on the gateway device first (this opens pairing for 10 minutes). The heater is paired, gets its clock (and, for a heater you had before, its settings) back, and appears under **Devices** with a "Found TermoWeb heater" notification. You can pair several heaters, one after the other.
-- Radio: the gateway device has a **Pairing open** sensor. It is on while new heaters are paired, and shows when pairing closes.
-- Radio: a new gateway that has not found its heaters yet now sets up at once (gateway device, **Pair new heaters**, **Pairing open**). It runs on your installation's own radio network, so a heater can be paired even when it is idle or belongs to another gateway or Home Assistant. Heaters that already work with another gateway are still found in the background.
-
-### Changed
-- Radio: outside the pairing time, a heater in pairing mode is ignored. This keeps a neighbour's heater out of your installation.
-- Radio: the options no longer have **Pair a new heater**; use the **Pair new heaters** button instead. **Configure** now opens **Move heaters to this installation's own network** directly.
-
-### Fixed
-- Radio: while a new gateway is still looking for your heaters, a heater in pairing mode is no longer mistaken for your heaters' radio network.
-
-## 2.4.0b4 (pre-release, 2026-10-11)
-
-Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
-
-### Changed
-- Radio setup (ESP32 gateway and nanoCUL) no longer waits up to 6 minutes for your heaters. Choose **Add the gateway and find my heaters**: setup finishes at once. The integration then listens in the background and adds each heater by itself, usually within a few minutes. You get a notification for each heater it finds.
-- Radio: a heater that is paired to your heaters' network but not set up yet is added by itself as soon as it talks. A heater paired again at a new radio number keeps its device and entities.
-
-## 2.4.0b3 (pre-release, 2026-10-11)
-
-Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
-
-### Added
-- ESP32 radio gateway: Home Assistant finds the gateway by itself. After you flash the updated `esphome/termoweb-radio.yaml`, the gateway shows up under **Settings → Devices & Services → Discovered**. Click **Add**, confirm, and choose how to find your heaters. You type nothing. When the gateway gets a new IP address, the existing entry follows it by itself.
-- nanoCUL stick: the setup form pre-selects the most likely USB port (a port named after a CUL, or the only free USB serial port).
-
-### Changed
-- Radio setup forms no longer ask for a network id. Setup learns it from the heaters' radio traffic, and pairing creates one for your installation. Existing entries keep their stored network id.
-- The manual ESP32 gateway form asks only for the IP address. Port (2323) and radio dialect moved to a collapsed **Advanced settings** section, as did the nanoCUL dialect.
-- Radio setup no longer refuses a gateway or stick that another entry uses. Home Assistant takes the connection over; the other entry loses it.
-- Radio: the site device is now called "Home" (a name you set yourself is kept).
-- Radio: devices show the real maker. Heaters and the site say "TermoWeb", the ESP32 gateway says "ESPHome", and the nanoCUL stick says "nanoCUL". The gateway is named "Radio gateway" (ESP32) or "nanoCUL stick". Cloud accounts are unchanged.
-
-## 2.4.0b2 (pre-release, 2026-10-11)
-
-Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
-
-### Changed
-- The integration is now listed as **local push** instead of cloud: with a nanoCUL stick or the ESP32 radio gateway it works without internet access. Cloud accounts work as before.
-- Setup menu order: cloud account, then the **nanoCUL USB stick** (easiest, no soldering), then the ESP32 radio gateway (advanced, needs soldering).
-- Radio gateway: each heater's power is now read from the heater itself. Dialect-B heaters report their rated power in their identity record; dialect-A heaters report their measured power. The power limit and the estimated energy and power sensors now work without any setup.
-- Radio gateway: heaters are named and identified by serial number (for example **Heater X123456**) instead of their radio number, which depends on the pairing order. A heater paired again at another number keeps its device, entities and history. On the first start each heater is asked for its serial; its device and entities move to the serial by themselves. Entity IDs, history and customisations are kept; entity IDs such as `climate.heater_2` are not renamed. Serials are hidden in diagnostics and logs. The serial is shown in the device info, and a new **Radio address** diagnostic sensor (disabled by default) shows the heater's current radio number.
-
-### Removed
-- Radio gateway: the manual heater power field in the integration options (**Configure** → **Settings**). Stored values are removed on upgrade.
-
-## 2.4.0b1 (pre-release, 2026-10-11)
-
-Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
-
-### Requirements
+### Before you upgrade
 - Home Assistant **2026.10.0** or newer is required (HACS enforces it).
+- Entity unique IDs move to one scheme on upgrade. Entity IDs, history and customisations are kept. If an old, unavailable duplicate remains (for example the 2.3.0 "Installation info" sensor), delete the unavailable one.
+- The **Start accumulator boost** and **Cancel accumulator boost** actions are now called **Start boost** and **Cancel boost**. Update automations and scripts that use them.
+- The `ws_debug_probe` action and the **debug** option are removed. Use Home Assistant's `logger:` settings for `custom_components.termoweb` (see DEBUG.md).
 
-### Added
-- Re-authentication: when your password changes, Home Assistant asks for the new password (Settings → Repairs or the integration card) and reloads the integration.
-- **Reconfigure** now reloads the integration.
+### Added: local radio control
+- **Two kinds of radio.** A **nanoCUL USB stick** with this project's firmware (the ready-made file is attached to each release), or an **ESP32 radio gateway** built with ESPHome. See [Radio stick: use a nanoCUL USB stick](docs/radio_nanocul.md) and [Radio gateway: build your own with an ESP32](docs/radio_gateway.md).
+- **Easy setup.** Home Assistant finds an ESP32 gateway on your network by itself (**Settings → Devices & Services → Discovered**). For a nanoCUL stick, the form pre-selects the most likely USB port. You do not type a network id or a radio type: they are found by themselves.
+- **Heaters are added by themselves.** Setup finishes at once. Heaters that already work with another gateway are found in the background, usually within a few minutes, and you get a notification for each one.
+- **Pairing.** Put a heater into pairing mode within 30 minutes of adding the gateway, or press **Pair new heaters** on the gateway device first (pairing then stays open for 10 minutes). The **Pairing open** sensor shows when pairing is open. Outside that time, heaters in pairing mode are ignored, so a neighbour's heater stays out.
+- **Heaters keep their identity.** Heaters are named and identified by serial number (for example **Heater X123456**), not by their radio number. A heater paired again keeps its device, entities and history, and gets its saved settings back.
+- **Control.** Mode, target temperature, the three preset temperatures and the weekly schedule. Power and estimated energy work without setup; heaters that keep their own energy meter report it, read every 10 minutes.
+- **Heater features, where the heater supports them.** **Boost** (the **Boost** preset, or the **Start boost** and **Cancel boost** actions); **Runback** and **EASY mode** switches; and advanced settings under the device's **Configuration**: **Temperature offset**, **Control mode**, **Panel temperature unit**, **Open window detection** and **True radiant**. The heater cannot report the advanced settings, so they show **Unknown** until you set them in Home Assistant.
+- **Move heaters to your own network.** **Configure** on a radio entry moves heaters from an old vendor gateway's radio network to this installation's own network.
+- **Tools.** **Radio survey** and **Radio capture** actions record what the radio hears, and **Download diagnostics** includes the last 200 radio messages. Serial numbers and network ids are hidden. A **Radio address** diagnostic sensor (disabled by default) shows each heater's current radio number.
+- **Listen only.** A listen-only entry shows what the radio hears without controlling anything.
+- The integration is now listed as **local push**.
+
+### Added: cloud accounts
+- Re-authentication: when your password changes, Home Assistant asks for the new one and reloads the integration.
+- **Reconfigure** reloads the integration.
 - The same account cannot be added twice. Ducaheat and Tevolve count as the same account. Email case does not matter.
-- Climate `turn_on` and `turn_off` are supported.
+- Climate **turn on** and **turn off** are supported.
 - Energy history import options: `max_history_retrieval` (1 to 3650 days) and `reset_progress`.
+- Translations for 25 languages cover all of the integration's text.
+
+### Added: the schedule card installs itself
+- The **TermoWeb Schedule** card (weekly schedule and preset temperatures) now comes with the integration. You no longer copy a file or add a dashboard resource: edit a dashboard, click **+ Add card** and search for `termoweb`. It works for cloud and radio heaters. See [Schedule card: edit the weekly schedule](docs/schedule_card.md).
+- If you installed the card by hand before, the integration replaces the old dashboard resource by itself. You can delete the `www/termoweb` folder.
+- If you manage dashboard resources in YAML, add `/termoweb/termoweb_schedule_card.js` as a module resource yourself.
 
 ### Changed
-- Entity unique IDs move to one scheme on upgrade. Entity IDs, history and customisations are kept. If an old unavailable duplicate remains (for example the 2.3.0 "Installation info" sensor), delete the unavailable one.
+- Heaters without boost show no preset choice. To end a temporary temperature change while in Auto, select **Auto** again.
 - Energy history import was rewritten: correct sums, resumable, a re-import overwrites in place, limited to 2 requests per second. Run it once.
-- All cloud (REST) requests are limited to 2 per second. The integration prefers the WebSocket for updates.
+- All cloud requests are limited to 2 per second. The integration prefers the WebSocket for updates.
 - Entities show **unavailable** when the cloud cannot be reached.
 - Gateway ids are masked in logs at INFO level and above.
+- Docs: the README and the radio guides are rewritten for local-first use, with shopping lists and step-by-step instructions.
 
 ### Fixed
 - Devices that use °F show correct temperatures.
-- Boost works for 60 to 600 minutes. The boost buttons work. The boost duration and boost temperature numbers write to the device.
+- Accumulator boost works for 60 to 600 minutes. The boost buttons work. The boost duration and boost temperature numbers write to the device.
+- Setting a temperature together with a mode now respects that mode.
+- The schedule card shows the selected heater in its list when it first opens.
 
 ### Removed
-- The `ws_debug_probe` action and the **debug** option. Use Home Assistant's `logger:` settings for `custom_components.termoweb` (see DEBUG.md).
+- The `ws_debug_probe` action and the **debug** option.
 - The `python-socketio` dependency.
+- The manual card install guide and the `install_termoweb_card.sh` script. The card installs itself.
+
+### Known limitations
+- Heater control pauses while a radio survey, capture or pairing runs.
+- The nanoCUL firmware is new; please report any problems.

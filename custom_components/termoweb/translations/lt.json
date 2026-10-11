@@ -1,174 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Kaip prijungti jūsų šildytuvai?",
+        "description": "Pasirinkite debesijos paskyrą, jei naudojate TermoWeb, Ducaheat arba Tevolve programėlę. Norint valdyti šildytuvus vietoje be debesijos, paprasčiausia naudoti nanoCUL USB adapterį, įkištą į šį Home Assistant kompiuterį (nereikia lituoti). ESP32 radijo šliuzas skirtas pažengusiems naudotojams: jį reikia surinkti ir sulituoti.",
+        "menu_options": {
+          "cloud": "Debesijos paskyra (TermoWeb, Ducaheat arba Tevolve programėlė)",
+          "nanocul": "Vietinis radijas: nanoCUL USB adapteris (paprasčiausia, nereikia lituoti)",
+          "radio": "Vietinis radijo šliuzas: ESP32 + CC1101 (pažengusiems, reikia lituoti)"
+        }
+      },
       "cloud": {
-        "title": "Prisijunkite prie \"TermoWeb\" šeimos šildytuvų",
-        "description": "Versija: {version}\n\nPasirinkite \"TermoWeb\" arba \"Ducaheat\" prekės ženklą ir įveskite savo paskyros duomenis.",
+        "title": "Prisijungimas prie TermoWeb šeimos šildytuvų",
+        "description": "Versija: {version}\n\nPasirinkite TermoWeb, Ducaheat arba Tevolve prekės ženklą ir įveskite savo paskyros prisijungimo duomenis. Tevolve naudoja Ducaheat serverį.",
         "data": {
           "brand": "Prekės ženklas",
           "username": "El. paštas",
           "password": "Slaptažodis"
         }
+      },
+      "radio": {
+        "title": "Prisijungimas prie radijo šliuzo",
+        "description": "Home Assistant paprastai pats suranda ESP32 radijo šliuzą: ieškokite jo skiltyje **Aptikta** puslapyje „Įrenginiai ir paslaugos“. Naudokite šią formą tik tada, jei jo ten nėra. Įveskite šliuzo IP adresą. Kitame žingsnyje pasirinksite: pridėti šliuzą ir leisti jam surasti šildytuvus arba susieti naujus šildytuvus.",
+        "data": {
+          "host": "Šliuzo IP adresas"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Išplėstiniai nustatymai",
+            "description": "Nekeiskite šių nustatymų, nebent pakeitėte šliuzo programinę įrangą.",
+            "data": {
+              "port": "Prievadas"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Rastas radijo šliuzas",
+        "description": "Rastas TermoWeb radijo šliuzas adresu {host}. Ar jį nustatyti?\n\nKitame žingsnyje pasirinksite: pridėti šliuzą (jis suras ir susies jūsų šildytuvus) arba tik klausytis."
+      },
+      "radio_method": {
+        "title": "Šliuzo pridėjimas",
+        "description": "Pasirinkite „Pridėti šliuzą“, jei norite valdyti šildytuvus. Nustatymas baigiamas iš karto. Tada:\n\n- Šildytuvai, kurie jau veikia su TermoWeb šliuzu ar programėle, randami patys, paprastai per kelias minutes. Šildytuvai siunčia signalą, kai pradeda šildyti, todėl padeda padidinti vieno šildytuvo temperatūrą.\n- Nauji arba atstatyti šildytuvai: per 30 minučių įjunkite kiekvieno šildytuvo susiejimo režimą. Kuriuos mygtukus spausti, nurodyta šildytuvo instrukcijoje. Susiekite po vieną šildytuvą. Vėliau pirmiausia paspauskite **Susieti naujus šildytuvus** šliuzo įrenginyje.\n\nApie kiekvieną pridėtą šildytuvą gausite pranešimą.\n\nPasirinkite „Tik klausytis“, jei norite bandymui įrašyti radijo srautą šalia vis dar veikiančio TermoWeb šliuzo. Šiuo režimu integracija niekada nesiunčia signalų ir neprideda šildytuvų.",
+        "menu_options": {
+          "radio_discover": "Pridėti šliuzą",
+          "radio_monitor": "Tik klausytis (įrašyti radijo srautą, niekada nesiųsti)"
+        }
+      },
+      "radio_rescan": { "title": "Ieškoma jūsų šildytuvų" },
+      "reconfigure_radio": {
+        "title": "Radijo šliuzo keitimas",
+        "description": "Pakeiskite šliuzo adresą. Pažymėkite „Iš naujo ieškoti šildytuvų“, jei pridėjote arba pašalinote šildytuvą.",
+        "data": {
+          "host": "Šliuzo IP adresas",
+          "port": "Prievadas",
+          "rescan": "Iš naujo ieškoti šildytuvų"
+        }
+      },
+      "nanocul": {
+        "title": "Prisijungimas prie nanoCUL USB adapterio",
+        "description": "Pasirinkite nanoCUL adapterio prievadą. Jei Home Assistant atpažino adapterį, jis jau pasirinktas: tiesiog paspauskite „Pateikti“. Kitame žingsnyje pasirinksite: pridėti šliuzą ir leisti jam surasti šildytuvus arba susieti naujus šildytuvus.",
+        "data": {
+          "device": "USB prievadas"
+        }
+      },
+      "nanocul_manual": {
+        "title": "nanoCUL prievado įvedimas",
+        "description": "Įveskite prievado kelią, pavyzdžiui, /dev/serial/by-id/usb-..., arba tinklo adresą, pavyzdžiui, socket://192.0.2.10:2323, jei adapteris bendrinamas per tinklą.",
+        "data": {
+          "device": "Prievado kelias arba URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "nanoCUL prievado keitimas",
+        "description": "Pakeiskite adapterio prievado kelią arba URL. Pažymėkite „Iš naujo ieškoti šildytuvų“, jei pridėjote arba pašalinote šildytuvą.",
+        "data": {
+          "device": "Prievado kelias arba URL",
+          "rescan": "Iš naujo ieškoti šildytuvų"
+        }
+      },
+      "reconfigure": {
+        "title": "Paskyros nustatymų keitimas",
+        "description": "Versija: {version}\n\nĮveskite naują šios paskyros slaptažodį. Čia negalite pereiti prie kitos paskyros: tam pridėkite naują įrašą.",
+        "data": {
+          "brand": "Prekės ženklas",
+          "username": "El. paštas",
+          "password": "Slaptažodis"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Prisijunkite iš naujo",
+        "description": "{brand} nepriėmė išsaugoto naudotojo {username} slaptažodžio. Įveskite dabartinį slaptažodį.",
+        "data": {
+          "password": "Slaptažodis"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Netinkamas vartotojo vardas arba slaptažodis (arba kliento raktas).",
-      "cannot_connect": "Nepavyksta prisijungti prie \"TermoWeb\" - tinklo/DNS/SSL klaida.",
-      "rate_limited": "Laikinai apribota API norma. Pabandykite dar kartą vėliau.",
-      "unknown": "Nežinoma klaida"
+      "invalid_auth": "Neteisingas naudotojo vardas arba slaptažodis (arba kliento raktas).",
+      "cannot_connect": "Nepavyko prisijungti prie TermoWeb – tinklo/DNS/SSL klaida.",
+      "rate_limited": "API laikinai apribojo užklausų skaičių. Bandykite vėliau.",
+      "unknown": "Nežinoma klaida",
+      "cannot_connect_radio": "Nepavyko prisijungti prie radijo šliuzo. Patikrinkite IP adresą ir prievadą bei ar šliuzas įjungtas.",
+      "no_gateway_mac": "Radijo šliuzas nepranešė savo MAC adreso. Atnaujinkite šliuzo programinę įrangą.",
+      "no_heaters": "Neatsakė nė vienas šildytuvas. Perkelkite šliuzą arčiau šildytuvų ir bandykite dar kartą.",
+      "cannot_connect_nanocul": "Nepavyko atidaryti nanoCUL adapterio. Patikrinkite, ar jis įkištas, ar prievadas teisingas ir ar jame įdiegta termoweb_rx programinė įranga.",
+      "nanocul_radio_missing": "Adapteris atsako, bet jo radijo modulis neprijungtas. Patikrinkite laidų jungtis.",
+      "gateway_radio_missing": "Šliuzas atsako, bet jo radijo modulis neprijungtas. Patikrinkite laidų jungtis."
+    },
+    "abort": {
+      "already_configured": "Šis šliuzas jau nustatytas.",
+      "reconfigure_successful": "Nustatymai išsaugoti.",
+      "monitor_reconfigure": "Tik klausymosi įrašo pakeisti negalima. Ištrinkite jį ir pridėkite iš naujo.",
+      "unique_id_mismatch": "Tai kita paskyra arba įrenginys. Jei norite jį naudoti, verčiau pridėkite naują įrašą.",
+      "reauth_successful": "Naujas slaptažodis išsaugotas.",
+      "cannot_connect_radio": "Nepavyko prisijungti prie radijo šliuzo. Patikrinkite, ar šliuzas įjungtas ir prijungtas prie jūsų tinklo.",
+      "no_gateway_mac": "Radijo šliuzas nepranešė savo MAC adreso. Atnaujinkite šliuzo programinę įrangą.",
+      "gateway_radio_missing": "Šliuzas atsako, bet jo radijo modulis neprijungtas. Patikrinkite laidų jungtis.",
+      "not_ipv4_address": "Radijo šliuzas paskelbė tik IPv6 adresą. Pridėkite jį rankiniu būdu su jo IPv4 adresu.",
+      "nanocul_firmware_too_old": "Šio nanoCUL adapterio programinė įranga per sena. Įrašykite į adapterį naujausią termoweb_rx programinę įrangą (žr. nanoCUL vadovą) ir bandykite dar kartą."
+    },
+    "progress": {
+      "radio_rescan": "Tikrinami visi jūsų radijo tinklo šildytuvai. Tai užtrunka iki minutės."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "\"TermoWeb\" parinktys"
+      "rehome": {
+        "title": "Šildytuvų perkėlimas į šios sistemos tinklą",
+        "description": "Naudokite tai, kai jūsų šildytuvai vis dar naudoja seno TermoWeb šliuzo radijo tinklą. Šildytuvai: {heaters}.\n\nKas vyksta:\n1. Kiekvienam šildytuvui atkuriami gamykliniai nustatymai. Prieš tai Home Assistant išsaugo jo nustatymus.\n2. Po vieną įjungiate šildytuvų susiejimo režimą. Kuriuos mygtukus spausti, nurodyta šildytuvo instrukcijoje. Tarp šildytuvų palaukite apie 10 sekundžių. Turite 5 minutes.\n3. Šildytuvai gauna naujus numerius nuo 2 ir toliau. Jų objektų ID pasikeičia. Šildytuvų pavadinimai išlieka tokie patys, kai Home Assistant atpažįsta šildytuvą.\n4. Home Assistant grąžina kiekvienam šildytuvui jo nustatymus: režimą, išankstinių nustatymų temperatūras, rankinę temperatūrą ir savaitės programą.\n\nKol tai vyksta, šildytuvų valdymas sustabdomas. Kai kurių senesnių šildytuvų negalima atstatyti radijo ryšiu, todėl jų šiuo būdu perkelti negalima. Paspauskite **Pateikti**, kad pradėtumėte, tada maždaug po 10 sekundžių įjunkite pirmojo šildytuvo susiejimo režimą."
+      },
+      "rehome_run": { "title": "Perkeliami jūsų šildytuvai" },
+      "rehome_done": {
+        "title": "Perkėlimas baigtas",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Integracija neveikia. Pirmiausia ją paleiskite ir bandykite dar kartą."
+    },
+    "progress": {
+      "rehome": "Atstatomi šildytuvai, tada laukiama šildytuvų susiejimo režimu. Dabar įjunkite vieno šildytuvo susiejimo režimą, tada kito. Procesas sustoja praėjus 1 minutei po paskutinio šildytuvo susiejimo arba po 5 minučių."
+    }
+  },
+  "device": {
+    "heater": {
+      "name": "Šildytuvas {addr}"
+    },
+    "accumulator": {
+      "name": "Akumuliacinis šildytuvas {addr}"
+    },
+    "thermostat": {
+      "name": "Termostatas {addr}"
+    },
+    "power_monitor": {
+      "name": "Galios matuoklis {addr}"
+    },
+    "node": {
+      "name": "Mazgas {addr}"
+    },
+    "site": {
+      "name": "Namai"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Vartai internetu"
+      "gateway_online": { "name": "Šliuzas prisijungęs" },
+      "pairing_open": {
+        "name": "Susiejimas atidarytas",
+        "state_attributes": { "ends_at": { "name": "Baigiasi" } }
       },
-      "boost_active": {
-        "name": "Didinti aktyvumą"
-      }
+      "boost_active": { "name": "Intensyvus šildymas įjungtas" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Priverstinis atnaujinimas"
-      },
-      "accumulator_boost_start": {
-        "name": "Pradėti didinti"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Atšaukti postūmį"
-      }
+      "force_refresh": { "name": "Priverstinai atnaujinti" },
+      "pair_new_heaters": { "name": "Susieti naujus šildytuvus" },
+      "accumulator_boost_start": { "name": "Pradėti intensyvų šildymą" },
+      "accumulator_boost_cancel": { "name": "Atšaukti intensyvų šildymą" },
+      "flash_display": { "name": "Mirksėti ekranu" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Didinimo trukmė"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Padidinti temperatūrą"
-      }
+      "accumulator_boost_duration": { "name": "Intensyvaus šildymo trukmė" },
+      "accumulator_boost_temperature": { "name": "Intensyvaus šildymo temperatūra" },
+      "heater_priority": { "name": "Prioritetas" },
+      "installation_power_limit": { "name": "Galios riba" },
+      "temperature_offset": { "name": "Temperatūros pataisa" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatūra"
+      "heater_temperature": { "name": "Temperatūra" },
+      "heater_energy_total": { "name": "Energija" },
+      "heater_power": { "name": "Galia" },
+      "radio_address": { "name": "Radijo adresas" },
+      "power_monitor_energy": { "name": "Energija" },
+      "power_monitor_power": { "name": "Galia" },
+      "installation_total_energy": { "name": "Bendra energija" },
+      "frames_heard": { "name": "Gauti kadrai" },
+      "boost_minutes_remaining": { "name": "Likusios intensyvaus šildymo minutės" },
+      "boost_end": { "name": "Intensyvaus šildymo pabaiga" },
+      "accumulator_charging": { "name": "Įkrovimas" },
+      "accumulator_current_charge": { "name": "Dabartinis įkrovimas" },
+      "accumulator_target_charge": { "name": "Tikslinis įkrovimas" },
+      "installation_info": { "name": "Vieta" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Nėra",
+              "temporary_override": "Laikinas pakeitimas",
+              "boost": "Intensyvus"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Apsauga nuo vaikų" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "EASY režimas" },
+      "open_window_detection": { "name": "Atviro lango aptikimas" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Valdymo režimas",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Histerezė 0,25 °C",
+          "hysteresis_0_35": "Histerezė 0,35 °C",
+          "hysteresis_0_5": "Histerezė 0,5 °C",
+          "hysteresis_0_75": "Histerezė 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energija"
-      },
-      "heater_power": {
-        "name": "Maitinimas"
-      },
-      "power_monitor_energy": {
-        "name": "Energija"
-      },
-      "power_monitor_power": {
-        "name": "Maitinimas"
-      },
-      "installation_total_energy": {
-        "name": "Bendra energija"
-      },
-      "boost_minutes_remaining": {
-        "name": "Likusios \"Boost\" minutės"
-      },
-      "boost_end": {
-        "name": "Didinimo pabaiga"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Ekrano temperatūros vienetas",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Sukonfigūruokite išankstinę akumuliatoriaus didinimo nuostatą",
-      "description": "Atnaujinkite numatytąją \"TermoWeb\" akumuliatoriaus didinimo trukmę ir (arba) temperatūrą. Minučių intervalas turi būti nuo 60 iki 600 minučių su 60 minučių žingsniu; jei norite išlaikyti esamą vertę, lauką praleiskite.",
+      "name": "Akumuliacinio šildytuvo intensyvaus šildymo nustatymas",
+      "description": "Atnaujinkite TermoWeb akumuliacinio šildytuvo numatytąją intensyvaus šildymo trukmę ir (arba) temperatūrą. Minučių turi būti nuo 60 iki 600, 60 minučių žingsniu; jei norite palikti esamą reikšmę, lauko nepildykite.",
       "fields": {
         "minutes": {
-          "name": "Numatytoji didinimo trukmė",
-          "description": "Minučių skaičius, kiek turėtų veikti postūmis, kai nenumatytas joks valdymas (60-600, žingsnis 60).",
+          "name": "Numatytoji intensyvaus šildymo trukmė",
+          "description": "Kiek minučių trunka intensyvus šildymas, kai kita trukmė nenurodyta (60–600, žingsnis 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Padidinti temperatūrą",
-          "description": "Neprivaloma didinimo nustatyta vertė, kuri taikoma didinimo seanso metu (°C arba °F).",
+          "name": "Intensyvaus šildymo temperatūra",
+          "description": "Neprivaloma nustatytoji temperatūra intensyvaus šildymo metu (°C arba °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Akumuliatoriaus paleidimo postūmis",
-      "description": "Iš karto padidinkite \"TermoWeb\" akumuliatoriaus apkrovą. Nurodykite trukmę, kad pakeistumėte numatytuosius nustatymus (60-600 minučių po 60 minučių), arba jos nenurodykite, kad būtų naudojamas išsaugotas išankstinis nustatymas.",
+      "name": "Pradėti intensyvų šildymą",
+      "description": "Iš karto pradeda intensyvų šildymą TermoWeb akumuliaciniame šildytuve arba radijo šildytuve, kuris tai palaiko. Akumuliacinis šildytuvas: nurodykite trukmę (60–600 minučių, 60 žingsniu) arba palikite tuščią, kad būtų naudojamas išsaugotas nustatymas. Radijo šildytuvas: trukmę palikite tuščią; šildytuvas intensyviai šildo savo nustatytą laiką.",
       "fields": {
         "minutes": {
-          "name": "Didinimo trukmė",
-          "description": "Padidinimo seanso trukmė minutėmis (60-600, žingsnis 60). Neprivaloma.",
+          "name": "Intensyvaus šildymo trukmė",
+          "description": "Intensyvaus šildymo trukmė minutėmis (60–600, žingsnis 60). Neprivaloma.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Atšaukti akumuliatoriaus didinimą",
-      "description": "Atšaukite aktyvią \"TermoWeb\" akumuliatoriaus didinimo sesiją."
+      "name": "Atšaukti intensyvų šildymą",
+      "description": "Sustabdo intensyvų šildymą TermoWeb akumuliaciniame šildytuve arba radijo šildytuve."
     },
     "set_schedule": {
-      "name": "Nustatykite savaitės tvarkaraštį",
-      "description": "Nustatykite \"TermoWeb\" šildytuvo 7×24 savaitinę programą. Programą sudaro 168 sveikųjų skaičių sąrašas, kuriame kiekviena reikšmė atitinka vieną savaitės valandą, prasidedančią pirmadienį 00:00. Naudokite 0 šaltajam išankstiniam nustatymui, 1 - naktiniam išankstiniam nustatymui ir 2 - dienos išankstiniam nustatymui.",
+      "name": "Nustatyti savaitės programą",
+      "description": "Nustato TermoWeb šildytuvo 7×24 savaitės programą. Programa yra 168 sveikųjų skaičių sąrašas, kuriame kiekviena reikšmė atitinka vieną savaitės valandą, pradedant pirmadieniu 00:00. Naudokite 0 šaltajam, 1 nakties ir 2 dienos išankstiniam nustatymui.",
       "fields": {
         "prog": {
           "name": "Programa",
-          "description": "168 sveikųjų skaičių (0, 1 arba 2) sąrašas, nurodantis šildytuvo savaitės tvarkaraštį. Indeksas 0 reiškia pirmadienį 00:00, indeksas 1 - pirmadienį 01:00 ir t. t.",
+          "description": "168 sveikųjų skaičių (0, 1 arba 2) sąrašas, aprašantis šildytuvo savaitės programą. Indeksas 0 yra pirmadienis 00:00, indeksas 1 – pirmadienis 01:00 ir t. t.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Nustatykite iš anksto nustatytą temperatūrą",
-      "description": "Nustatykite \"TermoWeb\" šildytuvo šalčio, nakties ir dienos iš anksto nustatytą temperatūrą. Galite pateikti visas tris temperatūras kaip vieną sąrašą (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Nustatyti išankstinių nustatymų temperatūras",
+      "description": "Nustato TermoWeb šildytuvo šaltojo, nakties ir dienos išankstinių nustatymų temperatūras. Galite pateikti visas tris temperatūras vienu sąrašu (``ptemp``) arba kiekvieną atskirai (``cold``, ``night`` ir ``day``). Nenurodyti išankstiniai nustatymai išlaiko dabartinę reikšmę.",
       "fields": {
         "ptemp": {
-          "name": "Iš anksto nustatyta temperatūra",
-          "description": "Trijų temperatūrų [šalčio, nakties, dienos] sąrašas tais pačiais vienetais kaip ir šildytuvas (°C arba °F). Jei pateikta, ji bus viršesnė už atskiras šalčio, nakties ir dienos vertes.",
+          "name": "Išankstinių nustatymų temperatūros",
+          "description": "Trijų temperatūrų sąrašas [šaltasis, naktis, diena] tais pačiais vienetais kaip šildytuvas (°C arba °F). Jei nurodyta, pakeičia atskiras šaltojo, nakties ir dienos reikšmes.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Šaltasis išankstinis nustatymas",
-          "description": "Iš anksto nustatyta šalčio temperatūra (°C arba °F).",
+          "name": "Šaltasis nustatymas",
+          "description": "Šaltojo išankstinio nustatymo temperatūra (°C arba °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Nakties išankstinis nustatymas",
-          "description": "Nakties temperatūros nustatymas (°C arba °F).",
+          "name": "Nakties nustatymas",
+          "description": "Nakties išankstinio nustatymo temperatūra (°C arba °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Iš anksto nustatyta diena",
-          "description": "Nustatyta dienos temperatūra (°C arba °F).",
+          "name": "Dienos nustatymas",
+          "description": "Dienos išankstinio nustatymo temperatūra (°C arba °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Energijos importo istorija",
-      "description": "Importuokite \"TermoWeb\" šildytuvų istorinius valandinius energijos skaitiklius iki vienerių metų atgal į \"Home Assistant\" statistiką kiekvienam sukonfigūruotam šildytuvui.",
+      "name": "Importuoti energijos istoriją",
+      "description": "Importuoja ankstesnį kiekvieno šildytuvo ir galios matuoklio valandinį energijos suvartojimą į Home Assistant statistiką (energijos skydelį). Eiga išsaugoma: jei importavimas sustoja, paleiskite jį dar kartą, kad tęstumėte.",
       "fields": {
         "reset_progress": {
-          "name": "Iš naujo nustatyti pažangą",
-          "description": "Išvalykite išsaugotą pažangą ir iš naujo importuokite istoriją iš naujo."
+          "name": "Atstatyti eigą",
+          "description": "Pamiršti išsaugotą eigą ir iš naujo importuoti visą laikotarpį. Esama statistika perrašoma, o ne ištrinama."
         },
         "max_history_retrieval": {
-          "name": "Maksimalus istorijos dienų skaičius",
-          "description": "Atkuriamos istorijos dienų skaičius. Pakeičia tik šiam importui sukonfigūruotą numatytąjį nustatymą."
+          "name": "Daugiausia istorijos dienų",
+          "description": "Kiek dienų atgal importuoti (nuo 1 iki 3650, numatytoji 7). Jei jau importavote mažiau dienų, atsiunčiamos tik senesnės dienos."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Radijo įrašymas",
+      "description": "Tam tikrą laiką įrašo kiekvieną radijo kadrą, kurį girdi šliuzas arba nanoCUL, ir išsaugo jį JSON failu Home Assistant konfigūracijos aplanke. Niekada nesiunčia signalų. Įprastame radijo įraše šildytuvų komandos laukia, kol įrašymas baigsis.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigūracijos įrašo ID",
+          "description": "Naudojamas radijo šliuzo arba nanoCUL konfigūracijos įrašas, paprastai tik klausymosi.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Trukmė",
+          "description": "Kiek laiko įrašyti, nuo 10 iki 1800 sekundžių."
+        },
+        "redact": {
+          "name": "Slėpti privačius duomenis",
+          "description": "Faile pakeičia tinklo ID ir šildytuvų serijos numerius. Be šios parinkties faile yra jūsų tinklo ID: bendrinkite jį tik privačiai."
+        },
+        "note": {
+          "name": "Pastaba",
+          "description": "Neprivalomas tekstas, išsaugomas faile, pavyzdžiui, kurį šildytuvą naudojote.",
+          "example": "padidinta svetainės šildytuvo temperatūra"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Radijo tyrimas",
+      "description": "Tam tikrą laiką klausosi viso radijo srauto šildytuvų dažnių juostoje, taip pat ir srauto, kurio ši integracija nesupranta, ir išsaugo ataskaitos failą Home Assistant konfigūracijos aplanke. Pridėkite failą prie GitHub pranešimo (issue), jei norite paprašyti naujo šildytuvų tipo palaikymo.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigūracijos įrašo ID",
+          "description": "Naudojamas radijo šliuzo arba nanoCUL konfigūracijos įrašas.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Trukmė",
+          "description": "Kiek laiko klausytis. Šildytuvai daugiausia siunčia, kai pradeda arba baigia šildyti."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Gamyklinių nustatymų atkūrimas radijo ryšiu",
+      "description": "NEGRĮŽTAMA. Atkuria vieno radijo šildytuvo gamyklinius nustatymus. Šildytuvas praranda visus nustatymus, laikrodį, savaitės programą ir radijo susiejimą bei nustoja bendrauti su Home Assistant. Prieš tai išsaugomi paskutiniai žinomi jo nustatymai. Norėdami vėl naudoti šildytuvą, šliuzo įrenginyje paspauskite „Susieti naujus šildytuvus“ ir įjunkite šildytuvo susiejimo režimą. Išsaugoti nustatymai grąžinami, kai šildytuvas atpažįstamas. Kai kurių senesnių šildytuvų negalima atstatyti radijo ryšiu: atstatykite juos rankiniu būdu (žr. šildytuvo instrukciją).",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigūracijos įrašo ID",
+          "description": "Naudojamas radijo šliuzo arba nanoCUL konfigūracijos įrašas.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Šildytuvo numeris",
+          "description": "Šildytuvo radijo numeris (skaičius pavadinime „Šildytuvas 6“)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radijas: perkelti šildytuvus į savo tinklą",
+      "description": "Perkelia visus radijo įrašo šildytuvus į šios sistemos radijo tinklą. Pirmiausia kiekvienas šildytuvas atstatomas (jo nustatymai išsaugomi), tada po vieną įjungiate šildytuvų susiejimo režimą. Šildytuvai gauna naujus numerius nuo 2 ir toliau, o jų nustatymai atkuriami. Kai kurių senesnių šildytuvų negalima atstatyti radijo ryšiu, todėl jų šiuo būdu perkelti negalima. Kol tai vyksta, šildytuvų valdymas sustabdomas.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigūracijos įrašo ID",
+          "description": "Naudojamas radijo šliuzo arba nanoCUL konfigūracijos įrašas.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Laukimo laikas",
+          "description": "Kiek laiko laukti, kol bus paspausti šildytuvų susiejimo mygtukai."
         }
       }
     }

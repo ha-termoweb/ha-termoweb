@@ -1,188 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Como estão ligados os seus aquecedores?",
+        "description": "Escolha a conta na nuvem se utiliza a aplicação TermoWeb, Ducaheat ou Tevolve. Para controlar os aquecedores localmente, sem a nuvem, a forma mais simples é uma pen USB nanoCUL ligada a este computador com o Home Assistant (sem soldar). O gateway de rádio ESP32 destina-se a utilizadores avançados: tem de ser montado e soldado.",
+        "menu_options": {
+          "cloud": "Conta na nuvem (aplicação TermoWeb, Ducaheat ou Tevolve)",
+          "nanocul": "Rádio local: pen USB nanoCUL (mais simples, sem soldar)",
+          "radio": "Gateway de rádio local: ESP32 + CC1101 (avançado, requer soldadura)"
+        }
+      },
       "cloud": {
-        "title": "Ligar aos aquecedores da família TermoWeb",
-        "description": "Versão: {version}\n\nEscolha a sua marca TermoWeb ou Ducaheat e introduza as credenciais da sua conta.",
+        "title": "Ligar a aquecedores da família TermoWeb",
+        "description": "Versão: {version}\n\nEscolha a sua marca (TermoWeb, Ducaheat ou Tevolve) e introduza as credenciais da sua conta. A Tevolve utiliza o servidor da Ducaheat.",
         "data": {
           "brand": "Marca",
-          "username": "Email",
+          "username": "E-mail",
+          "password": "Palavra-passe"
+        }
+      },
+      "radio": {
+        "title": "Ligar ao gateway de rádio",
+        "description": "Normalmente, o Home Assistant encontra o gateway de rádio ESP32 sozinho: procure-o em **Descoberto** na página Dispositivos e serviços. Utilize este formulário apenas se não aparecer aí. Introduza o endereço IP do seu gateway. No passo seguinte escolhe: adicionar o gateway e deixá-lo encontrar os seus aquecedores, ou emparelhar aquecedores novos.",
+        "data": {
+          "host": "Endereço IP do gateway"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Definições avançadas",
+            "description": "Não altere estes valores, a menos que tenha alterado o firmware do gateway.",
+            "data": {
+              "port": "Porta"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Gateway de rádio encontrado",
+        "description": "Foi encontrado um gateway de rádio TermoWeb em {host}. Configurá-lo?\n\nNo passo seguinte escolhe: adicionar o gateway (este encontra e emparelha os seus aquecedores) ou apenas escutar."
+      },
+      "radio_method": {
+        "title": "Adicionar o seu gateway",
+        "description": "Escolha \"Adicionar o gateway\" para controlar os seus aquecedores. A configuração termina de imediato. Depois:\n\n- Os aquecedores que já funcionam com um gateway ou aplicação TermoWeb são encontrados automaticamente, normalmente em poucos minutos. Os aquecedores comunicam quando começam a aquecer, por isso ajuda subir a temperatura de um aquecedor.\n- Aquecedores novos ou repostos: coloque cada aquecedor em modo de emparelhamento no prazo de 30 minutos. O manual do aquecedor indica que botões deve premir. Faça um aquecedor de cada vez. Mais tarde, prima primeiro **Emparelhar novos aquecedores** no dispositivo do gateway.\n\nRecebe uma notificação por cada aquecedor adicionado.\n\nEscolha \"Apenas escutar\" para gravar o tráfego de rádio para um teste, junto de um gateway TermoWeb que ainda esteja a funcionar. Neste modo, a integração nunca transmite e não adiciona aquecedores.",
+        "menu_options": {
+          "radio_discover": "Adicionar o gateway",
+          "radio_monitor": "Apenas escutar (grava o tráfego de rádio, nunca transmite)"
+        }
+      },
+      "radio_rescan": { "title": "A procurar os seus aquecedores" },
+      "reconfigure_radio": {
+        "title": "Alterar o gateway de rádio",
+        "description": "Altere o endereço do gateway. Assinale \"Procurar aquecedores novamente\" se adicionou ou removeu um aquecedor.",
+        "data": {
+          "host": "Endereço IP do gateway",
+          "port": "Porta",
+          "rescan": "Procurar aquecedores novamente"
+        }
+      },
+      "nanocul": {
+        "title": "Ligar à pen USB nanoCUL",
+        "description": "Escolha a porta da sua pen nanoCUL. Se o Home Assistant reconheceu a pen, esta já está selecionada: basta premir Submeter. No passo seguinte escolhe: adicionar o gateway e deixá-lo encontrar os seus aquecedores, ou emparelhar aquecedores novos.",
+        "data": {
+          "device": "Porta USB"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Introduzir a porta da nanoCUL",
+        "description": "Escreva o caminho da porta, por exemplo /dev/serial/by-id/usb-..., ou um endereço de rede como socket://192.0.2.10:2323 para uma pen partilhada pela rede.",
+        "data": {
+          "device": "Caminho da porta ou URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Alterar a porta da nanoCUL",
+        "description": "Altere o caminho da porta ou o URL da pen. Assinale \"Procurar aquecedores novamente\" se adicionou ou removeu um aquecedor.",
+        "data": {
+          "device": "Caminho da porta ou URL",
+          "rescan": "Procurar aquecedores novamente"
+        }
+      },
+      "reconfigure": {
+        "title": "Alterar as definições da conta",
+        "description": "Versão: {version}\n\nIntroduza a nova palavra-passe desta conta. Não é possível mudar para outra conta aqui: para isso, adicione uma nova entrada.",
+        "data": {
+          "brand": "Marca",
+          "username": "E-mail",
+          "password": "Palavra-passe"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Iniciar sessão novamente",
+        "description": "A {brand} não aceitou a palavra-passe guardada para {username}. Introduza a palavra-passe atual.",
+        "data": {
           "password": "Palavra-passe"
         }
       }
     },
     "error": {
-      "invalid_auth": "Nome de utilizador ou palavra-passe inválidos (ou chave do cliente).",
-      "cannot_connect": "Não é possível ligar ao TermoWeb — erro de rede/DNS/SSL.",
-      "rate_limited": "API temporariamente limitada. Tente novamente mais tarde.",
-      "unknown": "Erro desconhecido"
+      "invalid_auth": "Nome de utilizador ou palavra-passe inválidos (ou chave de cliente).",
+      "cannot_connect": "Não é possível ligar ao TermoWeb — erro de rede, DNS ou SSL.",
+      "rate_limited": "Limite de pedidos da API temporariamente atingido. Tente novamente mais tarde.",
+      "unknown": "Erro desconhecido",
+      "cannot_connect_radio": "Não é possível ligar ao gateway de rádio. Verifique o endereço IP e a porta, e se o gateway está ligado.",
+      "no_gateway_mac": "O gateway de rádio não indicou o seu endereço MAC. Atualize o firmware do gateway.",
+      "no_heaters": "Nenhum aquecedor respondeu. Aproxime o gateway dos aquecedores e tente novamente.",
+      "cannot_connect_nanocul": "Não é possível abrir a pen nanoCUL. Verifique se está ligada, se a porta está correta e se tem o firmware termoweb_rx.",
+      "nanocul_radio_missing": "A pen responde, mas o módulo de rádio não está ligado. Verifique as ligações.",
+      "gateway_radio_missing": "O gateway responde, mas o módulo de rádio não está ligado. Verifique as ligações."
+    },
+    "abort": {
+      "already_configured": "Este gateway já está configurado.",
+      "reconfigure_successful": "As definições foram guardadas.",
+      "monitor_reconfigure": "Uma entrada de apenas escuta não pode ser alterada. Elimine-a e adicione-a novamente.",
+      "unique_id_mismatch": "Esta é uma conta ou dispositivo diferente. Para o utilizar, adicione antes uma nova entrada.",
+      "reauth_successful": "A nova palavra-passe foi guardada.",
+      "cannot_connect_radio": "Não é possível ligar ao gateway de rádio. Verifique se o gateway está ligado e na sua rede.",
+      "no_gateway_mac": "O gateway de rádio não indicou o seu endereço MAC. Atualize o firmware do gateway.",
+      "gateway_radio_missing": "O gateway responde, mas o módulo de rádio não está ligado. Verifique as ligações.",
+      "not_ipv4_address": "O gateway de rádio anunciou apenas um endereço IPv6. Adicione-o manualmente com o seu endereço IPv4.",
+      "nanocul_firmware_too_old": "O firmware desta pen nanoCUL é demasiado antigo. Instale na pen o firmware termoweb_rx mais recente (consulte o guia da nanoCUL) e tente novamente."
+    },
+    "progress": {
+      "radio_rescan": "A verificar cada aquecedor da sua rede de rádio. Isto demora até um minuto."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Opções TermoWeb"
+      "rehome": {
+        "title": "Mudar os aquecedores para a rede própria desta instalação",
+        "description": "Utilize esta opção quando os seus aquecedores ainda usam a rede de rádio de um gateway TermoWeb antigo. Aquecedores: {heaters}.\n\nO que acontece:\n1. Cada aquecedor é reposto para as definições de fábrica. O Home Assistant guarda primeiro as suas definições.\n2. Coloca os aquecedores em modo de emparelhamento, um de cada vez. O manual do aquecedor indica que botões deve premir. Aguarde cerca de 10 segundos entre aquecedores. Tem 5 minutos.\n3. Os aquecedores recebem novos números, a partir de 2. Os IDs das entidades mudam. Os nomes dos aquecedores mantêm-se quando o Home Assistant reconhece o aquecedor.\n4. O Home Assistant devolve a cada aquecedor as suas definições: modo, temperaturas predefinidas, temperatura manual e programa semanal.\n\nO controlo dos aquecedores fica em pausa durante este processo. Alguns aquecedores mais antigos não podem ser repostos por rádio, pelo que não podem ser mudados desta forma. Prima **Submeter** para começar e, após cerca de 10 segundos, coloque o primeiro aquecedor em modo de emparelhamento."
+      },
+      "rehome_run": { "title": "A mudar os seus aquecedores" },
+      "rehome_done": {
+        "title": "Mudança concluída",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "A integração não está em execução. Inicie-a primeiro e tente novamente."
+    },
+    "progress": {
+      "rehome": "A repor os aquecedores e, em seguida, a aguardar aquecedores em modo de emparelhamento. Coloque agora um aquecedor em modo de emparelhamento e depois o seguinte. O processo termina 1 minuto depois de o último aquecedor ser emparelhado, ou ao fim de 5 minutos."
     }
   },
   "device": {
     "heater": {
       "name": "Aquecedor {addr}"
     },
+    "accumulator": {
+      "name": "Acumulador {addr}"
+    },
     "thermostat": {
       "name": "Termóstato {addr}"
+    },
+    "power_monitor": {
+      "name": "Medidor de potência {addr}"
     },
     "node": {
       "name": "Nó {addr}"
     },
-    "power_monitor": {
-      "name": "Monitor de energia {addr}"
+    "site": {
+      "name": "Casa"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway online"
+      "gateway_online": { "name": "Gateway online" },
+      "pairing_open": {
+        "name": "Emparelhamento aberto",
+        "state_attributes": { "ends_at": { "name": "Termina às" } }
       },
-      "boost_active": {
-        "name": "Reforço ativo"
-      }
+      "boost_active": { "name": "Boost ativo" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Forçar atualização"
-      },
-      "accumulator_boost_start": {
-        "name": "Iniciar reforço"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Cancelar reforço"
-      }
+      "force_refresh": { "name": "Forçar atualização" },
+      "pair_new_heaters": { "name": "Emparelhar novos aquecedores" },
+      "accumulator_boost_start": { "name": "Iniciar boost" },
+      "accumulator_boost_cancel": { "name": "Cancelar boost" },
+      "flash_display": { "name": "Piscar o ecrã" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Duração do reforço"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Temperatura do reforço"
-      }
+      "accumulator_boost_duration": { "name": "Duração do boost" },
+      "accumulator_boost_temperature": { "name": "Temperatura do boost" },
+      "heater_priority": { "name": "Prioridade" },
+      "installation_power_limit": { "name": "Limite de potência" },
+      "temperature_offset": { "name": "Ajuste de temperatura" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatura"
+      "heater_temperature": { "name": "Temperatura" },
+      "heater_energy_total": { "name": "Energia" },
+      "heater_power": { "name": "Potência" },
+      "radio_address": { "name": "Endereço de rádio" },
+      "power_monitor_energy": { "name": "Energia" },
+      "power_monitor_power": { "name": "Potência" },
+      "installation_total_energy": { "name": "Energia total" },
+      "frames_heard": { "name": "Tramas recebidas" },
+      "boost_minutes_remaining": { "name": "Minutos de boost restantes" },
+      "boost_end": { "name": "Fim do boost" },
+      "accumulator_charging": { "name": "A carregar" },
+      "accumulator_current_charge": { "name": "Carga atual" },
+      "accumulator_target_charge": { "name": "Carga pretendida" },
+      "installation_info": { "name": "Localização" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Nenhum",
+              "temporary_override": "Alteração temporária",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Bloqueio para crianças" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "Modo EASY" },
+      "open_window_detection": { "name": "Deteção de janela aberta" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Modo de regulação",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Histerese 0,25 °C",
+          "hysteresis_0_35": "Histerese 0,35 °C",
+          "hysteresis_0_5": "Histerese 0,5 °C",
+          "hysteresis_0_75": "Histerese 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energia"
-      },
-      "heater_power": {
-        "name": "Potência"
-      },
-      "power_monitor_energy": {
-        "name": "Energia"
-      },
-      "power_monitor_power": {
-        "name": "Potência"
-      },
-      "installation_total_energy": {
-        "name": "Energia total"
-      },
-      "boost_minutes_remaining": {
-        "name": "Minutos de reforço restantes"
-      },
-      "boost_end": {
-        "name": "Fim do reforço"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Unidade de temperatura no painel",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Configurar predefinição de reforço do acumulador",
-      "description": "Atualize a duração e/ou a temperatura predefinidas do reforço para um acumulador TermoWeb. Os minutos devem estar entre 60 e 600 em incrementos de 60; omita um campo para manter o valor existente.",
+      "name": "Configurar a predefinição de boost do acumulador",
+      "description": "Atualiza a duração e/ou a temperatura predefinidas do boost de um acumulador TermoWeb. Os minutos têm de estar entre 60 e 600, em incrementos de 60 minutos; omita um campo para manter o valor atual.",
       "fields": {
         "minutes": {
-          "name": "Duração predefinida do reforço",
-          "description": "Número de minutos que o reforço deve durar quando não existe substituição (60–600, passo 60).",
+          "name": "Duração predefinida do boost",
+          "description": "Número de minutos que o boost deve durar quando não é indicada outra duração (60–600, passo 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Temperatura do reforço",
-          "description": "Temperatura opcional a aplicar durante a sessão de reforço (°C ou °F).",
+          "name": "Temperatura do boost",
+          "description": "Temperatura pretendida opcional a aplicar durante o boost (°C ou °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Iniciar reforço do acumulador",
-      "description": "Inicie imediatamente um reforço num acumulador TermoWeb. Indique uma duração para substituir a predefinição (60–600 minutos em incrementos de 60) ou omita-a para usar a predefinição guardada.",
+      "name": "Iniciar boost",
+      "description": "Inicia agora um boost num acumulador TermoWeb ou num aquecedor via rádio que tenha boost. Acumulador: indique uma duração (60–600 minutos, em passos de 60) ou omita-a para usar a predefinição guardada. Aquecedor via rádio: omita a duração; o aquecedor usa o seu próprio tempo de boost.",
       "fields": {
         "minutes": {
-          "name": "Duração do reforço",
-          "description": "Duração da sessão de reforço em minutos (60–600, passo 60). Opcional.",
+          "name": "Duração do boost",
+          "description": "Duração do boost em minutos (60–600, passo 60). Opcional.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Cancelar reforço do acumulador",
-      "description": "Cancele a sessão de reforço ativa num acumulador TermoWeb."
+      "name": "Cancelar boost",
+      "description": "Para o boost num acumulador TermoWeb ou num aquecedor via rádio."
     },
     "set_schedule": {
-      "name": "Definir horário semanal",
-      "description": "Defina o programa semanal 7×24 para um aquecedor TermoWeb. O programa é uma lista de 168 inteiros, em que cada valor corresponde a uma hora da semana começando na segunda-feira às 00:00. Use 0 para a predefinição fria, 1 para a predefinição noturna e 2 para a predefinição diurna.",
+      "name": "Definir programa semanal",
+      "description": "Define o programa semanal 7×24 de um aquecedor TermoWeb. O programa é uma lista de 168 números inteiros, em que cada valor corresponde a uma hora da semana, a começar na segunda-feira às 00:00. Use 0 para a predefinição de frio, 1 para a predefinição de noite e 2 para a predefinição de dia.",
       "fields": {
         "prog": {
           "name": "Programa",
-          "description": "Uma lista de 168 inteiros (0, 1 ou 2) que representam o horário semanal do aquecedor. O índice 0 é segunda-feira 00:00, o índice 1 é segunda-feira 01:00 e assim sucessivamente.",
+          "description": "Uma lista de 168 números inteiros (0, 1 ou 2) que representa o programa semanal do aquecedor. O índice 0 é segunda-feira às 00:00, o índice 1 é segunda-feira às 01:00, e assim por diante.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
       "name": "Definir temperaturas predefinidas",
-      "description": "Defina as temperaturas predefinidas fria, noturna e diurna para um aquecedor TermoWeb. Pode fornecer as três temperaturas numa única lista (``ptemp``) ou especificar cada uma separadamente (``cold``, ``night`` e ``day``).",
+      "description": "Define as temperaturas das predefinições de frio, noite e dia de um aquecedor TermoWeb. Pode indicar as três temperaturas numa única lista (``ptemp``) ou cada uma em separado (``cold``, ``night`` e ``day``). As predefinições que omitir mantêm o valor atual.",
       "fields": {
         "ptemp": {
           "name": "Temperaturas predefinidas",
-          "description": "Uma lista de três temperaturas [fria, noturna, diurna] nas mesmas unidades do aquecedor (°C ou °F). Se fornecida, substitui os valores individuais frio, noite e dia.",
+          "description": "Uma lista de três temperaturas [frio, noite, dia] nas mesmas unidades do aquecedor (°C ou °F). Se for indicada, substitui os valores individuais de frio, noite e dia.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Predefinição fria",
-          "description": "Temperatura para a predefinição fria (°C ou °F).",
+          "name": "Predefinição de frio",
+          "description": "Temperatura da predefinição de frio (°C ou °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Predefinição noturna",
-          "description": "Temperatura para a predefinição noturna (°C ou °F).",
+          "name": "Predefinição de noite",
+          "description": "Temperatura da predefinição de noite (°C ou °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Predefinição diurna",
-          "description": "Temperatura para a predefinição diurna (°C ou °F).",
+          "name": "Predefinição de dia",
+          "description": "Temperatura da predefinição de dia (°C ou °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
       "name": "Importar histórico de energia",
-      "description": "Importe contadores horários de energia histórica para aquecedores TermoWeb até um ano atrás nas estatísticas do Home Assistant para todos os aquecedores configurados.",
+      "description": "Importa o consumo de energia horário passado de cada aquecedor e medidor de potência para as estatísticas do Home Assistant (o painel Energia). O progresso é guardado: se a importação parar, execute-a novamente para continuar.",
       "fields": {
         "reset_progress": {
           "name": "Repor progresso",
-          "description": "Limpa o progresso armazenado e volta a importar o histórico desde o início."
+          "description": "Esquece o progresso guardado e importa novamente todo o período. As estatísticas existentes são substituídas, não eliminadas."
         },
         "max_history_retrieval": {
           "name": "Máximo de dias de histórico",
-          "description": "Número de dias de histórico a obter. Substitui a predefinição configurada apenas para esta importação."
+          "description": "Quantos dias para trás importar (de 1 a 3650, predefinição 7). Se já importou menos dias, só são obtidos os dias mais antigos."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Captura de rádio",
+      "description": "Grava durante algum tempo todas as tramas de rádio que o gateway ou a nanoCUL recebem e guarda-as num ficheiro JSON na pasta de configuração do Home Assistant. Nunca transmite. Numa entrada de rádio normal, os comandos para os aquecedores aguardam até a captura terminar.",
+      "fields": {
+        "entry_id": {
+          "name": "ID da entrada de configuração",
+          "description": "A entrada de configuração do gateway de rádio ou da nanoCUL a utilizar, normalmente a de apenas escuta.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Duração",
+          "description": "Durante quanto tempo gravar, de 10 a 1800 segundos."
+        },
+        "redact": {
+          "name": "Ocultar dados privados",
+          "description": "Substitui no ficheiro os IDs de rede e os números de série dos aquecedores. Sem esta opção, o ficheiro contém o ID da sua rede: partilhe-o apenas em privado."
+        },
+        "note": {
+          "name": "Nota",
+          "description": "Texto opcional guardado no ficheiro, por exemplo qual o aquecedor que utilizou.",
+          "example": "temperatura do aquecedor da sala aumentada"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Análise de rádio",
+      "description": "Escuta durante algum tempo todo o tráfego de rádio na banda dos aquecedores, incluindo tráfego que esta integração não compreende, e guarda um ficheiro de relatório na pasta de configuração do Home Assistant. Anexe o ficheiro a um issue no GitHub para pedir suporte para um novo tipo de aquecedor.",
+      "fields": {
+        "entry_id": {
+          "name": "ID da entrada de configuração",
+          "description": "A entrada de configuração do gateway de rádio ou da nanoCUL a utilizar.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Duração",
+          "description": "Durante quanto tempo escutar. Os aquecedores comunicam mais quando começam ou param de aquecer."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Reposição de fábrica por rádio",
+      "description": "DESTRUTIVO. Repõe as definições de fábrica de um aquecedor via rádio. O aquecedor perde todas as definições, o relógio, o programa semanal e o emparelhamento de rádio, e deixa de comunicar com o Home Assistant. As suas últimas definições conhecidas são guardadas primeiro. Para voltar a usar o aquecedor, prima \"Emparelhar novos aquecedores\" no dispositivo do gateway e coloque o aquecedor em modo de emparelhamento. As definições guardadas são restauradas quando o aquecedor é reconhecido. Alguns aquecedores mais antigos não podem ser repostos por rádio: reponha-os manualmente (consulte o manual do aquecedor).",
+      "fields": {
+        "entry_id": {
+          "name": "ID da entrada de configuração",
+          "description": "A entrada de configuração do gateway de rádio ou da nanoCUL a utilizar.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Número do aquecedor",
+          "description": "O número de rádio do aquecedor (o número em \"Aquecedor 6\")."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Rádio: mudar aquecedores para a rede própria",
+      "description": "Muda todos os aquecedores de uma entrada de rádio para a rede de rádio própria desta instalação. Cada aquecedor é primeiro reposto (as suas definições são guardadas) e depois coloca os aquecedores em modo de emparelhamento, um de cada vez. Os aquecedores recebem novos números a partir de 2 e as suas definições são restauradas. Alguns aquecedores mais antigos não podem ser repostos por rádio, pelo que não podem ser mudados desta forma. O controlo dos aquecedores fica em pausa durante este processo.",
+      "fields": {
+        "entry_id": {
+          "name": "ID da entrada de configuração",
+          "description": "A entrada de configuração do gateway de rádio ou da nanoCUL a utilizar.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Tempo de espera",
+          "description": "Durante quanto tempo aguardar pelos botões de emparelhamento dos aquecedores."
         }
       }
     }

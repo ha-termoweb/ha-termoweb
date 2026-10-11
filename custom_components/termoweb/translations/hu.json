@@ -1,144 +1,297 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Hogyan csatlakoznak a fűtőtestjeid?",
+        "description": "Válaszd a felhőfiókot, ha a TermoWeb, Ducaheat vagy Tevolve alkalmazást használod. Ha felhő nélkül, helyben szeretnéd vezérelni a fűtőtesteket, a legegyszerűbb egy nanoCUL USB-stick, amelyet ebbe a Home Assistant számítógépbe dugsz (forrasztás nélkül). Az ESP32 rádiós átjáró haladó felhasználóknak való: meg kell építeni és forrasztani kell.",
+        "menu_options": {
+          "cloud": "Felhőfiók (TermoWeb, Ducaheat vagy Tevolve alkalmazás)",
+          "nanocul": "Helyi rádió: nanoCUL USB-stick (legegyszerűbb, forrasztás nélkül)",
+          "radio": "Helyi rádiós átjáró: ESP32 + CC1101 (haladó, forrasztás kell)"
+        }
+      },
       "cloud": {
-        "title": "Csatlakozás a TermoWeb családi fűtőberendezésekhez",
-        "description": "Változat: {version}\n\nVálassza ki a TermoWeb vagy Ducaheat márkát, és adja meg a fiókja hitelesítő adatait.",
+        "title": "Csatlakozás a TermoWeb-családba tartozó fűtőtestekhez",
+        "description": "Verzió: {version}\n\nVálaszd ki a márkát (TermoWeb, Ducaheat vagy Tevolve), és add meg a fiókod belépési adatait. A Tevolve a Ducaheat szerverét használja.",
         "data": {
           "brand": "Márka",
           "username": "E-mail",
+          "password": "Jelszó"
+        }
+      },
+      "radio": {
+        "title": "Csatlakozás a rádiós átjáróhoz",
+        "description": "A Home Assistant általában magától megtalálja az ESP32 rádiós átjárót: keresd a **Felfedezett** alatt az Eszközök és szolgáltatások oldalon. Ezt az űrlapot csak akkor használd, ha ott nem jelenik meg. Add meg az átjáró IP-címét. A következő lépésben választhatsz: hozzáadod az átjárót, és hagyod, hogy megkeresse a fűtőtesteket, vagy új fűtőtesteket párosítasz.",
+        "data": {
+          "host": "Átjáró IP-címe"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Speciális beállítások",
+            "description": "Ne módosítsd ezeket, hacsak nem változtattál az átjáró firmware-én.",
+            "data": {
+              "port": "Port"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Rádiós átjáró található",
+        "description": "TermoWeb rádiós átjáró található itt: {host}. Beállítod?\n\nA következő lépésben választhatsz: hozzáadod az átjárót (megkeresi és párosítja a fűtőtesteket), vagy csak hallgatózol."
+      },
+      "radio_method": {
+        "title": "Átjáró hozzáadása",
+        "description": "Válaszd az „Átjáró hozzáadása” lehetőséget a fűtőtestek vezérléséhez. A beállítás azonnal befejeződik. Ezután:\n\n- A már TermoWeb átjáróval vagy alkalmazással működő fűtőtesteket magától megtalálja, általában néhány percen belül. A fűtőtestek akkor adnak jelet, amikor fűteni kezdenek, ezért segít, ha az egyik fűtőtesten feljebb állítod a hőmérsékletet.\n- Új vagy visszaállított fűtőtestek: 30 percen belül tedd mindegyiket párosítási módba. A fűtőtest kézikönyvéből megtudod, mely gombokat kell megnyomni. Egyszerre csak egy fűtőtestet párosíts. Később előbb nyomd meg az átjáró eszközén az **Új fűtőtestek párosítása** gombot.\n\nMinden hozzáadott fűtőtestről értesítést kapsz.\n\nA „Csak hallgatás” lehetőséggel tesztként rögzítheted a rádióforgalmat egy még működő TermoWeb átjáró mellett. Ebben a módban az integráció soha nem sugároz, és nem ad hozzá fűtőtestet.",
+        "menu_options": {
+          "radio_discover": "Átjáró hozzáadása",
+          "radio_monitor": "Csak hallgatás (rádióforgalom rögzítése, adás nélkül)"
+        }
+      },
+      "radio_rescan": { "title": "Fűtőtestek keresése" },
+      "reconfigure_radio": {
+        "title": "Rádiós átjáró módosítása",
+        "description": "Módosítsd az átjáró címét. Jelöld be a „Fűtőtestek újrakeresése” lehetőséget, ha fűtőtestet adtál hozzá vagy távolítottál el.",
+        "data": {
+          "host": "Átjáró IP-címe",
+          "port": "Port",
+          "rescan": "Fűtőtestek újrakeresése"
+        }
+      },
+      "nanocul": {
+        "title": "Csatlakozás a nanoCUL USB-stickhez",
+        "description": "Válaszd ki a nanoCUL stick portját. Ha a Home Assistant felismerte a sticket, az már ki van választva: csak nyomd meg a Küldés gombot. A következő lépésben választhatsz: hozzáadod az átjárót, és hagyod, hogy megkeresse a fűtőtesteket, vagy új fűtőtesteket párosítasz.",
+        "data": {
+          "device": "USB-port"
+        }
+      },
+      "nanocul_manual": {
+        "title": "nanoCUL port megadása",
+        "description": "Írd be a port elérési útját, például /dev/serial/by-id/usb-..., vagy hálózaton megosztott stick esetén egy hálózati címet, például socket://192.0.2.10:2323.",
+        "data": {
+          "device": "Port elérési útja vagy URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "nanoCUL port módosítása",
+        "description": "Módosítsd a stick portjának elérési útját vagy URL-jét. Jelöld be a „Fűtőtestek újrakeresése” lehetőséget, ha fűtőtestet adtál hozzá vagy távolítottál el.",
+        "data": {
+          "device": "Port elérési útja vagy URL",
+          "rescan": "Fűtőtestek újrakeresése"
+        }
+      },
+      "reconfigure": {
+        "title": "Fiókbeállítások módosítása",
+        "description": "Verzió: {version}\n\nAdd meg a fiók új jelszavát. Itt nem válthatsz másik fiókra: ahhoz adj hozzá egy új bejegyzést.",
+        "data": {
+          "brand": "Márka",
+          "username": "E-mail",
+          "password": "Jelszó"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Jelentkezz be újra",
+        "description": "A(z) {brand} nem fogadta el a(z) {username} fiókhoz mentett jelszót. Add meg a jelenlegi jelszót.",
+        "data": {
           "password": "Jelszó"
         }
       }
     },
     "error": {
       "invalid_auth": "Érvénytelen felhasználónév vagy jelszó (vagy ügyfélkulcs).",
-      "cannot_connect": "Nem lehet csatlakozni a TermoWebhez - hálózati/DNS/SSL hiba.",
-      "rate_limited": "Átmenetileg az API által korlátozott sebességgel. Próbálja meg később újra.",
-      "unknown": "Ismeretlen hiba"
+      "cannot_connect": "Nem sikerült csatlakozni a TermoWebhez – hálózati/DNS/SSL hiba.",
+      "rate_limited": "Az API átmenetileg korlátozza a kéréseket. Próbáld újra később.",
+      "unknown": "Ismeretlen hiba",
+      "cannot_connect_radio": "Nem sikerült csatlakozni a rádiós átjáróhoz. Ellenőrizd az IP-címet és a portot, és hogy az átjáró be van-e kapcsolva.",
+      "no_gateway_mac": "A rádiós átjáró nem küldte el a MAC-címét. Frissítsd az átjáró firmware-ét.",
+      "no_heaters": "Egyetlen fűtőtest sem válaszolt. Vidd közelebb az átjárót a fűtőtestekhez, és próbáld újra.",
+      "cannot_connect_nanocul": "Nem sikerült megnyitni a nanoCUL sticket. Ellenőrizd, hogy be van-e dugva, jó-e a port, és hogy a termoweb_rx firmware fut-e rajta.",
+      "nanocul_radio_missing": "A stick válaszol, de a rádiómodulja nincs csatlakoztatva. Ellenőrizd a bekötést.",
+      "gateway_radio_missing": "Az átjáró válaszol, de a rádiómodulja nincs csatlakoztatva. Ellenőrizd a bekötést."
+    },
+    "abort": {
+      "already_configured": "Ez az átjáró már be van állítva.",
+      "reconfigure_successful": "A beállítások mentve.",
+      "monitor_reconfigure": "A csak hallgató bejegyzés nem módosítható. Töröld, majd add hozzá újra.",
+      "unique_id_mismatch": "Ez egy másik fiók vagy eszköz. Ha használni szeretnéd, adj hozzá helyette egy új bejegyzést.",
+      "reauth_successful": "Az új jelszó mentve.",
+      "cannot_connect_radio": "Nem sikerült csatlakozni a rádiós átjáróhoz. Ellenőrizd, hogy az átjáró be van-e kapcsolva és elérhető-e a hálózaton.",
+      "no_gateway_mac": "A rádiós átjáró nem küldte el a MAC-címét. Frissítsd az átjáró firmware-ét.",
+      "gateway_radio_missing": "Az átjáró válaszol, de a rádiómodulja nincs csatlakoztatva. Ellenőrizd a bekötést.",
+      "not_ipv4_address": "A rádiós átjáró csak IPv6-címet jelzett. Add hozzá kézzel az IPv4-címével.",
+      "nanocul_firmware_too_old": "A nanoCUL stick firmware-e túl régi. Telepítsd a stickre a legújabb termoweb_rx firmware-t (lásd a nanoCUL útmutatót), majd próbáld újra."
+    },
+    "progress": {
+      "radio_rescan": "A rádióhálózat összes fűtőtestének ellenőrzése. Ez legfeljebb egy percig tart."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "TermoWeb lehetőségek"
+      "rehome": {
+        "title": "Fűtőtestek áthelyezése a saját hálózatra",
+        "description": "Akkor használd, ha a fűtőtestek még egy régi TermoWeb átjáró rádióhálózatát használják. Fűtőtestek: {heaters}.\n\nMi történik:\n1. Minden fűtőtest visszaáll a gyári beállításokra. A Home Assistant előtte elmenti a beállításaikat.\n2. Egyenként párosítási módba teszed a fűtőtesteket. A fűtőtest kézikönyvéből megtudod, mely gombokat kell megnyomni. Két fűtőtest között várj kb. 10 másodpercet. 5 perced van.\n3. A fűtőtestek új számot kapnak, 2-től felfelé. Az entitásazonosítóik megváltoznak. A fűtőtestek neve megmarad, ha a Home Assistant felismeri a fűtőtestet.\n4. A Home Assistant visszaadja minden fűtőtest beállításait: üzemmód, előbeállított hőmérsékletek, kézi hőmérséklet és heti program.\n\nAmíg ez fut, a fűtőtestek vezérlése szünetel. Egyes régebbi fűtőtestek rádión keresztül nem állíthatók vissza, ezért így nem helyezhetők át. Nyomd meg a **Küldés** gombot az indításhoz, majd kb. 10 másodperc múlva tedd párosítási módba az első fűtőtestet."
+      },
+      "rehome_run": { "title": "Fűtőtestek áthelyezése folyamatban" },
+      "rehome_done": {
+        "title": "Az áthelyezés befejeződött",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Az integráció nem fut. Előbb indítsd el, majd próbáld újra."
+    },
+    "progress": {
+      "rehome": "A fűtőtestek visszaállítása, majd várakozás a párosítási módban lévő fűtőtestekre. Most tegyél párosítási módba egy fűtőtestet, majd a következőt. Ez 1 perccel az utolsó párosítás után, vagy 5 perc után leáll."
+    }
+  },
+  "device": {
+    "heater": {
+      "name": "Fűtőtest {addr}"
+    },
+    "accumulator": {
+      "name": "Hőtároló {addr}"
+    },
+    "thermostat": {
+      "name": "Termosztát {addr}"
+    },
+    "power_monitor": {
+      "name": "Teljesítménymérő {addr}"
+    },
+    "node": {
+      "name": "Csomópont {addr}"
+    },
+    "site": {
+      "name": "Otthon"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway online"
+      "gateway_online": { "name": "Átjáró online" },
+      "pairing_open": {
+        "name": "Párosítás nyitva",
+        "state_attributes": { "ends_at": { "name": "Vége" } }
       },
-      "boost_active": {
-        "name": "Boost aktív"
-      }
+      "boost_active": { "name": "Boost aktív" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Frissítés kikényszerítése"
-      },
-      "accumulator_boost_start": {
-        "name": "Start boost"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Cancel boost"
-      }
+      "force_refresh": { "name": "Frissítés kényszerítése" },
+      "pair_new_heaters": { "name": "Új fűtőtestek párosítása" },
+      "accumulator_boost_start": { "name": "Boost indítása" },
+      "accumulator_boost_cancel": { "name": "Boost leállítása" },
+      "flash_display": { "name": "Kijelző villogtatása" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Boost időtartam"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Boost hőmérséklet"
-      }
+      "accumulator_boost_duration": { "name": "Boost időtartama" },
+      "accumulator_boost_temperature": { "name": "Boost hőmérséklet" },
+      "heater_priority": { "name": "Prioritás" },
+      "installation_power_limit": { "name": "Teljesítménykorlát" },
+      "temperature_offset": { "name": "Hőmérséklet-eltolás" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Hőmérséklet"
+      "heater_temperature": { "name": "Hőmérséklet" },
+      "heater_energy_total": { "name": "Energia" },
+      "heater_power": { "name": "Teljesítmény" },
+      "radio_address": { "name": "Rádiócím" },
+      "power_monitor_energy": { "name": "Energia" },
+      "power_monitor_power": { "name": "Teljesítmény" },
+      "installation_total_energy": { "name": "Teljes energia" },
+      "frames_heard": { "name": "Vett keretek" },
+      "boost_minutes_remaining": { "name": "Hátralévő boost percek" },
+      "boost_end": { "name": "Boost vége" },
+      "accumulator_charging": { "name": "Töltés" },
+      "accumulator_current_charge": { "name": "Jelenlegi töltöttség" },
+      "accumulator_target_charge": { "name": "Cél töltöttség" },
+      "installation_info": { "name": "Helyszín" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Nincs",
+              "temporary_override": "Ideiglenes felülbírálás",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Gyerekzár" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "EASY mód" },
+      "open_window_detection": { "name": "Nyitott ablak érzékelése" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Szabályozási mód",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Hiszterézis 0,25 °C",
+          "hysteresis_0_35": "Hiszterézis 0,35 °C",
+          "hysteresis_0_5": "Hiszterézis 0,5 °C",
+          "hysteresis_0_75": "Hiszterézis 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energia"
-      },
-      "heater_power": {
-        "name": "Teljesítmény"
-      },
-      "power_monitor_energy": {
-        "name": "Energia"
-      },
-      "power_monitor_power": {
-        "name": "Teljesítmény"
-      },
-      "installation_total_energy": {
-        "name": "Teljes energia"
-      },
-      "boost_minutes_remaining": {
-        "name": "Boost percek hátralévő"
-      },
-      "boost_end": {
-        "name": "Boost vége"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Kijelző hőmérséklet-egysége",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Akkumulátor boost preset beállítása",
-      "description": "A TermoWeb akkumulátor alapértelmezett feltöltési időtartamának és/vagy hőmérsékletének frissítése. A perceknek 60 és 600 között kell lenniük, 60 perces lépésekben; a mező kihagyásával a meglévő érték marad.",
+      "name": "Hőtároló boost előbeállításának konfigurálása",
+      "description": "Egy TermoWeb hőtároló alapértelmezett boost időtartamának és/vagy hőmérsékletének módosítása. A perc értéke 60 és 600 között lehet, 60 perces lépésekben; ha egy mezőt kihagysz, a meglévő érték marad.",
       "fields": {
         "minutes": {
-          "name": "Alapértelmezett lökés időtartama",
-          "description": "Azon percek száma, amelyekig a nyomásfokozónak működnie kell, ha nincs felülbírálat (60-600, 60. lépés).",
+          "name": "Alapértelmezett boost időtartam",
+          "description": "Hány percig tartson a boost, ha nincs megadva más érték (60–600, 60-as lépésekben).",
           "example": "120"
         },
         "temperature": {
           "name": "Boost hőmérséklet",
-          "description": "Választható boost beállítási pont, amelyet a boost munkamenet során alkalmazni kell (°C vagy °F).",
+          "description": "Opcionális célhőmérséklet a boost idejére (°C vagy °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Akkumulátor-növelés indítása",
-      "description": "Azonnali lökést indíthat el egy TermoWeb akkumulátoron. Adjon meg egy időtartamot az alapértelmezett érték felülbírálásához (60-600 perc 60 perces lépésekben), vagy hagyja ki, hogy a tárolt előbeállítást használja.",
+      "name": "Boost indítása",
+      "description": "Azonnal boostot indít egy TermoWeb hőtárolón vagy egy boostot támogató rádiós fűtőtesten. Hőtároló: adj meg egy időtartamot (60–600 perc, 60-as lépésekben), vagy hagyd üresen a tárolt előbeállítás használatához. Rádiós fűtőtest: hagyd üresen az időtartamot; a fűtőtest a saját boost idejéig fűt.",
       "fields": {
         "minutes": {
-          "name": "Boost időtartam",
-          "description": "A boost munkamenet időtartama percben (60-600, 60-as lépés). Választható.",
+          "name": "Boost időtartama",
+          "description": "A boost időtartama percben (60–600, 60-as lépésekben). Opcionális.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Akkumulátor-növelés megszüntetése",
-      "description": "A TermoWeb akkumulátor aktív boost munkamenetének törlése."
+      "name": "Boost leállítása",
+      "description": "Leállítja a boostot egy TermoWeb hőtárolón vagy rádiós fűtőtesten."
     },
     "set_schedule": {
-      "name": "Heti ütemterv beállítása",
-      "description": "Állítsa be a TermoWeb fűtőberendezés 7×24-es heti programját. A program egy 168 egész számból álló lista, ahol minden érték a hét egy órájának felel meg, hétfőn 00:00-tól kezdődően. A 0 a hideg előbeállításhoz, az 1 az éjszakai előbeállításhoz és a 2 a nappali előbeállításhoz.",
+      "name": "Heti program beállítása",
+      "description": "Beállítja egy TermoWeb fűtőtest 7×24-es heti programját. A program 168 egész számból álló lista, minden érték a hét egy órájának felel meg, hétfő 00:00-tól kezdve. A 0 a hideg, az 1 az éjszakai, a 2 a nappali előbeállítást jelenti.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "168 egész számból álló lista (0, 1 vagy 2), amely a fűtőberendezés heti ütemezését jelöli. A 0 index hétfő 00:00, az 1 index hétfő 01:00, és így tovább.",
+          "description": "168 egész számból (0, 1 vagy 2) álló lista, amely a fűtőtest heti programját írja le. A 0. elem hétfő 00:00, az 1. elem hétfő 01:00, és így tovább.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Előre beállított hőmérséklet beállítása",
-      "description": "Állítsa be a TermoWeb fűtőberendezés hideg, éjszakai és nappali előre beállított hőmérsékletét. Mindhárom hőmérsékletet megadhatja egyetlen listaként (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Előbeállított hőmérsékletek beállítása",
+      "description": "Beállítja egy TermoWeb fűtőtest hideg, éjszakai és nappali előbeállított hőmérsékletét. Megadhatod mindhárom hőmérsékletet egyetlen listaként (``ptemp``), vagy külön-külön is (``cold``, ``night`` és ``day``). A kihagyott előbeállítások megtartják jelenlegi értéküket.",
       "fields": {
         "ptemp": {
-          "name": "Előre beállított hőmérsékletek",
-          "description": "Három hőmérséklet [hideg, éjszaka, nappal] listája a fűtőegységgel megegyező mértékegységben (°C vagy °F). Ha megadják, ez felülírja az egyedi hideg, éjszakai és nappali értékeket.",
+          "name": "Előbeállított hőmérsékletek",
+          "description": "Három hőmérséklet listája [hideg, éjszakai, nappali], a fűtőtesttel azonos mértékegységben (°C vagy °F). Ha megadod, felülírja a külön megadott hideg, éjszakai és nappali értékeket.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
@@ -152,23 +305,92 @@
           "example": "16.0"
         },
         "day": {
-          "name": "Nap előre beállított",
-          "description": "A napra előre beállított hőmérséklet (°C vagy °F).",
+          "name": "Nappali előbeállítás",
+          "description": "A nappali előbeállítás hőmérséklete (°C vagy °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Az energia behozatalának története",
-      "description": "Importálja a TermoWeb fűtőberendezések egy évvel ezelőtti historikus óránkénti energiaszámlálóit a Home Assistant statisztikáiba minden konfigurált fűtőberendezéshez.",
+      "name": "Energiaelőzmények importálása",
+      "description": "Az összes fűtőtest és teljesítménymérő korábbi óránkénti energiafogyasztásának importálása a Home Assistant statisztikáiba (az Energia irányítópultra). A haladás mentésre kerül: ha az importálás leáll, futtasd újra a folytatáshoz.",
       "fields": {
         "reset_progress": {
           "name": "Haladás visszaállítása",
-          "description": "Törölje a tárolt előrehaladást és importálja újra az előzményeket a nulláról."
+          "description": "Elfelejti a mentett haladást, és újra importálja a teljes időszakot. A meglévő statisztikák felülíródnak, nem törlődnek."
         },
         "max_history_retrieval": {
-          "name": "Max történelem napok",
-          "description": "A lekérdezendő előzmények napjainak száma. Csak erre az importra vonatkozóan írja felül a konfigurált alapértelmezett értéket."
+          "name": "Előzmények max. napjai",
+          "description": "Hány napra visszamenőleg importáljon (1–3650, alapértelmezés 7). Ha korábban kevesebb napot importáltál, csak a régebbi napok töltődnek le."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Rádiórögzítés",
+      "description": "Egy ideig rögzít minden rádiókeretet, amelyet az átjáró vagy a nanoCUL vesz, és JSON-fájlként menti a Home Assistant konfigurációs mappájába. Soha nem sugároz. Normál rádiós bejegyzésnél a fűtőtest-parancsok a rögzítés végéig várnak.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurációs bejegyzés azonosítója",
+          "description": "A használandó rádiós átjáró vagy nanoCUL konfigurációs bejegyzés, általában a csak hallgató.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Időtartam",
+          "description": "Meddig rögzítsen, 10–1800 másodperc."
+        },
+        "redact": {
+          "name": "Személyes adatok elrejtése",
+          "description": "A hálózati azonosítók és a fűtőtestek sorozatszámainak cseréje a fájlban. Enélkül a fájl tartalmazza a hálózati azonosítódat: csak privát módon oszd meg."
+        },
+        "note": {
+          "name": "Megjegyzés",
+          "description": "A fájlba mentett opcionális szöveg, például hogy melyik fűtőtestet használtad.",
+          "example": "nappali fűtőtest feljebb állítva"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Rádiófelmérés",
+      "description": "Egy ideig hallgatja a fűtőtestek frekvenciasávjának teljes rádióforgalmát, azt is, amelyet ez az integráció nem ért, és jelentésfájlt ment a Home Assistant konfigurációs mappájába. Csatold a fájlt egy GitHub-hibajegyhez, ha egy új fűtőtesttípus támogatását kéred.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurációs bejegyzés azonosítója",
+          "description": "A használandó rádiós átjáró vagy nanoCUL konfigurációs bejegyzés.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Időtartam",
+          "description": "Meddig hallgasson. A fűtőtestek akkor adnak a legtöbbet, amikor elkezdenek vagy abbahagynak fűteni."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Rádiós gyári visszaállítás",
+      "description": "VISSZAFORDÍTHATATLAN. Egy rádiós fűtőtest visszaállítása gyári beállításokra. A fűtőtest elveszíti minden beállítását, az óráját, a heti programját és a rádiós párosítását, és megszűnik a kapcsolata a Home Assistanttel. Az utolsó ismert beállításai előtte mentésre kerülnek. A fűtőtest újbóli használatához nyomd meg az átjáró eszközén az „Új fűtőtestek párosítása” gombot, és tedd a fűtőtestet párosítási módba. A mentett beállításai visszakerülnek, amikor a rendszer felismeri. Egyes régebbi fűtőtestek rádión keresztül nem állíthatók vissza: ezeket kézzel állítsd vissza (lásd a fűtőtest kézikönyvét).",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurációs bejegyzés azonosítója",
+          "description": "A használandó rádiós átjáró vagy nanoCUL konfigurációs bejegyzés.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Fűtőtest száma",
+          "description": "A fűtőtest rádiós száma (a szám a „Fűtőtest 6” névben)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Rádió: fűtőtestek áthelyezése a saját hálózatra",
+      "description": "Egy rádiós bejegyzés összes fűtőtestét áthelyezi ennek a telepítésnek a saját rádióhálózatára. Előbb minden fűtőtest visszaáll (a beállításai mentésre kerülnek), majd egyenként párosítási módba teszed a fűtőtesteket. A fűtőtestek új számot kapnak 2-től felfelé, és a beállításaik visszaállnak. Egyes régebbi fűtőtestek rádión keresztül nem állíthatók vissza, ezért így nem helyezhetők át. Amíg ez fut, a fűtőtestek vezérlése szünetel.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurációs bejegyzés azonosítója",
+          "description": "A használandó rádiós átjáró vagy nanoCUL konfigurációs bejegyzés.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Várakozási idő",
+          "description": "Meddig várjon a fűtőtestek párosítógombjainak megnyomására."
         }
       }
     }

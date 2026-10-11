@@ -1,174 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Hur är dina element anslutna?",
+        "description": "Välj molnkontot om du använder appen TermoWeb, Ducaheat eller Tevolve. Vill du styra elementen lokalt utan molnet är det enklast med en nanoCUL USB-sticka ansluten till den här Home Assistant-datorn (ingen lödning). ESP32-radiogatewayen är för avancerade användare: den måste byggas och lödas.",
+        "menu_options": {
+          "cloud": "Molnkonto (appen TermoWeb, Ducaheat eller Tevolve)",
+          "nanocul": "Lokal radio: nanoCUL USB-sticka (enklast, ingen lödning)",
+          "radio": "Lokal radiogateway: ESP32 + CC1101 (avancerat, kräver lödning)"
+        }
+      },
       "cloud": {
-        "title": "Anslut till TermoWeb-familjens värmare",
-        "description": "Version: {version}__\n\nVälj ditt TermoWeb- eller Ducaheat-varumärke och ange dina kontouppgifter.",
+        "title": "Anslut till element i TermoWeb-familjen",
+        "description": "Version: {version}\n\nVälj märket TermoWeb, Ducaheat eller Tevolve och ange inloggningsuppgifterna för ditt konto. Tevolve använder Ducaheats server.",
         "data": {
-          "brand": "Varumärke",
+          "brand": "Märke",
           "username": "E-post",
+          "password": "Lösenord"
+        }
+      },
+      "radio": {
+        "title": "Anslut till radiogatewayen",
+        "description": "Home Assistant hittar normalt ESP32-radiogatewayen själv: leta efter den under **Upptäckta** på sidan Enheter och tjänster. Använd bara det här formuläret om den inte visas där. Ange gatewayens IP-adress. I nästa steg väljer du: lägga till gatewayen och låta den hitta dina element, eller para nya element.",
+        "data": {
+          "host": "Gatewayens IP-adress"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Låt dessa vara som de är om du inte har ändrat gatewayens firmware.",
+            "data": {
+              "port": "Port"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Radiogateway hittad",
+        "description": "En TermoWeb-radiogateway hittades på {host}. Vill du konfigurera den?\n\nI nästa steg väljer du: lägga till gatewayen (den hittar och parar dina element) eller bara lyssna."
+      },
+      "radio_method": {
+        "title": "Lägg till din gateway",
+        "description": "Välj ”Lägg till gatewayen” för att styra dina element. Konfigurationen blir klar direkt. Sedan:\n\n- Element som redan fungerar med en TermoWeb-gateway eller -app hittas automatiskt, oftast inom några minuter. Elementen sänder när de börjar värma, så det hjälper att höja temperaturen på ett element.\n- Nya eller återställda element: sätt varje element i parkopplingsläge inom 30 minuter. Elementets manual visar vilka knappar du ska trycka på. Ett element i taget. Senare trycker du först på **Para nya element** på gatewayenheten.\n\nDu får en avisering för varje element som läggs till.\n\nVälj ”Bara lyssna” för att spela in radiotrafik för ett test, bredvid en TermoWeb-gateway som fortfarande är igång. Integrationen sänder aldrig i det här läget och lägger inte till några element.",
+        "menu_options": {
+          "radio_discover": "Lägg till gatewayen",
+          "radio_monitor": "Bara lyssna (spela in radiotrafik, sänd aldrig)"
+        }
+      },
+      "radio_rescan": { "title": "Söker efter dina element" },
+      "reconfigure_radio": {
+        "title": "Ändra radiogatewayen",
+        "description": "Ändra gatewayens adress. Kryssa i ”Sök efter element igen” om du har lagt till eller tagit bort ett element.",
+        "data": {
+          "host": "Gatewayens IP-adress",
+          "port": "Port",
+          "rescan": "Sök efter element igen"
+        }
+      },
+      "nanocul": {
+        "title": "Anslut till nanoCUL USB-stickan",
+        "description": "Välj porten för din nanoCUL-sticka. Om Home Assistant har känt igen stickan är den redan vald: tryck bara på Skicka. I nästa steg väljer du: lägga till gatewayen och låta den hitta dina element, eller para nya element.",
+        "data": {
+          "device": "USB-port"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Ange nanoCUL-porten",
+        "description": "Skriv sökvägen till porten, till exempel /dev/serial/by-id/usb-..., eller en nätverksadress som socket://192.0.2.10:2323 för en sticka som delas över nätverket.",
+        "data": {
+          "device": "Portsökväg eller URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Ändra nanoCUL-porten",
+        "description": "Ändra stickans portsökväg eller URL. Kryssa i ”Sök efter element igen” om du har lagt till eller tagit bort ett element.",
+        "data": {
+          "device": "Portsökväg eller URL",
+          "rescan": "Sök efter element igen"
+        }
+      },
+      "reconfigure": {
+        "title": "Ändra kontoinställningarna",
+        "description": "Version: {version}\n\nAnge det nya lösenordet för det här kontot. Du kan inte byta till ett annat konto här: lägg till en ny post för det.",
+        "data": {
+          "brand": "Märke",
+          "username": "E-post",
+          "password": "Lösenord"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Logga in igen",
+        "description": "{brand} godtog inte det sparade lösenordet för {username}. Ange det aktuella lösenordet.",
+        "data": {
           "password": "Lösenord"
         }
       }
     },
     "error": {
       "invalid_auth": "Ogiltigt användarnamn eller lösenord (eller klientnyckel).",
-      "cannot_connect": "Det går inte att ansluta till TermoWeb - nätverks-/DNS/SSL-fel.",
-      "rate_limited": "Temporärt hastighetsbegränsad av API. Försök igen senare.",
-      "unknown": "Okänt fel"
+      "cannot_connect": "Det går inte att ansluta till TermoWeb – nätverks-/DNS-/SSL-fel.",
+      "rate_limited": "Tillfälligt begränsad av API:et (för många förfrågningar). Försök igen senare.",
+      "unknown": "Okänt fel",
+      "cannot_connect_radio": "Det går inte att ansluta till radiogatewayen. Kontrollera IP-adressen och porten, och att gatewayen är påslagen.",
+      "no_gateway_mac": "Radiogatewayen rapporterade inte sin MAC-adress. Uppdatera gatewayens firmware.",
+      "no_heaters": "Inget element svarade. Flytta gatewayen närmare elementen och försök igen.",
+      "cannot_connect_nanocul": "Det går inte att öppna nanoCUL-stickan. Kontrollera att den är ansluten, att porten är rätt och att den kör firmwaren termoweb_rx.",
+      "nanocul_radio_missing": "Stickan svarar, men dess radiomodul är inte ansluten. Kontrollera kopplingen.",
+      "gateway_radio_missing": "Gatewayen svarar, men dess radiomodul är inte ansluten. Kontrollera kopplingen."
+    },
+    "abort": {
+      "already_configured": "Den här gatewayen är redan konfigurerad.",
+      "reconfigure_successful": "Inställningarna sparades.",
+      "monitor_reconfigure": "En post som bara lyssnar kan inte ändras. Ta bort den och lägg till den igen.",
+      "unique_id_mismatch": "Det här är ett annat konto eller en annan enhet. Lägg till en ny post i stället om du vill använda det.",
+      "reauth_successful": "Det nya lösenordet sparades.",
+      "cannot_connect_radio": "Det går inte att ansluta till radiogatewayen. Kontrollera att gatewayen är påslagen och ansluten till ditt nätverk.",
+      "no_gateway_mac": "Radiogatewayen rapporterade inte sin MAC-adress. Uppdatera gatewayens firmware.",
+      "gateway_radio_missing": "Gatewayen svarar, men dess radiomodul är inte ansluten. Kontrollera kopplingen.",
+      "not_ipv4_address": "Radiogatewayen meddelade bara en IPv6-adress. Lägg till den manuellt med dess IPv4-adress.",
+      "nanocul_firmware_too_old": "Firmwaren på den här nanoCUL-stickan är för gammal. Installera den senaste firmwaren termoweb_rx på stickan (se nanoCUL-guiden) och försök sedan igen."
+    },
+    "progress": {
+      "radio_rescan": "Kontrollerar alla element i ditt radionätverk. Det tar upp till en minut."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "TermoWeb Alternativ"
+      "rehome": {
+        "title": "Flytta elementen till installationens eget nätverk",
+        "description": "Använd detta när dina element fortfarande använder radionätverket från en gammal TermoWeb-gateway. Element: {heaters}.\n\nVad som händer:\n1. Varje element återställs till fabriksinställningarna. Home Assistant sparar först dess inställningar.\n2. Du sätter elementen i parkopplingsläge, ett i taget. Elementets manual visar vilka knappar du ska trycka på. Vänta cirka 10 sekunder mellan elementen. Du har 5 minuter på dig.\n3. Elementen får nya nummer, från 2 och uppåt. Deras entitets-ID:n ändras. Elementens namn förblir desamma när Home Assistant känner igen elementet.\n4. Home Assistant ger varje element tillbaka dess inställningar: läge, förinställda temperaturer, manuell temperatur och veckoprogram.\n\nStyrningen av elementen pausas medan detta pågår. Vissa äldre element kan inte återställas via radio och kan därför inte flyttas på det här sättet. Tryck på **Skicka** för att starta och sätt sedan det första elementet i parkopplingsläge efter cirka 10 sekunder."
+      },
+      "rehome_run": { "title": "Flyttar dina element" },
+      "rehome_done": {
+        "title": "Flytten är klar",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Integrationen körs inte. Starta den först och försök sedan igen."
+    },
+    "progress": {
+      "rehome": "Återställer elementen och väntar sedan på element i parkopplingsläge. Sätt nu ett element i parkopplingsläge, sedan nästa. Det avslutas 1 minut efter att det sista elementet parats, eller efter 5 minuter."
+    }
+  },
+  "device": {
+    "heater": {
+      "name": "Element {addr}"
+    },
+    "accumulator": {
+      "name": "Ackumulator {addr}"
+    },
+    "thermostat": {
+      "name": "Termostat {addr}"
+    },
+    "power_monitor": {
+      "name": "Effektmätare {addr}"
+    },
+    "node": {
+      "name": "Nod {addr}"
+    },
+    "site": {
+      "name": "Hem"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway online"
+      "gateway_online": { "name": "Gateway online" },
+      "pairing_open": {
+        "name": "Parkoppling öppen",
+        "state_attributes": { "ends_at": { "name": "Slutar" } }
       },
-      "boost_active": {
-        "name": "Boost aktiv"
-      }
+      "boost_active": { "name": "Boost aktiv" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Tvinga fram uppdatering"
-      },
-      "accumulator_boost_start": {
-        "name": "Starta boost"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Avbryt boost"
-      }
+      "force_refresh": { "name": "Tvinga uppdatering" },
+      "pair_new_heaters": { "name": "Para nya element" },
+      "accumulator_boost_start": { "name": "Starta boost" },
+      "accumulator_boost_cancel": { "name": "Avbryt boost" },
+      "flash_display": { "name": "Blinka displayen" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Boostens varaktighet"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Förhöjd temperatur"
-      }
+      "accumulator_boost_duration": { "name": "Boostlängd" },
+      "accumulator_boost_temperature": { "name": "Boosttemperatur" },
+      "heater_priority": { "name": "Prioritet" },
+      "installation_power_limit": { "name": "Effektgräns" },
+      "temperature_offset": { "name": "Temperaturjustering" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatur"
+      "heater_temperature": { "name": "Temperatur" },
+      "heater_energy_total": { "name": "Energi" },
+      "heater_power": { "name": "Effekt" },
+      "radio_address": { "name": "Radioadress" },
+      "power_monitor_energy": { "name": "Energi" },
+      "power_monitor_power": { "name": "Effekt" },
+      "installation_total_energy": { "name": "Total energi" },
+      "frames_heard": { "name": "Mottagna ramar" },
+      "boost_minutes_remaining": { "name": "Återstående boostminuter" },
+      "boost_end": { "name": "Boost slutar" },
+      "accumulator_charging": { "name": "Laddning" },
+      "accumulator_current_charge": { "name": "Aktuell laddning" },
+      "accumulator_target_charge": { "name": "Mål för laddning" },
+      "installation_info": { "name": "Plats" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Ingen",
+              "temporary_override": "Tillfällig ändring",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Barnlås" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "EASY-läge" },
+      "open_window_detection": { "name": "Detektering av öppet fönster" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Regleringsläge",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Hysteres 0,25 °C",
+          "hysteresis_0_35": "Hysteres 0,35 °C",
+          "hysteresis_0_5": "Hysteres 0,5 °C",
+          "hysteresis_0_75": "Hysteres 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energi"
-      },
-      "heater_power": {
-        "name": "Kraft"
-      },
-      "power_monitor_energy": {
-        "name": "Energi"
-      },
-      "power_monitor_power": {
-        "name": "Kraft"
-      },
-      "installation_total_energy": {
-        "name": "Total energi"
-      },
-      "boost_minutes_remaining": {
-        "name": "Boost minuter kvar"
-      },
-      "boost_end": {
-        "name": "Boost slut"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Temperaturenhet på panelen",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Konfigurera förinställning av ackumulatorns boost",
-      "description": "Uppdatera den förvalda boosttiden och/eller temperaturen för en TermoWeb-ackumulator. Minuterna måste vara mellan 60 och 600 i steg om 60 minuter; utelämna ett fält för att behålla det befintliga värdet.",
+      "name": "Konfigurera ackumulatorns boost-förinställning",
+      "description": "Uppdatera standardlängd och/eller temperatur för boost på en TermoWeb-ackumulator. Minuter måste vara mellan 60 och 600 i steg om 60 minuter; utelämna ett fält för att behålla det befintliga värdet.",
       "fields": {
         "minutes": {
-          "name": "Standard boost-varaktighet",
-          "description": "Antal minuter som boostfunktionen ska köras när ingen åsidosättning görs (60-600, steg 60).",
+          "name": "Standardlängd för boost",
+          "description": "Antal minuter boosten ska pågå när ingen annan längd anges (60–600, steg 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Förhöjd temperatur",
-          "description": "Valfritt börvärde för boost som ska tillämpas under boostsessionen (°C eller °F).",
+          "name": "Boosttemperatur",
+          "description": "Valfri måltemperatur under boosten (°C eller °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Starta ackumulator boost",
-      "description": "Utlöser en omedelbar boost på en TermoWeb-ackumulator. Ange en varaktighet för att åsidosätta standardinställningen (60-600 minuter i steg om 60 minuter), eller utelämna den för att använda den lagrade förinställningen.",
+      "name": "Starta boost",
+      "description": "Starta en boost nu på en TermoWeb-ackumulator eller på ett radioelement som har boost. Ackumulator: ange en längd (60–600 minuter, i steg om 60), eller utelämna den för att använda den sparade förinställningen. Radioelement: utelämna längden; elementet boostar under sin egen boosttid.",
       "fields": {
         "minutes": {
-          "name": "Boostens varaktighet",
-          "description": "Boost-sessionens varaktighet i minuter (60-600, steg 60). Valfritt alternativ.",
+          "name": "Boostlängd",
+          "description": "Boostens längd i minuter (60–600, steg 60). Valfritt.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Avbryt ackumulator boost",
-      "description": "Avbryt den aktiva boost-sessionen på en TermoWeb-ackumulator."
+      "name": "Avbryt boost",
+      "description": "Stoppa boosten på en TermoWeb-ackumulator eller ett radioelement."
     },
     "set_schedule": {
-      "name": "Fastställ veckoschema",
-      "description": "Ställ in 7×24-veckoprogrammet för en TermoWeb-värmare. Programmet är en lista med 168 heltal, där varje värde motsvarar en timme i veckan med start måndag 00:00. Använd 0 för kallförinställning, 1 för nattförinställning och 2 för dagförinställning.",
+      "name": "Ställ in veckoschema",
+      "description": "Ställ in 7×24-veckoprogrammet för ett TermoWeb-element. Programmet är en lista med 168 heltal, där varje värde motsvarar en timme i veckan med start måndag 00:00. Använd 0 för förinställningen kall, 1 för förinställningen natt och 2 för förinställningen dag.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "En lista med 168 heltal (0, 1 eller 2) som representerar värmarens veckoschema. Index 0 är måndag 00:00, index 1 är måndag 01:00, och så vidare.",
+          "description": "En lista med 168 heltal (0, 1 eller 2) som utgör elementets veckoschema. Index 0 är måndag 00:00, index 1 är måndag 01:00 och så vidare.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
       "name": "Ställ in förinställda temperaturer",
-      "description": "Ställ in de förinställda temperaturerna för kyla, natt och dag för en TermoWeb-värmare. Du kan antingen ange alla tre temperaturerna som en enda lista (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "description": "Ställ in temperaturerna för förinställningarna kall, natt och dag för ett TermoWeb-element. Du kan antingen ange alla tre temperaturerna som en lista (``ptemp``) eller ange var och en separat (``cold``, ``night`` och ``day``). Förinställningar du utelämnar behåller sitt nuvarande värde.",
       "fields": {
         "ptemp": {
           "name": "Förinställda temperaturer",
-          "description": "En lista med tre temperaturer [kall, natt, dag] i samma enheter som värmaren (°C eller °F). Om detta anges kommer det att åsidosätta individuella värden för kyla, natt och dag.",
+          "description": "En lista med tre temperaturer [kall, natt, dag] i samma enhet som elementet (°C eller °F). Om den anges ersätter den de enskilda värdena för kall, natt och dag.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Kall förinställning",
-          "description": "Temperatur för den kalla förinställningen (°C eller °F).",
+          "name": "Förinställning kall",
+          "description": "Temperatur för förinställningen kall (°C eller °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Förinställd natt",
-          "description": "Temperatur för nattförinställningen (°C eller °F).",
+          "name": "Förinställning natt",
+          "description": "Temperatur för förinställningen natt (°C eller °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Förinställd dag",
-          "description": "Temperatur för dagen förinställd (°C eller °F).",
+          "name": "Förinställning dag",
+          "description": "Temperatur för förinställningen dag (°C eller °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Historik för importerad energi",
-      "description": "Importera historiska timräknare för TermoWeb-värmare för upp till ett år sedan till Home Assistant-statistik för varje konfigurerad värmare.",
+      "name": "Importera energihistorik",
+      "description": "Importera tidigare energiförbrukning per timme för alla element och effektmätare till Home Assistants statistik (Energipanelen). Förloppet sparas: om importen stoppas kör du den igen för att fortsätta.",
       "fields": {
         "reset_progress": {
-          "name": "Återställ framsteg",
-          "description": "Radera lagrade framsteg och importera historiken från början igen."
+          "name": "Återställ förlopp",
+          "description": "Glöm sparat förlopp och importera hela perioden igen. Befintlig statistik skrivs över, den tas inte bort."
         },
         "max_history_retrieval": {
-          "name": "Max historikdagar",
-          "description": "Antal dagar med historik som ska hämtas. Åsidosätter den konfigurerade standardinställningen endast för denna import."
+          "name": "Max antal dagars historik",
+          "description": "Hur många dagar bakåt som ska importeras (1 till 3650, standard 7). Om du redan har importerat färre dagar hämtas bara de äldre dagarna."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Radioinspelning",
+      "description": "Spela in varje radioram som gatewayen eller nanoCUL hör under en tid och spara den som en JSON-fil i Home Assistants konfigurationsmapp. Sänder aldrig. På en vanlig radiopost väntar kommandon till elementen tills inspelningen är klar.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurationspost-ID",
+          "description": "Konfigurationsposten för radiogatewayen eller nanoCUL som ska användas, normalt den som bara lyssnar.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Längd",
+          "description": "Hur länge inspelningen ska pågå, 10 till 1800 sekunder."
+        },
+        "redact": {
+          "name": "Dölj privata data",
+          "description": "Ersätt nätverks-ID:n och elementens serienummer i filen. Utan detta innehåller filen ditt nätverks-ID: dela den bara privat."
+        },
+        "note": {
+          "name": "Anteckning",
+          "description": "Valfri text som sparas i filen, till exempel vilket element du använde.",
+          "example": "höjde temperaturen på elementet i vardagsrummet"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Radioundersökning",
+      "description": "Lyssna på all radiotrafik i elementens frekvensband under en tid, även trafik som den här integrationen inte förstår, och spara en rapportfil i Home Assistants konfigurationsmapp. Bifoga filen i ett ärende på GitHub för att be om stöd för en ny typ av element.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurationspost-ID",
+          "description": "Konfigurationsposten för radiogatewayen eller nanoCUL som ska användas.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Längd",
+          "description": "Hur länge du vill lyssna. Elementen sänder mest när de börjar eller slutar värma."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Fabriksåterställning via radio",
+      "description": "DESTRUKTIVT. Återställ ett radioelement till fabriksinställningarna. Elementet förlorar alla inställningar, sin klocka, sitt veckoprogram och sin radioparkoppling, och slutar kommunicera med Home Assistant. Dess senast kända inställningar sparas först. För att använda elementet igen trycker du på ”Para nya element” på gatewayenheten och sätter elementet i parkopplingsläge. De sparade inställningarna kommer tillbaka när det känns igen. Vissa äldre element kan inte återställas via radio: återställ dem manuellt (se elementets manual).",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurationspost-ID",
+          "description": "Konfigurationsposten för radiogatewayen eller nanoCUL som ska användas.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Elementnummer",
+          "description": "Elementets radionummer (numret i ”Element 6”)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radio: flytta element till eget nätverk",
+      "description": "Flytta alla element i en radiopost till installationens eget radionätverk. Varje element återställs först (dess inställningar sparas), sedan sätter du elementen i parkopplingsläge ett i taget. Elementen får nya nummer från 2 och uppåt och deras inställningar återställs. Vissa äldre element kan inte återställas via radio och kan därför inte flyttas på det här sättet. Styrningen av elementen pausas medan detta pågår.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurationspost-ID",
+          "description": "Konfigurationsposten för radiogatewayen eller nanoCUL som ska användas.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Väntetid",
+          "description": "Hur länge det ska väntas på att parkopplingsknapparna på elementen trycks in."
         }
       }
     }

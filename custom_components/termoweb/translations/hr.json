@@ -1,188 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Kako su vaši grijači povezani?",
+        "description": "Odaberite račun u oblaku ako koristite aplikaciju TermoWeb, Ducaheat ili Tevolve. Za lokalno upravljanje grijačima bez oblaka najjednostavniji je nanoCUL USB stick priključen na ovo Home Assistant računalo (bez lemljenja). ESP32 radijski pristupnik namijenjen je naprednim korisnicima: treba ga sastaviti i zalemiti.",
+        "menu_options": {
+          "cloud": "Račun u oblaku (aplikacija TermoWeb, Ducaheat ili Tevolve)",
+          "nanocul": "Lokalni radio: nanoCUL USB stick (najjednostavnije, bez lemljenja)",
+          "radio": "Lokalni radijski pristupnik: ESP32 + CC1101 (napredno, potrebno lemljenje)"
+        }
+      },
       "cloud": {
-        "title": "Povežite se s grijačima TermoWeb obitelji",
-        "description": "Verzija: {version}\n\nOdaberite svoju TermoWeb ili Ducaheat marku i unesite vjerodajnice računa.",
+        "title": "Povežite se s grijačima obitelji TermoWeb",
+        "description": "Verzija: {version}\n\nOdaberite svoju marku TermoWeb, Ducaheat ili Tevolve i unesite podatke za prijavu na račun. Tevolve koristi Ducaheat poslužitelj.",
         "data": {
           "brand": "Marka",
-          "username": "E-mail",
+          "username": "E-pošta",
+          "password": "Lozinka"
+        }
+      },
+      "radio": {
+        "title": "Povežite se s radijskim pristupnikom",
+        "description": "Home Assistant obično sam pronađe ESP32 radijski pristupnik: potražite ga pod **Otkriveno** na stranici Uređaji i usluge. Ovaj obrazac koristite samo ako se ondje ne pojavi. Unesite IP adresu svog pristupnika. U sljedećem koraku birate: dodati pristupnik i pustiti ga da pronađe vaše grijače ili upariti nove grijače.",
+        "data": {
+          "host": "IP adresa pristupnika"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Napredne postavke",
+            "description": "Ne mijenjajte ih osim ako ste promijenili firmver pristupnika.",
+            "data": {
+              "port": "Priključak"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Pronađen radijski pristupnik",
+        "description": "Pronađen je TermoWeb radijski pristupnik na adresi {host}. Želite li ga postaviti?\n\nU sljedećem koraku birate: dodati pristupnik (on pronalazi i uparuje vaše grijače) ili samo slušati."
+      },
+      "radio_method": {
+        "title": "Dodajte svoj pristupnik",
+        "description": "Odaberite „Dodaj pristupnik” za upravljanje grijačima. Postavljanje odmah završava. Zatim:\n\n- Grijači koji već rade s TermoWeb pristupnikom ili aplikacijom pronalaze se sami, obično u roku od nekoliko minuta. Grijači se javljaju kad počnu grijati, pa pomaže ako jednom grijaču povisite temperaturu.\n- Novi ili resetirani grijači: stavite svaki grijač u način uparivanja u roku od 30 minuta. U priručniku grijača piše koje tipke treba pritisnuti. Jedan po jedan grijač. Kasnije najprije pritisnite **Upari nove grijače** na uređaju pristupnika.\n\nZa svaki dodani grijač dobit ćete obavijest.\n\nOdaberite „Samo slušanje” za snimanje radijskog prometa radi testiranja, uz TermoWeb pristupnik koji još radi. U tom načinu integracija nikad ne odašilje i ne dodaje grijače.",
+        "menu_options": {
+          "radio_discover": "Dodaj pristupnik",
+          "radio_monitor": "Samo slušanje (snima radijski promet, nikad ne odašilje)"
+        }
+      },
+      "radio_rescan": { "title": "Traženje vaših grijača" },
+      "reconfigure_radio": {
+        "title": "Promjena radijskog pristupnika",
+        "description": "Promijenite adresu pristupnika. Označite „Ponovno potraži grijače” ako ste dodali ili uklonili grijač.",
+        "data": {
+          "host": "IP adresa pristupnika",
+          "port": "Priključak",
+          "rescan": "Ponovno potraži grijače"
+        }
+      },
+      "nanocul": {
+        "title": "Povežite se s nanoCUL USB stickom",
+        "description": "Odaberite priključak svog nanoCUL sticka. Ako je Home Assistant prepoznao stick, već je odabran: samo pritisnite Pošalji. U sljedećem koraku birate: dodati pristupnik i pustiti ga da pronađe vaše grijače ili upariti nove grijače.",
+        "data": {
+          "device": "USB priključak"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Unesite nanoCUL priključak",
+        "description": "Upišite putanju priključka, na primjer /dev/serial/by-id/usb-..., ili mrežnu adresu poput socket://192.0.2.10:2323 za stick koji se dijeli preko mreže.",
+        "data": {
+          "device": "Putanja priključka ili URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Promjena nanoCUL priključka",
+        "description": "Promijenite putanju priključka ili URL sticka. Označite „Ponovno potraži grijače” ako ste dodali ili uklonili grijač.",
+        "data": {
+          "device": "Putanja priključka ili URL",
+          "rescan": "Ponovno potraži grijače"
+        }
+      },
+      "reconfigure": {
+        "title": "Promjena postavki računa",
+        "description": "Verzija: {version}\n\nUnesite novu lozinku za ovaj račun. Ovdje se ne možete prebaciti na drugi račun: za to dodajte novi unos.",
+        "data": {
+          "brand": "Marka",
+          "username": "E-pošta",
+          "password": "Lozinka"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Ponovna prijava",
+        "description": "{brand} nije prihvatio spremljenu lozinku za {username}. Unesite trenutačnu lozinku.",
+        "data": {
           "password": "Lozinka"
         }
       }
     },
     "error": {
       "invalid_auth": "Neispravno korisničko ime ili lozinka (ili klijentski ključ).",
-      "cannot_connect": "Nije moguće povezati se s TermoWebom — mrežna/DNS/SSL greška.",
-      "rate_limited": "API je privremeno ograničen. Pokušajte ponovno kasnije.",
-      "unknown": "Nepoznata greška"
+      "cannot_connect": "Nije moguće povezati se s TermoWebom — mrežna/DNS/SSL pogreška.",
+      "rate_limited": "API je privremeno ograničio broj zahtjeva. Pokušajte ponovno kasnije.",
+      "unknown": "Nepoznata pogreška",
+      "cannot_connect_radio": "Nije moguće povezati se s radijskim pristupnikom. Provjerite IP adresu i priključak te je li pristupnik uključen.",
+      "no_gateway_mac": "Radijski pristupnik nije javio svoju MAC adresu. Ažurirajte firmver pristupnika.",
+      "no_heaters": "Nijedan grijač nije odgovorio. Približite pristupnik grijačima i pokušajte ponovno.",
+      "cannot_connect_nanocul": "Nije moguće otvoriti nanoCUL stick. Provjerite je li priključen, je li priključak ispravan i ima li firmver termoweb_rx.",
+      "nanocul_radio_missing": "Stick odgovara, ali njegov radijski modul nije spojen. Provjerite ožičenje.",
+      "gateway_radio_missing": "Pristupnik odgovara, ali njegov radijski modul nije spojen. Provjerite ožičenje."
+    },
+    "abort": {
+      "already_configured": "Ovaj je pristupnik već postavljen.",
+      "reconfigure_successful": "Postavke su spremljene.",
+      "monitor_reconfigure": "Unos samo za slušanje ne može se mijenjati. Izbrišite ga i ponovno dodajte.",
+      "unique_id_mismatch": "Ovo je drugi račun ili uređaj. Da biste ga koristili, dodajte novi unos.",
+      "reauth_successful": "Nova lozinka je spremljena.",
+      "cannot_connect_radio": "Nije moguće povezati se s radijskim pristupnikom. Provjerite je li pristupnik uključen i spojen na vašu mrežu.",
+      "no_gateway_mac": "Radijski pristupnik nije javio svoju MAC adresu. Ažurirajte firmver pristupnika.",
+      "gateway_radio_missing": "Pristupnik odgovara, ali njegov radijski modul nije spojen. Provjerite ožičenje.",
+      "not_ipv4_address": "Radijski pristupnik objavio je samo IPv6 adresu. Dodajte ga ručno s njegovom IPv4 adresom.",
+      "nanocul_firmware_too_old": "Firmver na ovom nanoCUL sticku je prestar. Instalirajte najnoviji firmver termoweb_rx na stick (pogledajte vodič za nanoCUL) pa pokušajte ponovno."
+    },
+    "progress": {
+      "radio_rescan": "Provjeravaju se svi grijači u vašoj radijskoj mreži. To traje do jedne minute."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "TermoWeb opcije"
+      "rehome": {
+        "title": "Premjestite grijače u vlastitu mrežu ove instalacije",
+        "description": "Koristite ovo kad vaši grijači još koriste radijsku mrežu starog TermoWeb pristupnika. Grijači: {heaters}.\n\nŠto se događa:\n1. Svaki se grijač vraća na tvorničke postavke. Home Assistant najprije sprema njegove postavke.\n2. Grijače stavljate u način uparivanja, jedan po jedan. U priručniku grijača piše koje tipke treba pritisnuti. Između grijača pričekajte oko 10 sekundi. Imate 5 minuta.\n3. Grijači dobivaju nove brojeve, od 2 nadalje. Mijenjaju im se ID-ovi entiteta. Nazivi grijača ostaju isti kad Home Assistant prepozna grijač.\n4. Home Assistant svakom grijaču vraća njegove postavke: način rada, temperature režima, ručnu temperaturu i tjedni program.\n\nUpravljanje grijačima pauzirano je dok ovo traje. Neki stariji grijači ne mogu se resetirati radijom, pa se ne mogu premjestiti na ovaj način. Pritisnite **Pošalji** za početak, a zatim nakon otprilike 10 sekundi stavite prvi grijač u način uparivanja."
+      },
+      "rehome_run": { "title": "Premještanje vaših grijača" },
+      "rehome_done": {
+        "title": "Premještanje završeno",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Integracija nije pokrenuta. Najprije je pokrenite pa pokušajte ponovno."
+    },
+    "progress": {
+      "rehome": "Resetiranje grijača, zatim čekanje grijača u načinu uparivanja. Sada stavite jedan grijač u način uparivanja, zatim sljedeći. Ovo završava 1 minutu nakon uparivanja posljednjeg grijača ili nakon 5 minuta."
     }
   },
   "device": {
     "heater": {
       "name": "Grijač {addr}"
     },
+    "accumulator": {
+      "name": "Akumulacijska peć {addr}"
+    },
     "thermostat": {
       "name": "Termostat {addr}"
+    },
+    "power_monitor": {
+      "name": "Mjerač energije {addr}"
     },
     "node": {
       "name": "Čvor {addr}"
     },
-    "power_monitor": {
-      "name": "Mjerač energije {addr}"
+    "site": {
+      "name": "Dom"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway online"
+      "gateway_online": { "name": "Pristupnik dostupan" },
+      "pairing_open": {
+        "name": "Uparivanje otvoreno",
+        "state_attributes": { "ends_at": { "name": "Završava u" } }
       },
-      "boost_active": {
-        "name": "Pojačanje aktivno"
-      }
+      "boost_active": { "name": "Pojačanje aktivno" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Prisili osvježavanje"
-      },
-      "accumulator_boost_start": {
-        "name": "Pokreni pojačanje"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Otkaži pojačanje"
-      }
+      "force_refresh": { "name": "Prisilno osvježi" },
+      "pair_new_heaters": { "name": "Upari nove grijače" },
+      "accumulator_boost_start": { "name": "Pokreni pojačanje" },
+      "accumulator_boost_cancel": { "name": "Otkaži pojačanje" },
+      "flash_display": { "name": "Zatreperi zaslon" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Trajanje pojačanja"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Temperatura pojačanja"
-      }
+      "accumulator_boost_duration": { "name": "Trajanje pojačanja" },
+      "accumulator_boost_temperature": { "name": "Temperatura pojačanja" },
+      "heater_priority": { "name": "Prioritet" },
+      "installation_power_limit": { "name": "Ograničenje snage" },
+      "temperature_offset": { "name": "Korekcija temperature" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatura"
+      "heater_temperature": { "name": "Temperatura" },
+      "heater_energy_total": { "name": "Energija" },
+      "heater_power": { "name": "Snaga" },
+      "radio_address": { "name": "Radijska adresa" },
+      "power_monitor_energy": { "name": "Energija" },
+      "power_monitor_power": { "name": "Snaga" },
+      "installation_total_energy": { "name": "Ukupna energija" },
+      "frames_heard": { "name": "Primljeni okviri" },
+      "boost_minutes_remaining": { "name": "Preostale minute pojačanja" },
+      "boost_end": { "name": "Kraj pojačanja" },
+      "accumulator_charging": { "name": "Punjenje" },
+      "accumulator_current_charge": { "name": "Trenutačna napunjenost" },
+      "accumulator_target_charge": { "name": "Ciljna napunjenost" },
+      "installation_info": { "name": "Lokacija" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Nijedan",
+              "temporary_override": "Privremena promjena",
+              "boost": "Pojačanje"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Zaštita za djecu" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "Način EASY" },
+      "open_window_detection": { "name": "Prepoznavanje otvorenog prozora" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Način regulacije",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Histereza 0,25 °C",
+          "hysteresis_0_35": "Histereza 0,35 °C",
+          "hysteresis_0_5": "Histereza 0,5 °C",
+          "hysteresis_0_75": "Histereza 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energija"
-      },
-      "heater_power": {
-        "name": "Snaga"
-      },
-      "power_monitor_energy": {
-        "name": "Energija"
-      },
-      "power_monitor_power": {
-        "name": "Snaga"
-      },
-      "installation_total_energy": {
-        "name": "Ukupna energija"
-      },
-      "boost_minutes_remaining": {
-        "name": "Preostali minuti pojačanja"
-      },
-      "boost_end": {
-        "name": "Kraj pojačanja"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Jedinica temperature na zaslonu",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Postavi zadano pojačanje akumulatora",
-      "description": "Ažurirajte zadano trajanje i/ili temperaturu pojačanja za TermoWeb akumulator. Minute moraju biti između 60 i 600 u koracima od 60; izostavite polje kako biste zadržali postojeću vrijednost.",
+      "name": "Postavi zadano pojačanje akumulacijske peći",
+      "description": "Ažurira zadano trajanje i/ili temperaturu pojačanja za TermoWeb akumulacijsku peć. Minute moraju biti između 60 i 600, u koracima od 60 minuta; izostavite polje kako biste zadržali postojeću vrijednost.",
       "fields": {
         "minutes": {
           "name": "Zadano trajanje pojačanja",
-          "description": "Broj minuta koliko pojačanje traje kada nema nadjačavanja (60–600, korak 60).",
+          "description": "Koliko minuta traje pojačanje kad nije navedeno drugo trajanje (60–600, korak 60).",
           "example": "120"
         },
         "temperature": {
           "name": "Temperatura pojačanja",
-          "description": "Neobvezna temperatura koju treba primijeniti tijekom sesije pojačanja (°C ili °F).",
+          "description": "Neobavezna ciljna temperatura tijekom pojačanja (°C ili °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Pokreni pojačanje akumulatora",
-      "description": "Odmah pokrenite pojačanje na TermoWeb akumulatoru. Unesite trajanje kako biste nadjačali zadanu vrijednost (60–600 minuta u koracima od 60) ili ga izostavite kako biste koristili spremljenu postavku.",
+      "name": "Pokreni pojačanje",
+      "description": "Odmah pokreće pojačanje na TermoWeb akumulacijskoj peći ili na radijskom grijaču koji ima pojačanje. Akumulacijska peć: navedite trajanje (60–600 minuta, u koracima od 60) ili ga izostavite za spremljenu zadanu vrijednost. Radijski grijač: izostavite trajanje; grijač koristi vlastito vrijeme pojačanja.",
       "fields": {
         "minutes": {
           "name": "Trajanje pojačanja",
-          "description": "Trajanje sesije pojačanja u minutama (60–600, korak 60). Neobvezno.",
+          "description": "Trajanje pojačanja u minutama (60–600, korak 60). Neobavezno.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Otkaži pojačanje akumulatora",
-      "description": "Otkažite aktivnu sesiju pojačanja na TermoWeb akumulatoru."
+      "name": "Otkaži pojačanje",
+      "description": "Zaustavlja pojačanje na TermoWeb akumulacijskoj peći ili radijskom grijaču."
     },
     "set_schedule": {
       "name": "Postavi tjedni raspored",
-      "description": "Postavite 7×24 tjedni program za TermoWeb grijač. Program je popis od 168 cijelih brojeva, gdje svaka vrijednost odgovara jednom satu u tjednu počevši od ponedjeljka 00:00. Koristite 0 za hladni, 1 za noćni, a 2 za dnevni režim.",
+      "description": "Postavlja tjedni program 7×24 za TermoWeb grijač. Program je popis od 168 cijelih brojeva, gdje svaka vrijednost odgovara jednom satu u tjednu, počevši od ponedjeljka u 00:00. Koristite 0 za hladni režim, 1 za noćni režim i 2 za dnevni režim.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "Popis od 168 cijelih brojeva (0, 1 ili 2) koji predstavljaju tjedni raspored grijača. Indeks 0 je ponedjeljak 00:00, indeks 1 je ponedjeljak 01:00 itd.",
+          "description": "Popis od 168 cijelih brojeva (0, 1 ili 2) koji predstavlja tjedni raspored grijača. Indeks 0 je ponedjeljak 00:00, indeks 1 je ponedjeljak 01:00 i tako dalje.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Postavi zadane temperature",
-      "description": "Postavite hladnu, noćnu i dnevnu zadanu temperaturu za TermoWeb grijač. Možete unijeti sve tri temperature kao jedan popis (``ptemp``) ili svaku navesti zasebno (``cold``, ``night`` i ``day``).",
+      "name": "Postavi temperature režima",
+      "description": "Postavlja temperature hladnog, noćnog i dnevnog režima za TermoWeb grijač. Sve tri temperature možete navesti kao jedan popis (``ptemp``) ili svaku zasebno (``cold``, ``night`` i ``day``). Režimi koje izostavite zadržavaju trenutačnu vrijednost.",
       "fields": {
         "ptemp": {
-          "name": "Zadane temperature",
-          "description": "Popis od tri temperature [hladna, noćna, dnevna] u istim jedinicama kao grijač (°C ili °F). Ako je navedeno, nadjačava pojedinačne vrijednosti hladno, noć i dan.",
+          "name": "Temperature režima",
+          "description": "Popis od tri temperature [hladni, noćni, dnevni] u istim jedinicama kao grijač (°C ili °F). Ako je naveden, zamjenjuje pojedinačne vrijednosti za hladni, noćni i dnevni režim.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
           "name": "Hladni režim",
-          "description": "Temperatura za hladni režim (°C ili °F).",
+          "description": "Temperatura hladnog režima (°C ili °F).",
           "example": "10.0"
         },
         "night": {
           "name": "Noćni režim",
-          "description": "Temperatura za noćni režim (°C ili °F).",
+          "description": "Temperatura noćnog režima (°C ili °F).",
           "example": "16.0"
         },
         "day": {
           "name": "Dnevni režim",
-          "description": "Temperatura za dnevni režim (°C ili °F).",
+          "description": "Temperatura dnevnog režima (°C ili °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
       "name": "Uvezi povijest potrošnje energije",
-      "description": "Uvezite povijesne satne brojače energije za TermoWeb grijače do godinu dana unatrag u statistiku Home Assistanta za sve konfigurirane grijače.",
+      "description": "Uvozi prošlu satnu potrošnju energije svakog grijača i mjerača energije u statistiku Home Assistanta (nadzorna ploča Energija). Napredak se sprema: ako se uvoz prekine, pokrenite ga ponovno za nastavak.",
       "fields": {
         "reset_progress": {
           "name": "Resetiraj napredak",
-          "description": "Obriši spremljeni napredak i ponovno uvezi povijest od početka."
+          "description": "Zaboravi spremljeni napredak i ponovno uvezi cijelo razdoblje. Postojeća statistika se prepisuje, ne briše."
         },
         "max_history_retrieval": {
           "name": "Maks. dana povijesti",
-          "description": "Broj dana povijesti za dohvat. Zamjenjuje zadanu vrijednost samo za ovaj uvoz."
+          "description": "Koliko dana unatrag uvesti (od 1 do 3650, zadano 7). Ako ste već uvezli manje dana, dohvaćaju se samo stariji dani."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Snimanje radijskog prometa",
+      "description": "Određeno vrijeme snima svaki radijski okvir koji pristupnik ili nanoCUL čuje i sprema ga kao JSON datoteku u konfiguracijsku mapu Home Assistanta. Nikad ne odašilje. Na običnom radijskom unosu naredbe grijačima čekaju dok snimanje ne završi.",
+      "fields": {
+        "entry_id": {
+          "name": "ID konfiguracijskog unosa",
+          "description": "Konfiguracijski unos radijskog pristupnika ili nanoCUL-a koji se koristi, obično onaj samo za slušanje.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Trajanje",
+          "description": "Koliko dugo snimati, od 10 do 1800 sekundi."
+        },
+        "redact": {
+          "name": "Sakrij privatne podatke",
+          "description": "Zamjenjuje ID-ove mreže i serijske brojeve grijača u datoteci. Bez toga datoteka sadrži ID vaše mreže: dijelite je samo privatno."
+        },
+        "note": {
+          "name": "Bilješka",
+          "description": "Neobavezan tekst koji se sprema u datoteku, na primjer koji ste grijač koristili.",
+          "example": "pojačan grijač u dnevnoj sobi"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Radijsko istraživanje",
+      "description": "Određeno vrijeme sluša sav radijski promet u frekvencijskom pojasu grijača, uključujući promet koji ova integracija ne razumije, i sprema datoteku izvješća u konfiguracijsku mapu Home Assistanta. Priložite datoteku uz prijavu problema na GitHubu kako biste zatražili podršku za novu vrstu grijača.",
+      "fields": {
+        "entry_id": {
+          "name": "ID konfiguracijskog unosa",
+          "description": "Konfiguracijski unos radijskog pristupnika ili nanoCUL-a koji se koristi.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Trajanje",
+          "description": "Koliko dugo slušati. Grijači najviše odašilju kad počnu ili prestanu grijati."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Radijsko vraćanje na tvorničke postavke",
+      "description": "DESTRUKTIVNO. Vraća jedan radijski grijač na tvorničke postavke. Grijač gubi sve postavke, sat, tjedni program i radijsko uparivanje te prestaje komunicirati s Home Assistantom. Njegove posljednje poznate postavke najprije se spremaju. Da biste grijač ponovno koristili, pritisnite „Upari nove grijače” na uređaju pristupnika i stavite grijač u način uparivanja. Spremljene postavke vraćaju se kad se grijač prepozna. Neki stariji grijači ne mogu se resetirati radijom: resetirajte ih ručno (pogledajte priručnik grijača).",
+      "fields": {
+        "entry_id": {
+          "name": "ID konfiguracijskog unosa",
+          "description": "Konfiguracijski unos radijskog pristupnika ili nanoCUL-a koji se koristi.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Broj grijača",
+          "description": "Radijski broj grijača (broj u „Grijač 6”)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radijsko premještanje grijača u vlastitu mrežu",
+      "description": "Premješta sve grijače radijskog unosa u vlastitu radijsku mrežu ove instalacije. Svaki se grijač najprije resetira (postavke mu se spremaju), a zatim grijače jedan po jedan stavljate u način uparivanja. Grijači dobivaju nove brojeve od 2 nadalje i postavke im se vraćaju. Neki stariji grijači ne mogu se resetirati radijom, pa se ne mogu premjestiti na ovaj način. Upravljanje grijačima pauzirano je dok ovo traje.",
+      "fields": {
+        "entry_id": {
+          "name": "ID konfiguracijskog unosa",
+          "description": "Konfiguracijski unos radijskog pristupnika ili nanoCUL-a koji se koristi.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Vrijeme čekanja",
+          "description": "Koliko dugo čekati na tipke za uparivanje na grijačima."
         }
       }
     }
