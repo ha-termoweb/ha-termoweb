@@ -2,7 +2,7 @@
 
 Builders return payload bytes only; :func:`dialect.build_frame` wraps them.
 Decoders return frozen dataclasses whose fields are None wherever the record
-form does not carry a value. Nothing is guessed. See ``docs/radio_protocol.md``.
+form does not carry a value. Nothing is guessed. See ``docs/research/protocol.md``.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ REPLY_REJECTED = 0x56
 
 ROUTE_PROBE_TAG = 0x06
 
-# What a payload's first byte means (radio_protocol.md section 4), for captures.
+# What a payload's first byte means (docs/research/protocol.md section 4), for captures.
 OPCODE_NAMES: dict[int, str] = {
     0x50: "registration",
     0x51: "clock sync (registering)",

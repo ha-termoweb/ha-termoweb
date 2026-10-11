@@ -6,13 +6,31 @@ an ESP32-S3 + CC1101 radio gateway. It does not use the TermoWeb cloud.
 
 The radio backend (`docs/radio_backend.md`) uses this package.
 
+This page is the overview. Deeper reference, from the original research (see
+[README.md](README.md)):
+
+- [physical.md](physical.md): radio parameters measured on air, sync, PN9
+  whitening, CRC, frame classes by length, CC1101 and AX5043 settings.
+- [frames.md](frames.md): header fields, routing path, tags, relays, which
+  sender a heater obeys, and what the heater drops, acks or processes.
+- [messages.md](messages.md): every known dialect-A payload in detail
+  (status record, energy counter, power request, program, presets, advanced
+  settings, identity) with worked frames.
+- [sessions.md](sessions.md): timing, report confirmation, registration,
+  keepalive and the LINK timeout, the vendor gateway's start-up, and
+  dialect-A pairing in detail.
+
 ## 1. Radio
 
 | Item | Value |
 |---|---|
-| Carrier | 869.525 MHz |
-| Modulation | 2-FSK, 50.8 kHz deviation |
+| Carrier | 869.525 MHz (869.40–869.65 MHz sub-band: 500 mW ERP, 10 % duty cycle) |
+| Modulation | 2-FSK, NRZ, MSB first. Deviation: a CC1101 station sends 50.8 kHz, the heaters about 61 kHz; both decode fine |
 | Data rate | 9.6 kbps |
+| Preamble | `AA…`; 2 bytes is enough for the heaters, 8 is the firmware default |
+
+Measured offsets, occupied bandwidth and receiver settings:
+[physical.md](physical.md).
 
 ## 2. Frame layout
 
@@ -25,14 +43,19 @@ the on-air bytes are the logical bytes.
 | 1 | 2 | network id |
 | 3 | 1 | src: this hop's sender |
 | 4 | 1 | dst: this hop's receiver |
-| 5 | 1 | flags (`80` = ack, or "fire and forget" on a data frame) |
-| 6 | 5 | path: originator, then hops, padded (`00` from a station, `01` from a heater) |
-| 11 | 1 | tag (`00` commands, `03` dialect-B pairing announcement, `04` id assignment, `06` route probe) |
+| 5 | 1 | flags (`80` = ack; on a data frame `80` means "no ack wanted": the heater does not ack it but still processes it) |
+| 6 | 5 | path: originator (the sender a heater checks: it obeys only `01`), then hops, padded (`00` from a station, `01` from a heater) |
+| 11 | 1 | tag (`00` commands, replies and reports, `03` pairing announcement, `04` id assignment, `06` route probe, `84` the empty probe a heater sends right after adopting an id; a wrong tag is acked and ignored) |
 | 12 | n | payload |
 | 12+n | 2 | CRC, high byte first, over bytes `0 .. total-3` |
 
 An **ack** is 8 bytes: `len net(2) acker sender 80 crc(2)`. It has no path,
 tag or payload.
+
+There is no encryption, authentication or sequence counter: retries are
+byte-identical and a replayed frame is accepted. Bytes 3-4 are per hop and
+bytes 6-10 end to end; heaters relay frames for each other. Details, and what
+a heater drops, acks or processes: [frames.md](frames.md).
 
 ## 3. Dialects
 
@@ -44,7 +67,7 @@ The layout above is the same in both dialects. Only the framing differs.
 | Byte 0 | total length − 3 | total length |
 | Whitening | PN9, whole frame from byte 0 | none |
 | CRC | CRC-16/CCITT, poly `1021`, init `1D0F`, xorout `FFFF` | CRC-16/MODBUS, reflected poly `A001`, init `FFFF`, no xorout |
-| Network id | `1B 30` on stock gateways; a network Home Assistant pairs uses its own id (section 7) | per installation, learned from traffic (no default) |
+| Network id | the vendor gateway's own id. Only one dialect-A installation was studied, so treat it as per installation, like dialect B; a network Home Assistant pairs uses its own id (section 7). The vendor gateway's radio drops other ids in hardware. | per installation, learned from traffic (no default) |
 | Ack | logical `05 net acker sender 80 crc` (scrambled) | `08 net acker sender 80 crc` |
 | EB clock sync | 9 bytes, ends `03` | 8 bytes, no `03` |
 | Gateway `Y` mode | `0` | `1` |
@@ -53,8 +76,10 @@ The layout above is the same in both dialects. Only the framing differs.
 
 `x^9 + x^5 + 1`, seed all ones, one byte per eight shifts, bytes assembled
 MSB first. The keystream starts `FF 87 B8 59 B7 A1 CC 24`. It is the
-bit-reverse of the table in TI DN509. Because the first keystream byte is
-`FF`, the total length is `(air[0] XOR FF) + 3`.
+bit-reverse of the table in TI DN509, so rtl_433, URH and the CC1101's
+hardware whitener do not de-whiten it. Because the first keystream byte is
+`FF`, the total length is `(air[0] XOR FF) + 3`. Full details, the CRC
+pseudocode and the frame classes by length: [physical.md](physical.md).
 
 ### Dialect B network id
 
@@ -73,18 +98,19 @@ sends on its own. The examples below use the synthetic id `12 34`.
 | Route probe, 06 → 02 | `0E 12 34 06 02 00 06 02 01 01 01 06 F6 91` |
 | Ack, station 01 for 06 | `08 12 34 01 06 80 A0 E4` |
 
-### Test vectors (dialect A)
+### Test vectors (dialect A, synthetic network id `12 34`)
 
-| Frame | Bytes |
+| Frame | Bytes (on air) |
 |---|---|
-| Setpoint 25.5 C, 01 → 04 | `F1 9C 88 58 B3 A1 CD 20 57 5E 4B 9C BA EB D9 F6 E5` |
-| Ack, 04 for 01 | `FA 9C 88 5D B6 21 FB D1` |
+| Setpoint 25.5 C, 01 → 04 | `F1 95 8C 58 B3 A1 CD 20 57 5E 4B 9C BA EB D9 63 42` |
+| Ack, 04 for 01 | `FA 95 8C 5D B6 21 99 5C` |
 
 ## 4. Opcodes
 
 Status column:
 
-- **A** — proven on air in dialect A (ha-termoweb-local captures).
+- **A** — proven on air in dialect A (research captures, 2026-09; details in
+  [messages.md](messages.md)).
 - **B** — observed on air in dialect B (heater 06, 2026-10-09).
 - **?** — not yet tried or not understood in that dialect.
 
@@ -94,47 +120,63 @@ A reply's first payload byte is the request opcode + 1. A two-byte
 | Payload | Direction | Meaning | A | B |
 |---|---|---|---|---|
 | `B4 01` / `B4 02` / `B4 04` | station → heater | mode auto / manual / off, reply `B5 55`. Dialect B acks it but ignores it: no reply, mode unchanged | A | ignored |
-| `B4 02 <half-deg>` | station → heater | manual setpoint, 7–35 C | A | ? |
-| `B4 03 <half-deg>` | station → heater | temporary override setpoint | A | ? |
+| `B4 02 <half-deg>` | station → heater | manual setpoint, 7–35 C. A heater with a lower limit acks it, answers `B5 55` and ignores it; while Runback is on, the heater clamps to its Max Temp | A | ? |
+| `B4 03 <half-deg>` | station → heater | temporary override setpoint; the heater ends it itself at its next program change or at midnight | A | ? |
 | `B6 <af> <eco> <comfort>` | station → heater | preset temperatures, strictly increasing, reply `B7 55` | A | rejected |
 | `B6 <af> <eco> <comfort> <mode> [<setpoint>]` | station → heater | presets plus mode (01 program / 02 manual / 03 temporary override / 04 off), and for 02/03 the target setpoint in half degrees; dialect B's only mode and setpoint write, reply `B7 55`. Mode 03 ends at the next program change. | ? | B |
 | `B2` + 84 bytes | station → heater | weekly program write, 48 slots/day, Sunday first, reply `B3 55` | A | rejected |
 | `B2` + 42 bytes | station → heater | weekly program write, 24 slots/day, same layout as the `B1` read, reply `B3 55` | ? | B |
-| `D2` / `D4` / `D6` / `BA` `01|00` | station → heater | boost / runback / EASY / keypad lock toggles, reply `<op+1> 55` | A | ? |
-| `C4` + 8 bytes | station → heater | advanced setup record, reply `C5 55/56` | A | ? |
+| `D2` / `D4` / `D6` / `BA` `01|00` | station → heater | boost / runback / EASY / keypad lock toggles, reply `<op+1> 55`. Side effects: boost heats for the heater's own boost time while the mode reads off; runback forces manual at the anti-frost setpoint and `D4 00` does not restore it; EASY forces manual | A | ? |
+| `C4` + 8 bytes | station → heater | advanced setup record (control mode, units, offset, away, window, true radiant), reply `C5 55/56`. No read-back: every write sets all eight fields | A | ? |
 | `5E 01` | station → heater | flash display, reply `5F 55` (dialect B: ack only; what a real gateway sends for "identify" in dialect B is not yet captured, see section 10) | A | B (acked) |
 | `57 55` | station → heater | confirm a `56 ..` report | A | ? |
 | `51|52 YY MM DD DOW HH MM SS [03]` | station → heater | clock sync (`51` while registering), DOW 0 = Sunday, reply `53 55` | A (9 bytes) | B (8 bytes; the 9-byte form gets `53 56`) |
 | `BF 01` | station → heater | grant a `BE` power request | A | B (the repeats stop) |
-| `B8` → `B9 ..` | request / reply | status: E6 (14 bytes), E4 (16, with boost tail) | A | B (short 5 bytes: `B9 af eco comfort mode`) |
-| `B0` → `B1 ..` | request / reply | program: 85 bytes (48 slots/day) or 43 bytes (24 slots/day) | A | B (43 bytes) |
-| `BC` → `BD ..` | request / reply | dialect A: `BD` + u32 Wh energy counter | A | B: 9-byte power record, **not** energy (see below) |
+| `B8` → `B9 ..` | request / reply | status: E6 (14 bytes); E4 (16, with boost tail) while a boost or runback runs | A | B (short 5 bytes: `B9 af eco comfort mode`) |
+| `B0` → `B1 ..` | request / reply | program: 85 bytes (48 slots/day) or 43 bytes (24 slots/day); the form follows the length of the last `B2` written | A | B (43 bytes) |
+| `BC` → `BD ..` | request / reply | dialect A: `BD` + u32 big-endian Wh, the heater's own cumulative energy counter (live, never pushed, cleared by a factory reset) | A | B: 9-byte power record, **not** energy (see below) |
 | `5A` → `5B ..` | request / reply | identity: `5B 77 01 01 01 <id>` + 12-byte tail + `0A 1A` | A | B (`5B 55` + 16 bytes ending in the ASCII serial; payload byte 10 = rated power / 100 W, `0F` = 1500 W) |
-| `DA` → `DB ..` | request / reply | advanced record, 17 bytes | A | ? |
+| `DA` → `DB ..` | request / reply | advanced record, 17 bytes: the E2 report without its `56` (eco, comfort, Low Surface Temperature index, boost temperature) | A | ? |
+| `C0` → `C1 55` | request / reply | meaning unknown | A | ? |
 | `C2` → `C3 55` | request / reply | meaning unknown | A | B (ack only) |
-| `D0` → `EC`-class reply | request / reply | capability, meaning unknown | A | B (ack only) |
-| `C6` → `C7 ..` | request / reply | meaning unknown | A | B (`C7 55`) |
+| `D0` → `D1 ..` | request / reply | capability record `D1 00 05 01 01 00 27 10`, the same on every heater (not the rating), meaning unknown | A | B (ack only) |
+| `C6` → `C7 ..` | request / reply | `C7 04 00 00 00 14 00 00 00`, meaning unknown | A | B (`C7 55`) |
+| `CA 00` → `CB 55` | request / reply | ends the vendor gateway's query burst; meaning unknown | A | ? |
+| `CC` + 6 or 8 bytes | station → heater | factory block (duty limit, temperature compensation…); every form tried was refused `CD 56` | refused | ? |
+| `CE <hi> <lo>` | station → heater | accepted `CF 55` when it repeats the heater's own measured power; effect unknown | A | ? |
 | `C8 <p> <v>` | station → heater | write parameter: exactly two argument bytes, reply `C9 55` (`C9 56` for any other length). `C8 01 D0` is the factory reset (section 8); no other value is used | ? | B |
 | `50` | heater → station | registration; the station answers with a `51` clock sync | A | B |
 | `56 B9 ..` | heater → station | status report (E5, 15 bytes; E3, 17 bytes with boost tail) | A | ? |
-| `56 DB ..` | heater → station | advanced record report (E2) | A | ? |
+| `56 DB ..` | heater → station | advanced record report (E2), pushed after a panel settings change | A | ? |
+| `56 C7 ..` | heater → station | diagnostic push (EA class), seen at registration | A | ? |
 | `56 B1` + 84 bytes | heater → station | program report (9E class) | A | ? |
-| `BE ..` | heater → station | power request: the element wants to switch on | A (`BE hi lo`, 3 bytes) | B (9 bytes) |
+| `BE ..` | heater → station | power request: the element wants to switch on. Dialect A: `BE` + measured full-load power (deciwatts); the vendor gateway answers `BF 01` (granted) or `BF 00` (refused, then a back-off) from its power limit | A (`BE hi lo`, 3 bytes) | B (9 bytes) |
 | empty, tag `06` | heater → any | route probe | A | B |
+| empty, tag `84` | heater → station | first frame under a newly assigned id (section 7) | A | ? |
 | `55`, tag `03`, from `FF` | heater → any | dialect-B pairing announcement (section 7) | – | B |
 | `77` + 12-byte identity, from `FF` | heater → any | dialect-A pairing announcement (section 7) | A | – |
 | `<id>`, tag `04`, to `FF` | station → heater | id assignment (section 7) | A | B |
 
 ### Status record fields (E6 offsets, payload without the `56` marker)
 
-`B9 af eco comfort mode room_hi room_lo setpoint power_hi power_lo duty flags b12 b13 [boost_hi boost_lo]`
+`B9 af eco comfort mode room_hi room_lo setpoint power_hi power_lo duty flags pcb_temp error [boost_hi boost_lo]`
 
 - Presets and setpoint: half degrees. Room: tenths of a degree, big-endian.
-- Power: measured full-load power, deciwatts, big-endian.
+- Power: measured full-load power, deciwatts, big-endian (latched; updated
+  while the element is on). Power now = this × duty.
+- Duty: percent, capped by the panel's Low Surface Temperature setting.
+- `pcb_temp`: the control board's temperature, whole °C. `error`: the
+  heater's error code (always `00` so far).
+- Setpoint: the setpoint in force (the slot's preset in auto).
 - Flags: `01` heating, `02` locked, `04` presence, `08` window open,
   `10` true radiant, `20` boost, `40` EASY, `80` runback.
 - Boost tail: high 4 bits = day (0 = Sunday), low 12 bits = minute of day.
 - Mode: `01` auto, `02` manual, `03` override, `04` off.
+
+**Do not treat duty 0 or a clear heating flag as proof the element is off.**
+One heater ran its element for an hour after a cancelled panel boost while
+every report said off, duty 0, not heating; `pcb_temp` rising is the tell
+([messages.md](messages.md#status-record)).
 
 The dialect-B short form stops after `mode`. The decoder returns None for
 every field it does not carry.
@@ -172,6 +214,15 @@ wire. Codes: `0` cold (anti-frost), `1` night (eco), `2` day (comfort);
 `3` is never seen and decodes to None. Slots per day = record length × 4 / 7:
 24 for the 43-byte reply, 48 for the 85-byte one. The package API takes and
 offers Monday-first weeks and rotates at the boundary.
+
+The 85-byte form is the same schedule at half-hour resolution: each nibble is
+two 2-bit half-hour slots (so a schedule set on the hour only shows nibbles
+`0`, `5` and `A`). A heater accepts either length whatever form it answered
+with before, and its next `B1` reply has the form of the last write, so read
+the form fresh after every write. The heater runs the schedule itself, with
+no station or cloud: the setpoint changes within 3–5 s of each slot boundary,
+half-hour boundaries included. A factory reset leaves an all-zero (all
+anti-frost) week.
 
 ## 5. Gateway line protocol (TCP port 2323)
 
@@ -333,12 +384,12 @@ the network id.
 
 | | Dialect A | Dialect B |
 |---|---|---|
-| Announcement | payload `77` + 12-byte identity (13 bytes), tag `00` | payload `55`, tag `03`, net `00 00`, path `FF <dst> 01 01 01` |
+| Announcement | payload `77` + 12-byte identity (13 bytes), tag `03`, net `00 00`, path `FF 01 01 01 01` | payload `55`, tag `03`, net `00 00`, path `FF <dst> 01 01 01` |
 | Sweep | about 200 ms per destination | 120-160 ms per destination, for example `18, 19, 1C, 1D, 1E, 02 … 15, 01` |
 | Answered frame | any direct copy (src and dst are not checked) | only the frame swept to this station (dst `01`): the heater acks an assignment only right after it |
 | Identity | in the announcement | none: heaters are paired one at a time |
-| After the assignment | (ha-termoweb-local captures) registration `50` | link ack from `FF` on the new net, an empty tag-`84` frame, then `50` registrations from the new id; `B8` reads answer at once |
-| Status | documented by ha-termoweb-local, not yet tried here | proven 2026-10-10 |
+| After the assignment | an empty tag-`84` frame from the new id 50–100 ms later; a heater that had no pairing record then runs the `50` registration; the vendor gateway enrols about 60 s later (clock, then `C2 B0 5A D0 C6`) | link ack from `FF` on the new net, an empty tag-`84` frame, then `50` registrations from the new id; `B8` reads answer at once |
+| Status | proven 2026-09 from a replacement station in the research ([sessions.md](sessions.md#pairing-in-dialect-a)); not yet tried with this integration | proven 2026-10-10 |
 
 Assignment test vector (dialect B, id 06, synthetic network id `12 34`):
 `0F 12 34 01 FF 00 01 FF 00 00 00 04 06 D0 57`.
@@ -383,8 +434,8 @@ open that long (up to `total_s`), and after a pairing the run ends
 
 Stock gateways have a per-installation network id. Home Assistant derives its
 own: `pairing.site_network_id(seed)` takes the first two bytes of the SHA-256
-of the seed that are not `00 00`, `FF FF` or `1B 30` (the stock dialect-A
-id). The config flow seeds it with the Home Assistant instance id
+of the seed that are not `00 00`, `FF FF` or the code's dialect-A default
+(`DIALECT_A.network_id`). The config flow seeds it with the Home Assistant instance id
 (`homeassistant.helpers.instance_id`) plus the gateway id, `<instance>:<gateway
 dev_id>`, so two gateways in one installation get two networks. The id is
 stored in the config entry (`network_id`); heaters paired later join the
@@ -410,7 +461,7 @@ derived one.
 - Automatic pairing: while the entry's pairing window is open (30 minutes
   after the entry is created, 10 minutes after **Pair new heaters**), the
   listener's announcements start one short `async_pair` (20 s, one heater).
-  See [radio backend: automatic pairing](radio_backend.md#automatic-pairing-pairing-window).
+  See [radio backend: automatic pairing](../radio_backend.md#automatic-pairing-pairing-window).
 - `RadioClient.async_pair(window_s, wanted_id=None, max_heaters=None)` pairs
   under the exchange lock: heater commands wait until it ends. New heaters
   get ids no stored node uses.
@@ -445,9 +496,27 @@ correctly.
 heater. Other parameters are accepted and not yet understood. The
 integration sends only `C8 01 D0` and exposes no other parameter write.
 
-Dialect A: no reset is known. `protocol.factory_reset(DIALECT_A)` raises
-`ValueError`; `RadioClient.async_factory_reset` raises
-`RadioUnsupportedError`.
+Dialect A: no reset over the radio is known. `protocol.factory_reset(DIALECT_A)`
+raises `ValueError`; `RadioClient.async_factory_reset` raises
+`RadioUnsupportedError`. The heater's panel has one: RESET in ADVANCED
+SETTINGS (default password `0000`). It wipes the pairing (the heater goes
+silent on the radio until it is paired again and answers no scan), sets the
+clock to 00:00, the presets to 7.0 / 18.0 / 21.0 °C, an all-anti-frost
+program, and the energy counter to 0. The heater's 12-byte identity survives
+it.
+
+### Dangerous commands
+
+- `C8 01 D0`, `C8 01 D1`, `C8 01 D2` (dialect B) factory-reset the heater
+  and drop it off the network. The integration sends only `C8 01 D0`, and
+  only from the reset service.
+- `C4` overwrites all eight advanced settings, and there is no way to read
+  most of them back first.
+- `CC` (factory block) was refused in every form tried; do not experiment
+  with it on a heater you rely on.
+- Turning a vendor gateway back on next to a Home Assistant station: it
+  re-applies its own (cloud) settings to every heater, and two stations
+  with id `01` on one network were never tested.
 
 Service `termoweb.radio_factory_reset` (`entry_id`, `heater`) first saves
 the heater's restorable settings (mode, manual setpoint, presets, program)
@@ -561,7 +630,9 @@ display flash ("identify"; `5E 01` → `5F 55` is proven in dialect A only).
 It works on monitor entries and, passively, on normal radio entries: it
 holds the exchange lock like `radio_survey`, so heater commands (and the
 listener's keepalive clock syncs) wait until it ends. Keep captures on a
-normal entry short: heaters want a clock sync every 150 s.
+normal entry short: the integration sends each heater a clock sync every
+120 s, and a dialect-A heater shows its lost-link (LINK) indication about
+12 minutes after its last one ([sessions.md](sessions.md#keepalive-and-the-link-indication)).
 
 `RadioClient.async_capture` adds a frame listener and a line listener
 (`RadioLink.add_line_listener`: every line that is not a decoded frame,
@@ -600,4 +671,4 @@ drops `air`, and removes network ids and hex runs from `raw` lines and the
 `gateway` line. Every other payload byte stays. Without `redact` the file
 contains the network id, so testers share it privately.
 
-The tester guide is [Help find the identify command](radio_identify_capture.md).
+The tester guide is [Help find the identify command](../radio_identify_capture.md).

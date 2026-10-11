@@ -1,0 +1,35 @@
+name: Leak scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  private-identifiers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Installation-specific identifiers (network ids, heater identities,
+      # serials, gateway ids, hostnames) live in the LEAK_PATTERNS secret, one
+      # fixed string per line, so the list itself is never published.
+      # See docs/research/privacy.md.
+      - name: No installation-specific identifiers
+        env:
+          LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
+        run: |
+          if [ -z "$LEAK_PATTERNS" ]; then
+            echo "::notice::LEAK_PATTERNS secret not set (pull requests from forks get no secrets); skipping"
+            exit 0
+          fi
+          printf '%s\n' "$LEAK_PATTERNS" | sed '/^$/d' > "$RUNNER_TEMP/patterns"
+          if git grep -nIiF -f "$RUNNER_TEMP/patterns" -- . > "$RUNNER_TEMP/hits"; then
+            echo "::error::$(wc -l < "$RUNNER_TEMP/hits") line(s) match a LEAK_PATTERNS entry (contents withheld)"
+            cut -d: -f1,2 "$RUNNER_TEMP/hits"
+            exit 1
+          fi

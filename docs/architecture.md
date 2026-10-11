@@ -3,7 +3,7 @@
 This document is the authoritative reference for the **v2 architecture** of the
 TermoWeb integration and describes the code as it is. Function-level detail is in
 `docs/function_map.txt` (generated; see `AGENTS.md`). Radio details are in
-`radio_backend.md` and `radio_protocol.md`.
+`radio_backend.md` and `research/protocol.md`.
 
 ## Architecture invariants
 
@@ -290,7 +290,7 @@ refuses every transmit) with `RadioMonitor`, which counts frames instead of
 performing station duties. Its `frame_monitor` capability limits the
 platforms to the gateway-online binary sensor and the frames-heard sensor;
 `site_device` is off, so its gateway has no site device.
-See `radio_protocol.md` section 10.
+See `research/protocol.md` section 10.
 
 ## Device registry
 

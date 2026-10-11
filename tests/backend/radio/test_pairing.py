@@ -212,7 +212,7 @@ def test_free_node_id_and_assignment_frame() -> None:
     assert pr.free_node_id([]) == 2
     assert pr.free_node_id([2, 3, 5]) == 4
     assert pr.free_node_id(range(2, 0x42)) is None
-    vector = bytes.fromhex("0F123401FF0001FF0000000406D057")  # radio_protocol.md
+    vector = bytes.fromhex("0F123401FF0001FF0000000406D057")  # research/protocol.md
     assert pr.build_assignment(DIALECT_B, 6, NET) == vector
     frame = decode(DIALECT_B, pr.build_assignment(DIALECT_B, 6, NET))
     assert frame.ok and frame.network_id == NET
