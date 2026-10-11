@@ -30,6 +30,7 @@ from custom_components.termoweb.backend.radio import (
     GatewayInfo,
     RadioLink,
     RadioLinkError,
+    RadioMissingError,
 )
 from custom_components.termoweb.backend.radio.discovery import NetworkSighting
 from custom_components.termoweb.backend.radio.link import parse_query_line
@@ -297,6 +298,7 @@ async def test_reconfigure_radio_refuses_other_gateway(
     ("error", "expected"),
     [
         (RadioLinkError("down"), "cannot_connect_radio"),
+        (RadioMissingError("no CC1101"), "gateway_radio_missing"),
         (config_flow_radio.RadioSetupError("no_gateway_mac"), "no_gateway_mac"),
     ],
 )
@@ -382,12 +384,19 @@ async def test_reconfigure_nanocul_without_mac_cannot_be_checked(
     assert entry.unique_id == f"{BRAND_RADIO}:nanocul-a1b2c3"
 
 
+@pytest.mark.parametrize(
+    ("raised", "error"),
+    [
+        (RadioLinkError("gone"), "cannot_connect_nanocul"),
+        (RadioMissingError("no CC1101"), "nanocul_radio_missing"),
+    ],
+)
 async def test_reconfigure_nanocul_unreadable_stick_shows_an_error(
-    hass: HomeAssistant, radio: FakeRadio
+    hass: HomeAssistant, radio: FakeRadio, raised: Exception, error: str
 ) -> None:
-    """An unreadable stick keeps the reconfigure form open with an error."""
+    """An unreadable stick (or one without its radio) keeps the form open."""
     entry = _stick_entry(hass)
-    radio.stick = RadioLinkError("gone")
+    radio.stick = raised
     form = await entry.start_reconfigure_flow(hass)
 
     result = await hass.config_entries.flow.async_configure(
@@ -396,7 +405,7 @@ async def test_reconfigure_nanocul_unreadable_stick_shows_an_error(
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reconfigure_nanocul"
-    assert result["errors"] == {"base": "cannot_connect_nanocul"}
+    assert result["errors"] == {"base": error}
 
 
 @pytest.mark.parametrize(
@@ -565,6 +574,7 @@ async def test_radio_step_aborts_for_a_configured_gateway(
     ("probe", "error"),
     [
         (RadioLinkError("down"), "cannot_connect_radio"),
+        (RadioMissingError("no CC1101"), "gateway_radio_missing"),
         (config_flow_radio.RadioSetupError("no_gateway_mac"), "no_gateway_mac"),
     ],
 )
@@ -582,6 +592,7 @@ async def test_radio_form_gateway_errors(
     ("raised", "error"),
     [
         (RadioLinkError("lost"), "cannot_connect_radio"),
+        (RadioMissingError("no CC1101"), "gateway_radio_missing"),
         (RuntimeError("boom"), "unknown"),
     ],
 )
@@ -762,15 +773,22 @@ async def test_stick_form_asks_only_for_the_port(
     assert [str(key) for key in manual["data_schema"].schema] == ["device"]
 
 
+@pytest.mark.parametrize(
+    ("raised", "error"),
+    [
+        (RadioLinkError("busy"), "cannot_connect_nanocul"),
+        (RadioMissingError("no CC1101"), "nanocul_radio_missing"),
+    ],
+)
 async def test_busy_stick_stays_on_the_form(
-    hass: HomeAssistant, stick: FakeRadio
+    hass: HomeAssistant, stick: FakeRadio, raised: Exception, error: str
 ) -> None:
-    """A busy stick keeps the form open with an error."""
-    stick.stick = RadioLinkError("busy")
+    """A busy stick, or one without its radio module, keeps the form open."""
+    stick.stick = raised
     result = await _stick_menu(hass, STICK_FORM)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "nanocul"
-    assert result["errors"] == {"base": "cannot_connect_nanocul"}
+    assert result["errors"] == {"base": error}
 
 
 async def test_old_stick_firmware_aborts_the_setup(
@@ -794,12 +812,19 @@ async def test_stick_step_aborts_for_a_configured_stick(
     assert result["reason"] == "already_configured"
 
 
+@pytest.mark.parametrize(
+    ("raised", "error"),
+    [
+        (RadioLinkError("unplugged"), "cannot_connect_nanocul"),
+        (RadioMissingError("no CC1101"), "nanocul_radio_missing"),
+    ],
+)
 async def test_stick_lost_during_a_rescan_shows_the_reconfigure_form(
-    hass: HomeAssistant, stick: FakeRadio
+    hass: HomeAssistant, stick: FakeRadio, raised: Exception, error: str
 ) -> None:
     """A stick lost while scanning again shows its reconfigure form with the error."""
     entry = _stick_entry(hass, device_id="nanocul-a1b2c3")
-    stick.discover = RadioLinkError("unplugged")
+    stick.discover = raised
     stick.stick = ("nanocul-a1b2c3", True)
     form = await entry.start_reconfigure_flow(hass)
     result = await hass.config_entries.flow.async_configure(
@@ -807,7 +832,7 @@ async def test_stick_lost_during_a_rescan_shows_the_reconfigure_form(
     )
     result = await _finish_progress(hass, result)
     assert result["step_id"] == "reconfigure_nanocul"
-    assert result["errors"] == {"base": "cannot_connect_nanocul"}
+    assert result["errors"] == {"base": error}
 
 
 # --- radio helpers used by the flow ---------------------------------------------------
@@ -1157,6 +1182,7 @@ async def test_zeroconf_without_mac_probes_for_the_gateway_id(
     ("probe", "reason"),
     [
         (RadioLinkError("down"), "cannot_connect_radio"),
+        (RadioMissingError("no CC1101"), "gateway_radio_missing"),
         (config_flow_radio.RadioSetupError("no_gateway_mac"), "no_gateway_mac"),
     ],
 )
@@ -1184,6 +1210,7 @@ async def test_zeroconf_ignores_ipv6_advertisements(
     ("probe", "error"),
     [
         (RadioLinkError("down"), "cannot_connect_radio"),
+        (RadioMissingError("no CC1101"), "gateway_radio_missing"),
         (config_flow_radio.RadioSetupError("no_gateway_mac"), "no_gateway_mac"),
     ],
 )

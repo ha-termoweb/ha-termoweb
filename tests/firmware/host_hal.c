@@ -3,7 +3,9 @@
  * Output bytes collect in a buffer; the clock is a counter (delays advance
  * it); the chip keeps config registers, an RX FIFO the test fills, and the
  * bytes each transmit wrote to the TX FIFO. A transmit always "finishes"
- * (MARCSTATE reads IDLE) unless the test sets a stuck MARCSTATE.
+ * (MARCSTATE reads IDLE) unless the test sets a stuck MARCSTATE. The chip
+ * identifies as a CC1101 (PARTNUM 00, VERSION 14) unless the test removes
+ * it: then every status read returns the MISO idle level (0x00 or 0xFF).
  */
 #include <stdint.h>
 #include <string.h>
@@ -29,6 +31,7 @@ static int masked;
 static int lock_depth;
 static int survey_calls;
 static int last_survey_secs = -1;
+static int absent_level = -1; /* -1: chip present; else what MISO reads */
 
 void rc_hal_putc(char c) {
   if (out_len < sizeof(out) - 1) out[out_len++] = c;
@@ -56,6 +59,7 @@ void rc_hal_write_burst(uint8_t addr, const uint8_t *buf, uint8_t len) {
 }
 
 uint8_t rc_hal_read_status(uint8_t addr) {
+  if (absent_level >= 0) return (uint8_t)absent_level;
   switch (addr) {
     case CC1101_RXBYTES: {
       uint32_t n = rx_tail - rx_head;
@@ -101,6 +105,8 @@ void host_reset(void) {
   clock_us = 1000;
   memset(regs, 0, sizeof(regs));
   memset(status_regs, 0, sizeof(status_regs));
+  status_regs[CC1101_VERSION] = 0x14;
+  absent_level = -1;
   memset(strobes, 0, sizeof(strobes));
   rx_head = rx_tail = rx_overflow = 0;
   tx_len = tx_count = 0;
@@ -122,6 +128,8 @@ void host_rx_push(const uint8_t *data, uint32_t len) {
 }
 void host_set_rx_overflow(uint8_t on) { rx_overflow = on; }
 void host_set_status(uint8_t addr, uint8_t val) { status_regs[addr & 0x3F] = val; }
+void host_set_absent(int level) { absent_level = level; }
+uint8_t host_radio_ok(void) { return rc.radio_ok; }
 void host_set_marcstate_tx(uint8_t val) { marcstate_tx = val; }
 uint8_t host_reg(uint8_t addr) { return regs[addr & 0x3F]; }
 uint32_t host_strobes(uint8_t cmd) { return strobes[cmd & 0x3F]; }

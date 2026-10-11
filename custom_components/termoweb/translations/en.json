@@ -105,7 +105,9 @@
       "cannot_connect_radio": "Cannot connect to the radio gateway. Check the IP address and port, and that the gateway is powered on.",
       "no_gateway_mac": "The radio gateway did not report its MAC address. Update the gateway firmware.",
       "no_heaters": "No heater answered. Move the gateway closer to the heaters and try again.",
-      "cannot_connect_nanocul": "Cannot open the nanoCUL stick. Check that it is plugged in, that the port is right, and that it runs the termoweb_rx firmware."
+      "cannot_connect_nanocul": "Cannot open the nanoCUL stick. Check that it is plugged in, that the port is right, and that it runs the termoweb_rx firmware.",
+      "nanocul_radio_missing": "The stick answers, but its radio module is not connected. Check the wiring.",
+      "gateway_radio_missing": "The gateway answers, but its radio module is not connected. Check the wiring."
     },
     "progress": {
       "radio_rescan": "Checking every heater on your radio network. This takes up to a minute."
@@ -118,6 +120,7 @@
       "reauth_successful": "The new password was saved.",
       "cannot_connect_radio": "Cannot connect to the radio gateway. Check that the gateway is powered on and on your network.",
       "no_gateway_mac": "The radio gateway did not report its MAC address. Update the gateway firmware.",
+      "gateway_radio_missing": "The gateway answers, but its radio module is not connected. Check the wiring.",
       "not_ipv4_address": "The radio gateway announced only an IPv6 address. Add it by hand with its IPv4 address.",
       "nanocul_firmware_too_old": "The firmware on this nanoCUL stick is too old. Put the newest termoweb_rx firmware on the stick (see the nanoCUL guide), then try again."
     }

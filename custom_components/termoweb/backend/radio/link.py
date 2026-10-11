@@ -69,6 +69,10 @@ class TransmitBlockedError(RadioLinkError):
     """Raised when something tries to transmit through a listen-only link."""
 
 
+class RadioMissingError(RadioLinkError):
+    """Raised when the stick or gateway answers but reports no CC1101 radio."""
+
+
 @dataclass(frozen=True)
 class GatewayInfo:
     """Fields parsed from the gateway's ``# Q ...`` status line."""
@@ -81,6 +85,7 @@ class GatewayInfo:
     mac: str | None
     raw: str
     dialect: str | None = None  # None: firmware without runtime dialects (dialect A)
+    radio: str | None = None  # "ok" / "missing"; None: firmware without the check
 
 
 @dataclass(frozen=True)
@@ -155,6 +160,7 @@ def parse_query_line(line: str) -> GatewayInfo | None:
         mac=fields.get("mac"),
         raw=line,
         dialect=fields.get("dialect"),
+        radio=fields.get("radio"),
     )
 
 
@@ -327,6 +333,13 @@ class RadioLink:
             raise
         info = parse_query_line(query_line)
         assert info is not None  # the waiter only matches Q lines
+        if info.radio == "missing":
+            await self.close()
+            _LOGGER.error("Radio firmware reports no CC1101: %s", info.raw)
+            raise RadioMissingError(
+                "The stick or gateway answers, but its radio module is not "
+                "connected. Check the wiring."
+            )
         if info.dialect is None and self._dialect.firmware_mode != 0:
             await self.close()
             raise UnsupportedDialectError(

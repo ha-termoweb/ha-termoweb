@@ -125,6 +125,7 @@ static uint8_t spi(uint8_t v) {
 static void spi_init(void) {
   DDRB |= (1 << PB3) | (1 << PB5) | (1 << CS_BIT); /* MOSI, SCK, CS out */
   DDRB &= (uint8_t) ~(1 << MISO_BIT);
+  PORTB |= (1 << MISO_BIT); /* pull-up: an empty CC1101 socket reads 0xFF, not noise */
   cs_high();
   SPCR = (1 << SPE) | (1 << MSTR); /* mode 0, MSB first, F_CPU/4 = 4 MHz */
   SPSR = 0;

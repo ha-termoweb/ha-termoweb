@@ -103,6 +103,7 @@ void rc_print_banner(void) {
   put_p(RC_PSTR(" mode=dynamic tx=pa"));
   put_hex8(RC_PA);
   put_mac();
+  if (!rc.radio_ok) put_p(RC_PSTR(" radio=missing"));
   rc_print_eol();
 }
 
@@ -119,8 +120,11 @@ void rc_print_query(void) {
   put_hex8((uint8_t)(rc.net >> 8));
   put_hex8((uint8_t)rc.net);
   put_mac();
+  put_p(rc.radio_ok ? RC_PSTR(" radio=ok") : RC_PSTR(" radio=missing"));
   rc_print_eol();
 }
+
+void rc_print_no_radio(void) { put_line_p(RC_PSTR("# error: no CC1101 radio found")); }
 
 void rc_print_overrun(void) { put_line_p(RC_PSTR("# uart overrun")); }
 
@@ -502,6 +506,10 @@ static void finish_t(uint8_t n) {
     put_line_p(RC_PSTR("TXERR survey active"));
     return;
   }
+  if (!rc.radio_ok) {
+    put_line_p(RC_PSTR("TXERR no radio"));
+    return;
+  }
   rc_hal_gdo_mask();
   uint8_t err = cc1101_transmit(rc.tx_buf, n);
   rx_rearm_unmask();
@@ -551,10 +559,12 @@ static void finish_n(uint8_t n) {
  * and ack format at once; the sync word is rewritten live. */
 static void set_dialect(uint8_t d) {
   rc.dialect = d;
-  rc_hal_gdo_mask();
-  rc_hal_strobe(CC1101_SIDLE);
-  cc1101_write_sync();
-  rx_rearm_unmask();
+  if (rc.radio_ok) {
+    rc_hal_gdo_mask();
+    rc_hal_strobe(CC1101_SIDLE);
+    cc1101_write_sync();
+    rx_rearm_unmask();
+  }
   put_p(d == RC_DIALECT_B ? RC_PSTR("# dialect=B sync=") : RC_PSTR("# dialect=A sync="));
   put_sync();
   rc_print_eol();
@@ -568,10 +578,12 @@ static void finish_f(uint8_t ok) {
     return;
   }
   rc.freq_khz = rc.f_value;
-  rc_hal_gdo_mask();
-  rc_hal_strobe(CC1101_SIDLE);
-  cc1101_write_freq(rc.f_value);
-  rx_rearm_unmask();
+  if (rc.radio_ok) {
+    rc_hal_gdo_mask();
+    rc_hal_strobe(CC1101_SIDLE);
+    cc1101_write_freq(rc.f_value);
+    rx_rearm_unmask();
+  }
   uint32_t word = rc_freq_word(rc.f_value);
   put_p(RC_PSTR("# freq="));
   put_freq(rc.freq_khz);
@@ -590,6 +602,10 @@ static void finish_r(uint8_t ok) {
   }
   if (rc.f_value == 0) {
     if (rc.survey_active) rc_hal_survey(0);
+    return;
+  }
+  if (!rc.radio_ok) {
+    rc_print_no_radio();
     return;
   }
   rc_hal_survey((uint16_t)(rc.f_value > RC_SURVEY_MAX_SECS ? RC_SURVEY_MAX_SECS : rc.f_value));
@@ -818,6 +834,14 @@ void rc_begin(void) {
   rc.rx_state = RC_RX_IDLE;
   rc.packet_ready = 0;
   rc.freq_khz = rc.default_khz ? rc.default_khz : RC_DEFAULT_FREQ_KHZ;
+  rc.radio_ok = cc1101_present();
+  if (!rc.radio_ok) {
+    /* Nothing to configure or receive from: edges stay masked, and T, R and
+     * the receive path stay off until the next reset probes again. */
+    rc_print_banner();
+    rc_print_no_radio();
+    return;
+  }
   cc1101_init();
   rc_print_banner();
   cc1101_enter_rx();
