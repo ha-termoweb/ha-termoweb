@@ -27,6 +27,7 @@ from .backend.radio.discovery import (
     DISCOVERY_DIALECTS,
     SCAN_ADDRESSES,
     NetworkSighting,
+    PairingOpen,
     discover_network,
     probe_heaters,
     survey_network,
@@ -361,12 +362,14 @@ async def find_network(
     link_factory: Any = RadioLink,
     dialect_capable: bool = True,
     analyse_survey: AnalyseSurvey = _analyse_inline,
+    pairing_open: PairingOpen | None = None,
 ) -> NetworkSighting:
     """Return the heater network: the known one, else learned by listening.
 
     When listening hears nothing in a known dialect, a raw survey tells a
     silent installation (``no_traffic``) from one that speaks an unknown
-    dialect (UnknownDialectError).
+    dialect (UnknownDialectError). A pairing announcement heard while
+    ``pairing_open()`` is true raises PairingAnnounced.
     """
     if dialect != DIALECT_AUTO and (
         network_id is not None or DIALECTS[dialect].network_id is not None
@@ -380,7 +383,11 @@ async def find_network(
     else:
         dialects = (DIALECT_A,)  # stock nanoCUL firmware: dialect A only
     sighting = await discover_network(
-        host, port, dialects=dialects, link_factory=link_factory
+        host,
+        port,
+        dialects=dialects,
+        link_factory=link_factory,
+        pairing_open=pairing_open,
     )
     if sighting is None:
         sighting = await survey_sighting(

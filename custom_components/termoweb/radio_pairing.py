@@ -11,14 +11,15 @@ from collections.abc import Iterable, Mapping
 import logging
 from typing import Any
 
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import instance_id
 
 from .backend.radio.pairing import PairedHeater, site_network_id
 from .backend.radio_client import RadioUnsupportedError
 from .backend.sanitize import mask_identifier
-from .const import CONF_NODES, CONF_RADIO_RESTORE
+from .const import CONF_NODES, CONF_RADIO_RESTORE, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -200,6 +201,25 @@ def merge_heaters(
     return nodes, added, moved
 
 
+@callback
+def async_notify_added(
+    hass: HomeAssistant, entry: ConfigEntry, added: Iterable[Mapping[str, Any]]
+) -> None:
+    """Tell the user which heaters were added to ``entry`` (nothing when none)."""
+
+    lines = [
+        f"Found TermoWeb heater {node.get('serial')}. It was added to {entry.title}."
+        for node in added
+    ]
+    if lines:
+        persistent_notification.async_create(
+            hass,
+            "\n".join(lines),
+            title="New TermoWeb heater found",
+            notification_id=f"{DOMAIN}_{entry.entry_id}_heaters_found",
+        )
+
+
 def add_nodes(
     hass: HomeAssistant, entry: ConfigEntry, heaters: Iterable[PairedHeater]
 ) -> bool:
@@ -223,6 +243,7 @@ def add_nodes(
 
 __all__ = [
     "add_nodes",
+    "async_notify_added",
     "async_reset_keeping_settings",
     "async_site_network_id",
     "default_node_name",

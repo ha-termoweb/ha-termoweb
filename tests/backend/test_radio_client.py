@@ -896,6 +896,22 @@ async def test_pair_runs_under_the_exchange_lock_and_skips_stored_ids(
 
 
 @pytest.mark.asyncio
+async def test_pair_skips_reserved_ids_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ids handed out since setup are not free, like stored ones."""
+
+    client, _links, _ = make_client()
+    seen: dict = {}
+
+    async def fake_pair(link, **kwargs):
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(rc, "pair_heaters", fake_pair)
+    await client.async_pair(20, max_heaters=1, reserved_ids={2, 3})
+    assert seen["existing_ids"] == {2, 3, 6, 7}
+
+
+@pytest.mark.asyncio
 async def test_factory_reset_sends_c8_and_needs_c9_55() -> None:
     """Dialect B resets with ``C8 01 D0``; a rejection raises."""
 

@@ -1083,6 +1083,60 @@ async def test_listen_once_returns_none_on_silence() -> None:
     assert rig.ft.now >= 3
 
 
+def _sweep(dst: int = 1) -> str:
+    """Return a dialect-B pairing sweep frame: from FF, tag 03, on net 0000."""
+    return rx_line(
+        build_frame(
+            DIALECT_B,
+            0xFF,
+            dst,
+            b"\x55",
+            tag=0x03,
+            path=(0xFF, dst, 1, 1, 1),
+            network_id=b"\x00\x00",
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_listen_once_never_takes_a_pairing_sweep_for_a_network() -> None:
+    """With pairing closed, a heater in pairing mode is skipped, not net 0000."""
+    rig = Rig({"B": [_sweep(), _sweep(0x18)]})
+    sighting = await d.listen_once(
+        "gw",
+        2323,
+        DIALECT_B,
+        3,
+        link_factory=rig.link_factory,
+        sleep=rig.sleep,
+        clock=rig.ft.clock,
+        pairing_open=lambda: False,
+    )
+    assert sighting is None
+    assert rig.gateways[0].transmitted() == []
+
+
+@pytest.mark.asyncio
+async def test_discover_network_stops_for_a_pairing_heater_while_pairing_is_open() -> (
+    None
+):
+    """An announcement heard while pairing is open ends listening at once."""
+    rig = Rig({"B": [_sweep(0x18)]})
+    with pytest.raises(d.PairingAnnounced) as heard:
+        await d.discover_network(
+            "gw",
+            window_s=10,
+            total_s=60,
+            link_factory=rig.link_factory,
+            sleep=rig.sleep,
+            clock=rig.ft.clock,
+            pairing_open=lambda: True,
+        )
+    assert heard.value.dialect is DIALECT_B
+    assert rig.ft.now < 60  # did not listen out the whole round
+    assert all(gw.writer.closed for gw in rig.gateways)
+
+
 @pytest.mark.asyncio
 async def test_discover_network_alternates_dialects() -> None:
     """Dialect B is tried first; dialect A traffic is found on the next window."""

@@ -977,7 +977,9 @@ class DiscoveryRadio:
         self.surveyed: Any = None
         self.calls: list[tuple] = []
 
-    async def discover_network(self, host, port, *, dialects, link_factory) -> Any:
+    async def discover_network(
+        self, host, port, *, dialects, link_factory, pairing_open=None
+    ) -> Any:
         """Record the dialects listened for."""
         self.calls.append(("listen", tuple(d.name for d in dialects)))
         return self.sighting

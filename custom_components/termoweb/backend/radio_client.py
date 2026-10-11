@@ -345,16 +345,18 @@ class RadioClient:
         wanted_id: int | None = None,
         max_heaters: int | None = None,
         idle_stop_s: float | None = None,
+        reserved_ids: Iterable[int] = (),
     ) -> list[PairedHeater]:
         """Pair heaters into this network; heater commands wait meanwhile.
 
-        New heaters get the lowest id not used by a stored node; ``wanted_id``
-        pairs one heater to that id (one re-paired after a factory reset).
+        New heaters get the lowest id not used by a stored node or listed in
+        ``reserved_ids`` (heaters paired since setup); ``wanted_id`` pairs one
+        heater to that id (one re-paired after a factory reset).
         """
 
         self._require_transmit()
         link = await self.async_connect()
-        existing: set[int] = set()
+        existing: set[int] = set(reserved_ids)
         for node in self._nodes:
             try:
                 existing.add(radio_addr(node.get("addr")))

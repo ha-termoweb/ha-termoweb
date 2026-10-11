@@ -59,6 +59,7 @@ class Rig:
         self.paired: list[PairedHeater] | Exception = [_paired(6)]
         self.reset_error: Exception | None = None
         self.restore_error: Exception | None = None
+        self.pair_locked: list[bool] = []
         self.client.async_pair = self._pair
         self.client.async_factory_reset = self._reset
         self.client.async_restore = self._restore
@@ -78,6 +79,7 @@ class Rig:
 
     async def _pair(self, window_s: float, **kwargs: Any) -> Any:
         self.calls.append(("pair", (window_s, kwargs)))
+        self.pair_locked.append(self.runtime.radio_pairing_lock.locked())
         if isinstance(self.paired, Exception):
             raise self.paired
         return self.paired
@@ -356,6 +358,8 @@ async def test_pairing_a_new_heater_adds_it_and_reloads(rig: Rig) -> None:
     assert rig.calls == [("pair", (300, {"wanted_id": None, "max_heaters": 1}))]
     assert rig.entry.data["nodes"][-1] == rp.radio_node(2)
     assert rig.reloads == [ENTRY_ID]
+    assert rig.pair_locked == [True]  # automatic pairing stands by
+    assert not rig.runtime.radio_pairing_lock.locked()
 
 
 @pytest.mark.parametrize(

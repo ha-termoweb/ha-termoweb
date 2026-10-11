@@ -464,6 +464,8 @@ gateway backend, not listen-only entries).
      per A+B cycle every spell overlaps a window of each dialect. An
      associated heater that does not want heat may stay silent. Every
      CRC-valid data frame gives the network id (bytes 1-2) and its sender.
+     A heater's pairing announcement is not network traffic (dialect B sends
+     it on net `0000`) and is skipped.
      Dialect-B network ids belong to one installation, so there is no
      default to fall back on. A dialect the firmware cannot speak (a stock
      nanoCUL only knows A) is dropped from the rotation;

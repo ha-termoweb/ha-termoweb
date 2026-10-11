@@ -144,7 +144,8 @@ async def async_register_radio_pairing_services(hass: HomeAssistant) -> None:
             )
         _LOGGER.info("Radio pairing for %s: waiting up to %d s", entry_id, timeout)
         try:
-            paired = await client.async_pair(timeout, wanted_id=addr, max_heaters=1)
+            async with runtime.radio_pairing_lock:  # automatic pairing stands by
+                paired = await client.async_pair(timeout, wanted_id=addr, max_heaters=1)
         except (PairingError, RadioError, RadioLinkError) as err:
             raise HomeAssistantError(f"Radio pairing failed: {err}") from err
         if not paired:

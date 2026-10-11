@@ -168,6 +168,18 @@ def signal_radio_unknown_heater(entry_id: str) -> str:
     return f"{DOMAIN}_{entry_id}_radio_unknown_heater"
 
 
+def signal_radio_pairing_announcement(entry_id: str) -> str:
+    """Signal name for a pairing announcement heard by a radio entry's listener."""
+
+    return f"{DOMAIN}_{entry_id}_radio_pairing_announcement"
+
+
+def signal_radio_pairing_window(entry_id: str) -> str:
+    """Signal name for a change of a radio entry's pairing window."""
+
+    return f"{DOMAIN}_{entry_id}_radio_pairing_window"
+
+
 # Polling
 DEFAULT_POLL_INTERVAL: Final = 1800  # seconds (30 minutes)
 MIN_POLL_INTERVAL: Final = 30  # seconds

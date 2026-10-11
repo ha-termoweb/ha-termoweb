@@ -19,10 +19,16 @@ import pytest
 
 from custom_components.termoweb.backend import radio_client as rc, radio_ws
 from custom_components.termoweb.backend.radio import protocol as p
+from custom_components.termoweb.backend.radio.dialect import DIALECT_A
 from custom_components.termoweb.backend.radio.link import RadioLinkError
+from custom_components.termoweb.backend.radio.pairing import Announcement
 from custom_components.termoweb.backend.radio_client import RadioClient
 from custom_components.termoweb.backend.radio_ws import RadioListener
-from custom_components.termoweb.const import BRAND_RADIO, signal_ws_status
+from custom_components.termoweb.const import (
+    BRAND_RADIO,
+    signal_radio_pairing_announcement,
+    signal_ws_status,
+)
 from custom_components.termoweb.coordinator.state import StateCoordinator
 from custom_components.termoweb.domain.ids import NodeType
 from custom_components.termoweb.inventory import Inventory
@@ -383,6 +389,56 @@ async def test_frames_without_usable_content(radio: Radio) -> None:
 
     assert link.sent == [(6, b"\x57\x55"), (6, b"\x57\x55")]
     assert radio.deltas == []
+
+
+async def test_pairing_announcements_are_signalled_not_answered(
+    hass: HomeAssistant, radio: Radio
+) -> None:
+    """A sweep frame on net 0000 to any id is signalled; the listener sends nothing."""
+
+    heard: list[Any] = []
+    unsub = async_dispatcher_connect(
+        hass, signal_radio_pairing_announcement(ENTRY_ID), heard.append
+    )
+    radio.listener.start()
+    await settle()
+    link = radio.links[0]
+    link.sent.clear()
+
+    for dst in (0x18, 1):
+        link.deliver(received(0xFF, b"\x55", dst=dst, tag=0x03, network_id=b"\x00\x00"))
+    await settle()
+    unsub()
+
+    assert [announcement.dst for announcement in heard] == [0x18, 1]
+    assert link.sent == []
+
+
+async def test_relayed_pairing_announcements_are_dropped(
+    hass: HomeAssistant, radio: Radio, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dialect-A copy relayed by a paired heater cannot be answered: no signal."""
+
+    heard: list[Any] = []
+    unsub = async_dispatcher_connect(
+        hass, signal_radio_pairing_announcement(ENTRY_ID), heard.append
+    )
+    relayed = Announcement(DIALECT_A, bytes(12), relayed=True, dst=1)
+    monkeypatch.setattr(radio_ws, "classify_announcement", lambda *_args: relayed)
+    radio.listener.start()
+    await settle()
+    radio.links[0].deliver(received(9, b"\x77" + bytes(12)))
+    await settle()
+    unsub()
+    assert heard == []
+
+
+async def test_frame_before_the_gateway_connects_is_ignored(radio: Radio) -> None:
+    """Without a gateway link nothing is dispatched or answered."""
+
+    radio.listener._on_frame(received(HEATER, REGISTRATION))
+    await settle()
+    assert radio.links == [] and radio.deltas == []
 
 
 async def test_shared_address_reports_as_heater(hass: HomeAssistant) -> None:

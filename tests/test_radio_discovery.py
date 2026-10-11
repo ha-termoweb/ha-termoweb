@@ -22,6 +22,7 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.termoweb import radio_discovery
 from custom_components.termoweb.backend.radio import DIALECT_B, RadioLinkError
 from custom_components.termoweb.backend.radio.discovery import NetworkSighting
+from custom_components.termoweb.backend.radio.pairing import PairedHeater
 from custom_components.termoweb.backend.radio.survey import analyse
 from custom_components.termoweb.config_flow_radio import (
     RadioSetupError,
@@ -431,6 +432,34 @@ async def test_finder_stores_nothing_when_every_heater_is_known(
     await radio_discovery.HeaterFinder(hass, entry, _Client()).async_add([6])
     assert entry.data["nodes"] == [KNOWN]
     assert reloads == []
+
+
+async def test_paired_heaters_join_the_batch_without_a_second_identity_read(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A heater paired here is stored with the batch; one without a serial is read."""
+    reloads = record_reloads(monkeypatch, hass)
+    entry = _pending_entry(dialect="B", network_id="1234", nodes=[KNOWN])
+    entry.add_to_hass(hass)
+    asked: list[int] = []
+
+    class _Client:
+        async def async_read_identity(self, addr: int) -> Any:
+            asked.append(addr)
+            return SimpleNamespace(tail=b"", serial=SERIALS[addr])
+
+    finder = radio_discovery.HeaterFinder(hass, entry, _Client())
+    finder.async_paired(PairedHeater(7, None))  # its identity read failed
+    finder.async_paired(PairedHeater(4, None, serial="S000004"))
+    finder.async_heard(4)  # its registration: not read again
+    await _after_debounce(hass)
+
+    assert asked == [7]
+    assert [node["addr"] for node in entry.data["nodes"]] == ["6", "4", "7"]
+    assert reloads == [entry.entry_id]
+    finder.async_paired(PairedHeater(9, None, serial="S000009"))  # done: ignored
+    await _after_debounce(hass)
+    assert len(entry.data["nodes"]) == 3
 
 
 async def test_new_gateway_finds_its_network_then_its_heaters(
