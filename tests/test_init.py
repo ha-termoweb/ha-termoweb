@@ -745,6 +745,12 @@ class FakeLink:
         self.closes += 1
         self.connected = False
 
+    def add_listener(self, _callback: Any) -> Any:
+        """Accept a frame (or TX) listener; this link never hears anything."""
+        return lambda: None
+
+    add_tx_listener = add_listener
+
 
 @pytest.fixture
 def radio_clients() -> Generator[list[tuple[RadioClient, list[FakeLink]]]]:

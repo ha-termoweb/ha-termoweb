@@ -296,6 +296,18 @@ custom_components/termoweb/backend/radio/capture.py :: redact_line
     Mask the MAC, network ids and on-air hex in a gateway line.
 custom_components/termoweb/backend/radio/capture.py :: redact
     Return frames and raw lines safe to share: network ids become NET1, NET2...
+custom_components/termoweb/backend/radio/capture.py :: FrameLog.__init__
+    Create an empty log that holds at most ``size`` frames.
+custom_components/termoweb/backend/radio/capture.py :: FrameLog.on_rx
+    Log a received frame; one failing in ``dialect`` is tried in every dialect.
+custom_components/termoweb/backend/radio/capture.py :: FrameLog.on_tx
+    Log a frame this station transmitted.
+custom_components/termoweb/backend/radio/capture.py :: FrameLog._add
+    Append one entry and count its kind.
+custom_components/termoweb/backend/radio/capture.py :: FrameLog.snapshot
+    Return the counts and the logged frames, oldest first, safe to share.
+custom_components/termoweb/backend/radio/capture.py :: _log_record
+    Return one frame log entry as a masked diagnostics record.
 custom_components/termoweb/backend/radio/capture.py :: summarise
     Return frame and ack counts, networks, node ids and a named opcode histogram.
 custom_components/termoweb/backend/radio/dialect.py :: crc16_ccitt_a
@@ -382,6 +394,10 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink.add_line_listener
     Register ``callback`` for every gateway line that is not a decoded frame.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.add_line_listener._remove
     Unregister the callback; safe to call more than once.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.add_tx_listener
+    Register ``callback`` for the air bytes of every confirmed transmit.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.add_tx_listener._remove
+    Unregister the callback; safe to call more than once.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.send_frame
     Transmit ``air`` and wait for ``dst``'s ack, retrying up to ``retries`` times.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.request
@@ -402,6 +418,8 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink._dispatch
     Route one gateway line to waiters and listeners.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._notify_lines
     Hand one non-frame gateway line to every line listener.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._notify_tx
+    Hand the air bytes of a confirmed transmit to every TX listener.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._resolve
     Complete every pending waiter whose predicate accepts ``item``.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._add_line_waiter
@@ -581,7 +599,7 @@ custom_components/termoweb/backend/radio/survey.py :: _mask
 custom_components/termoweb/backend/radio/survey.py :: parse_run_tokens
     Parse ``+118 -92`` run tokens into ``(level, micros)``; skip bad tokens.
 custom_components/termoweb/backend/radio_backend.py :: radio_diagnostics
-    Return radio link facts for diagnostics; no MAC or network id.
+    Return radio link facts and recent masked frames; no MAC or network id.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.diagnostics
     Return the radio link facts.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.create_ws_client
@@ -612,6 +630,10 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.gateway_info
     Return the gateway's last ``Q`` status, if connected once.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_connect
     Return the shared link, opening the gateway connection if needed.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._log_rx
+    Log a frame the link heard, with its current dialect and network id.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._log_tx
+    Log a frame the link transmitted, with its current dialect and network id.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_close
     Close the gateway connection for good; later use raises RadioLinkError.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.add_disconnect_listener

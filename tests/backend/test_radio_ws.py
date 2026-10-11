@@ -255,7 +255,7 @@ async def test_start_connects_refreshes_and_reports_health(radio: Radio) -> None
 
     await radio.listener.stop()
     assert task.done()
-    assert link.closes == 1 and link.listeners == []
+    assert link.closes == 1 and link.listeners == [radio.client._log_rx]
     assert tracker.status == "stopped"
     assert not radio.connected()
 
@@ -505,7 +505,7 @@ async def test_disconnect_reports_down_then_reconnects_with_backoff(
     radio.sleeper.release()  # end of the refresh sleep: the loop sees the drop
     await settle()
     assert radio.sleeper.calls == [REFRESH, 5.0]
-    assert link.listeners == []
+    assert link.listeners == [radio.client._log_rx]
 
     radio.sleeper.release()  # end of the backoff: reconnect
     await settle()

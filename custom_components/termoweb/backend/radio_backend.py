@@ -27,7 +27,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def radio_diagnostics(client: Any, entry_data: Mapping[str, Any]) -> dict[str, Any]:
-    """Return radio link facts for diagnostics; no MAC or network id."""
+    """Return radio link facts and recent masked frames; no MAC or network id."""
 
     info = client.gateway_info
     section: dict[str, Any] = {
@@ -47,6 +47,7 @@ def radio_diagnostics(client: Any, entry_data: Mapping[str, Any]) -> dict[str, A
             "station_id": info.station_id,
             "survey": supports_survey(info),
         }
+    section["recent_frames"] = client.frame_log.snapshot()
     return section
 
 

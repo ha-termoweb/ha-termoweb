@@ -255,6 +255,7 @@ class RadioLink:
         self._last_command_at: float | None = None
         self._listeners: list[Callable[[ReceivedFrame], None]] = []
         self._line_listeners: list[Callable[[str], None]] = []
+        self._tx_listeners: list[Callable[[bytes], None]] = []
         self._line_waiters: list[tuple[Callable[[str], bool], asyncio.Future[str]]] = []
         self._frame_waiters: list[
             tuple[Callable[[ReceivedFrame], bool], asyncio.Future[ReceivedFrame]]
@@ -435,6 +436,17 @@ class RadioLink:
 
         return _remove
 
+    def add_tx_listener(self, callback: Callable[[bytes], None]) -> Callable[[], None]:
+        """Register ``callback`` for the air bytes of every confirmed transmit."""
+        self._tx_listeners.append(callback)
+
+        def _remove() -> None:
+            """Unregister the callback; safe to call more than once."""
+            with contextlib.suppress(ValueError):
+                self._tx_listeners.remove(callback)
+
+        return _remove
+
     # --- transmit ------------------------------------------------------------
 
     async def send_frame(
@@ -523,6 +535,7 @@ class RadioLink:
                 raise RadioLinkError("no TX confirmation from the gateway")
             self._missed_confirms = 0
             if line.startswith("TX "):
+                self._notify_tx(bytes(air))
                 parts = line.split()
                 return _int_or_none(parts[1]) if len(parts) > 1 else None, written
             if line != TXERR_BAD_HEX or written == 2:
@@ -668,6 +681,14 @@ class RadioLink:
                 listener(line)
             except Exception:
                 _LOGGER.exception("Radio line listener failed")
+
+    def _notify_tx(self, air: bytes) -> None:
+        """Hand the air bytes of a confirmed transmit to every TX listener."""
+        for listener in list(self._tx_listeners):
+            try:
+                listener(air)
+            except Exception:
+                _LOGGER.exception("Radio TX listener failed")
 
     @staticmethod
     def _resolve[T](
