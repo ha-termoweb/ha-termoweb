@@ -5,7 +5,7 @@
   "codeowners": ["@ha-termoweb"],
   "config_flow": true,
   "documentation": "https://github.com/ha-termoweb/ha-termoweb#readme",
-  "iot_class": "cloud_push",
+  "iot_class": "local_push",
   "issue_tracker": "https://github.com/ha-termoweb/ha-termoweb/issues",
   "loggers": ["custom_components.termoweb"],
   "requirements": ["pydantic>=2.8.0", "pyserial-asyncio-fast==0.16"],

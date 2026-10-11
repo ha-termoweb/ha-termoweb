@@ -165,7 +165,7 @@ class TermoWebConfigFlow(RadioConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Offer the cloud account or the local radio gateway."""
         return self.async_show_menu(
-            step_id="user", menu_options=["cloud", "radio", "nanocul"]
+            step_id="user", menu_options=["cloud", "nanocul", "radio"]
         )
 
     async def async_step_cloud(

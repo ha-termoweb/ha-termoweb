@@ -37,7 +37,7 @@ async def _cloud_form(hass: HomeAssistant) -> dict[str, Any]:
         DOMAIN, context={"source": SOURCE_USER}
     )
     assert result["type"] is FlowResultType.MENU
-    assert result["menu_options"] == ["cloud", "radio", "nanocul"]
+    assert result["menu_options"] == ["cloud", "nanocul", "radio"]
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": "cloud"}
     )

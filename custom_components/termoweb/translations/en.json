@@ -3,11 +3,11 @@
     "step": {
       "user": {
         "title": "How do your heaters connect?",
-        "description": "Choose the cloud account if you use the TermoWeb, Ducaheat or Tevolve app. Choose a local radio if you control the heaters without the cloud: the ESP32 radio gateway on your network, or a nanoCUL USB stick plugged into this Home Assistant computer.",
+        "description": "Choose the cloud account if you use the TermoWeb, Ducaheat or Tevolve app. To control the heaters locally without the cloud, the easiest way is a nanoCUL USB stick plugged into this Home Assistant computer (no soldering). The ESP32 radio gateway is for advanced users: it has to be built and soldered.",
         "menu_options": {
           "cloud": "Cloud account (TermoWeb, Ducaheat or Tevolve app)",
-          "radio": "Local radio gateway: ESP32 + CC1101 on your network",
-          "nanocul": "Local radio: nanoCUL USB stick (CC1101 868 MHz)"
+          "nanocul": "Local radio: nanoCUL USB stick (easiest, no soldering)",
+          "radio": "Local radio gateway: ESP32 + CC1101 (advanced, needs soldering)"
         }
       },
       "cloud": {
