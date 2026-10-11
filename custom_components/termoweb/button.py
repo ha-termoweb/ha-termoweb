@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from homeassistant.components.button import ButtonEntity
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
@@ -32,6 +33,7 @@ from .identifiers import (
 )
 from .inventory import Inventory
 from .nodes import AccumulatorNode
+from .radio_autopair import async_open_pairing_window, pairing_supported
 from .runtime import require_runtime
 from .utils import build_gateway_device_info, build_node_device_info
 
@@ -168,6 +170,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ]
     entities.extend(flash_entities)
 
+    if pairing_supported(runtime):
+        entities.append(PairNewHeatersButton(entry, dev_id))
+
     async_add_entities(entities)
 
 
@@ -196,6 +201,30 @@ class StateRefreshButton(CoordinatorEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Request an immediate coordinator refresh when pressed."""
         await self.coordinator.async_request_refresh()
+
+
+class PairNewHeatersButton(ButtonEntity):
+    """Button that opens the radio gateway's pairing window for 10 minutes."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "pair_new_heaters"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_should_poll = False
+
+    def __init__(self, entry: ConfigEntry, dev_id: str) -> None:
+        """Initialise the button for the gateway of ``entry``."""
+        self._entry = entry
+        self._dev_id = dev_id
+        self._attr_unique_id = build_gateway_entity_unique_id(dev_id, "pair_heaters")
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the Home Assistant device metadata for this gateway."""
+        return build_gateway_device_info(self.hass, self._entry.entry_id, self._dev_id)
+
+    async def async_press(self) -> None:
+        """Open the pairing window: heaters put into pairing mode are paired."""
+        async_open_pairing_window(self.hass, self._entry)
 
 
 class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):

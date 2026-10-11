@@ -414,13 +414,9 @@ async def test_rehome_service(rig: Rig) -> None:
 
 
 async def _run_options(hass: HomeAssistant, entry_id: str) -> Any:
-    """Open the options, pick rehome, submit and return the step after progress."""
-    menu = await hass.config_entries.options.async_init(entry_id)
-    assert menu["type"] is FlowResultType.MENU
-    assert menu["menu_options"] == ["pair_heaters", "rehome"]
-    form = await hass.config_entries.options.async_configure(
-        menu["flow_id"], {"next_step_id": "rehome"}
-    )
+    """Open the options (the rehome form), submit and return the step after progress."""
+    form = await hass.config_entries.options.async_init(entry_id)
+    assert form["type"] is FlowResultType.FORM
     assert form["step_id"] == "rehome"
     assert form["description_placeholders"]["heaters"].startswith("Room 6, ")
     result = await hass.config_entries.options.async_configure(form["flow_id"], {})
@@ -495,10 +491,7 @@ async def test_options_flow_shows_progress_while_moving(rig: Rig) -> None:
 
     rig.client.paired = [_paired(2)]
     rig.client.async_pair = slow
-    menu = await rig.hass.config_entries.options.async_init(ENTRY_ID)
-    form = await rig.hass.config_entries.options.async_configure(
-        menu["flow_id"], {"next_step_id": "rehome"}
-    )
+    form = await rig.hass.config_entries.options.async_init(ENTRY_ID)
     result = await rig.hass.config_entries.options.async_configure(form["flow_id"], {})
     assert result["type"] is FlowResultType.SHOW_PROGRESS
     assert result["progress_action"] == "rehome"

@@ -405,10 +405,10 @@ derived one.
   `pairing.pair_new_network` on the site network id, in the chosen dialect
   (`auto`: B and A in turn; a stock nanoCUL: A only), and creates the entry
   with the paired heaters. No heater paired: error `no_heaters_paired`.
-- Options flow of a radio entry: a menu offers the settings form or "Pair a
-  new heater". Pairing uses the running client (`async_pair`, 5 minutes,
-  stops 60 s after the last pairing), adds the new heaters to the entry's
-  nodes and reloads the entry.
+- Automatic pairing: while the entry's pairing window is open (30 minutes
+  after the entry is created, 10 minutes after **Pair new heaters**), the
+  listener's announcements start one short `async_pair` (20 s, one heater).
+  See [radio backend: automatic pairing](radio_backend.md#automatic-pairing-pairing-window).
 - `RadioClient.async_pair(window_s, wanted_id=None, max_heaters=None)` pairs
   under the exchange lock: heater commands wait until it ends. New heaters
   get ids no stored node uses.

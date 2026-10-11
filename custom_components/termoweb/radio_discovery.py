@@ -25,7 +25,12 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_call_later
 
 from .backend import backend_capabilities
-from .backend.radio.discovery import PROBE_GAP_S, SCAN_ADDRESSES, SURVEY_S
+from .backend.radio.discovery import (
+    PROBE_GAP_S,
+    SCAN_ADDRESSES,
+    SURVEY_S,
+    PairingAnnounced,
+)
 from .backend.radio.link import RadioLinkError
 from .backend.radio.pairing import PairedHeater
 from .backend.radio_client import RadioError
@@ -48,6 +53,7 @@ from .const import (
     DOMAIN,
     signal_radio_unknown_heater,
 )
+from .radio_autopair import async_pair_new_network, pairing_window_end
 from .radio_pairing import async_notify_added, merge_heaters
 from .radio_survey import ISSUE_URL, async_analyse, async_save_report, report_payload
 from .utils import async_get_integration_version
@@ -84,7 +90,11 @@ def async_start_network_search(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_search_network(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Listen until the heater network is heard; store it and reload the entry."""
+    """Listen until the heater network is heard; store it and reload the entry.
+
+    A heater announcing pairing while the pairing window is open is paired
+    into the site network instead (radio_autopair.async_pair_new_network).
+    """
 
     data = dict(entry.data)
     host, port = radio_address(data)
@@ -97,7 +107,12 @@ async def async_search_network(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 None,
                 link_factory=radio_link_factory(data),
                 analyse_survey=functools.partial(async_analyse, hass),
+                pairing_open=lambda: pairing_window_end(hass, entry) is not None,
             )
+        except PairingAnnounced as heard:
+            if await async_pair_new_network(hass, entry, heard.dialect):
+                return
+            continue  # listen again at once: the heater may still be announcing
         except UnknownDialectError as err:
             await _async_report_unknown_dialect(hass, entry, err)
             return
