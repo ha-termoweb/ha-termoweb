@@ -154,7 +154,7 @@ async def async_register_radio_pairing_services(hass: HomeAssistant) -> None:
             )
         node_id = paired[0].node_id
         if addr is None:
-            add_nodes(hass, entry, [node_id])
+            add_nodes(hass, entry, paired[:1])
             return {"heater": node_id, "added": True, "restored": False}
         restored = False
         if call.data.get("restore", True) and snapshot is not None:

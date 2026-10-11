@@ -377,8 +377,8 @@ class RadioClient:
         await link.set_network_id(network_id)
         self._network_id = bytes(network_id)
 
-    async def async_read_identity(self, addr: int) -> bytes:
-        """Return the identity tail of the heater's ``5A`` reply; note its rating."""
+    async def async_read_identity(self, addr: int) -> protocol.IdentityRecord:
+        """Return the heater's decoded ``5A`` identity reply; note its rating."""
 
         reply = await self._exchange(
             addr,
@@ -393,7 +393,7 @@ class RadioClient:
         if watts is not None:
             _LOGGER.info("Heater %s is rated %d W (identity record)", addr, watts)
             self.power.note_identity_power(addr, float(watts))
-        return record.tail
+        return record
 
     async def _learn_rated_power(self, addr: int) -> None:
         """Read a heater's identity once for its rating while its power is unknown."""
@@ -667,6 +667,11 @@ class RadioClient:
                 "fw_version": info.version,
             }
         ]
+
+    def set_nodes(self, nodes: Iterable[Mapping[str, Any]]) -> None:
+        """Replace the stored node list (setup learned the heaters' serials)."""
+
+        self._nodes = [dict(node) for node in nodes if isinstance(node, Mapping)]
 
     async def get_nodes(self, dev_id: str) -> dict[str, list[dict[str, Any]]]:
         """Return the stored heater list in the cloud ``{"nodes": [...]}`` shape."""

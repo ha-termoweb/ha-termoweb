@@ -17,14 +17,17 @@ from homeassistant.core import HomeAssistant
 from .backend.radio.dialect import DIALECT_B
 from .backend.radio.link import RadioLinkError
 from .backend.radio.pairing import IDLE_STOP_S, PairedHeater, PairingError
+from .backend.radio.protocol import IdentityRecord
 from .backend.radio_client import RadioError, radio_addr
 from .const import CONF_NETWORK_ID, CONF_NODES
+from .radio_identity import async_rekey_node
 from .radio_pairing import (
     async_reset_keeping_settings,
     async_site_network_id,
     radio_node,
     saved_snapshot,
     store_snapshot,
+    with_serial,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,7 +46,7 @@ def _addr(node: dict[str, Any]) -> int | None:
         return None
 
 
-async def _read_identities(client: Any, addrs: list[int]) -> dict[int, bytes]:
+async def _read_identities(client: Any, addrs: list[int]) -> dict[int, IdentityRecord]:
     """Return every heater's ``5A`` identity; raise RehomeError before any change."""
 
     identities = {}
@@ -87,14 +90,25 @@ async def _identified(client: Any, heater: PairedHeater) -> PairedHeater:
     if heater.identity is not None:
         return heater
     try:
-        identity = await client.async_read_identity(heater.node_id)
+        record = await client.async_read_identity(heater.node_id)
     except RadioError, RadioLinkError:
         return heater
-    return dataclasses.replace(heater, identity=identity)
+    return dataclasses.replace(
+        heater, identity=record.tail, serial=heater.serial or record.serial
+    )
+
+
+def _moved_node(
+    old: dict[str, Any], heater: PairedHeater, identity: IdentityRecord
+) -> dict[str, Any]:
+    """Return the stored node of a heater that moved: new id, same name and serial."""
+
+    serial = old.get("serial") or heater.serial or identity.serial
+    return {**with_serial(old, serial), "addr": str(heater.node_id)}
 
 
 def _match(
-    addrs: list[int], identities: dict[int, bytes], paired: list[Any]
+    addrs: list[int], identities: dict[int, IdentityRecord], paired: list[Any]
 ) -> dict[int, int]:
     """Return ``{new id: old id}``: direct for one heater, else by 5A identity."""
 
@@ -102,8 +116,8 @@ def _match(
         return {paired[0].node_id: addrs[0]}
     matches: dict[int, int] = {}
     for heater in paired:
-        for old, identity in identities.items():
-            if heater.identity == identity and old not in matches.values():
+        for old, record in identities.items():
+            if heater.identity == record.tail and old not in matches.values():
                 matches[heater.node_id] = old
                 break
     return matches
@@ -154,7 +168,7 @@ async def async_rehome(
     if len(addrs) > 1:  # one heater maps directly; more need their identities
         paired = [await _identified(client, heater) for heater in paired]
     matches = _match(addrs, identities, paired)
-    names = {_addr(node): node.get("name") for node in nodes}
+    stored = {_addr(node): node for node in nodes}
     moved = []
     for heater in paired:
         old = matches.get(heater.node_id)
@@ -176,11 +190,21 @@ async def async_rehome(
     matched_old = set(matches.values())
     new_nodes = [node for node in nodes if _addr(node) not in matched_old]
     for heater in paired:
-        node = radio_node(heater.node_id)
         old = matches.get(heater.node_id)
-        if old is not None and names.get(old):
-            node["name"] = names[old]
+        if old is None:
+            new_nodes.append(radio_node(heater.node_id, heater.serial))
+            continue
+        node = _moved_node(stored[old], heater, identities[old])
         new_nodes.append(node)
+        # Its device and entities follow it: address-keyed ones move to the serial.
+        async_rekey_node(
+            hass,
+            entry.entry_id,
+            str(runtime.dev_id),
+            str(node.get("type") or "htr"),
+            stored[old].get("serial") or str(old),
+            node.get("serial") or node["addr"],
+        )
     hass.config_entries.async_update_entry(
         entry,
         data={

@@ -33,7 +33,7 @@ from homeassistant.util.unit_conversion import EnergyConverter
 
 from .backend.rest_client import BackendAuthError, BackendRateLimitError
 from .const import DOMAIN
-from .identifiers import build_heater_energy_unique_id
+from .identifiers import build_heater_energy_unique_id, node_key
 from .runtime import EntryRuntime
 from .throttle import default_samples_rate_limit_state
 
@@ -341,7 +341,9 @@ async def async_import_energy_history(
     summaries: list[NodeSummary] = []
     try:
         for node_type, addr in targets:
-            unique_id = build_heater_energy_unique_id(runtime.dev_id, node_type, addr)
+            unique_id = build_heater_energy_unique_id(
+                runtime.dev_id, node_type, node_key(inventory, node_type, addr)
+            )
             entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, unique_id)
             if entity_id is None:
                 _LOGGER.debug("%s:%s: no energy sensor; skipping", node_type, addr)

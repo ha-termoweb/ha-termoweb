@@ -492,8 +492,12 @@ custom_components/termoweb/backend/radio/protocol.py :: decode_program
     Decode a ``B1`` program reply (43 or 85 bytes) or a ``56 B1`` program report.
 custom_components/termoweb/backend/radio/protocol.py :: IdentityRecord.ascii_serial
     Return the short form's trailing printable-ASCII run, or None.
+custom_components/termoweb/backend/radio/protocol.py :: IdentityRecord.serial
+    Return the heater's serial token (see :func:`serial_token`).
 custom_components/termoweb/backend/radio/protocol.py :: IdentityRecord.rated_power_w
     Return the short form's rated power in watts (byte 10 x 100 W), or None.
+custom_components/termoweb/backend/radio/protocol.py :: serial_token
+    Return a heater's stable serial: its ASCII serial, else the identity's last 8 hex digits.
 custom_components/termoweb/backend/radio/protocol.py :: decode_identity
     Decode a ``5B 77`` (E0) or ``5B 55`` (short) identity reply.
 custom_components/termoweb/backend/radio/protocol.py :: _deciwatts
@@ -625,7 +629,7 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.async_pair
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_set_network_id
     Move this station to another network id; reconnects keep using it.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_read_identity
-    Return the identity tail of the heater's ``5A`` reply; note its rating.
+    Return the heater's decoded ``5A`` identity reply; note its rating.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._learn_rated_power
     Read a heater's identity once for its rating while its power is unknown.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_factory_reset
@@ -662,6 +666,8 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient._program
     Return the heater's ``prog``, re-reading it after ``program_refresh_s``.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.list_devices
     Return the radio gateway as the single device, keyed by its MAC (or id).
+custom_components/termoweb/backend/radio_client.py :: RadioClient.set_nodes
+    Replace the stored node list (setup learned the heaters' serials).
 custom_components/termoweb/backend/radio_client.py :: RadioClient.get_nodes
     Return the stored heater list in the cloud ``{"nodes": [...]}`` shape.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.get_node_settings
@@ -1064,6 +1070,8 @@ custom_components/termoweb/button.py :: AccumulatorBoostContext.node_type
     Return the canonical node type for the accumulator node.
 custom_components/termoweb/button.py :: AccumulatorBoostContext.addr
     Return the canonical address for the accumulator node.
+custom_components/termoweb/button.py :: AccumulatorBoostContext.key
+    Return the node key (address, or a radio heater's serial) for IDs.
 custom_components/termoweb/button.py :: AccumulatorBoostContext.unique_id
     Return the unique ID for a boost helper with ``suffix``.
 custom_components/termoweb/button.py :: _iter_accumulator_contexts
@@ -1654,6 +1662,8 @@ custom_components/termoweb/coordinator/state.py :: StateCoordinator.resume_polli
     Resume REST polling at ``base_interval`` or the rate-limit backoff.
 custom_components/termoweb/diagnostics.py :: _extract_websocket_clients
     Return websocket telemetry entries for diagnostics.
+custom_components/termoweb/diagnostics.py :: _redact_serial_names
+    Return the node entries with radio heater serials masked in their names.
 custom_components/termoweb/diagnostics.py :: _radio_section
     Return the backend's own facts plus the last radio survey and capture.
 custom_components/termoweb/diagnostics.py :: async_get_config_entry_diagnostics
@@ -1857,7 +1867,13 @@ custom_components/termoweb/identifiers.py :: _key
 custom_components/termoweb/identifiers.py :: _dev
     Return the normalised gateway id; raise ValueError when it is missing.
 custom_components/termoweb/identifiers.py :: build_heater_unique_id
-    Return the canonical unique ID for a node entity (``suffix`` is its key).
+    Return the unique ID for a node entity; ``addr`` is its node_key, ``suffix`` its key.
+custom_components/termoweb/identifiers.py :: node_key
+    Return a node's ID key: its serial when the inventory knows one, else its address.
+custom_components/termoweb/identifiers.py :: build_node_device_identifier
+    Return the device registry identifier of the node with ID key ``key``.
+custom_components/termoweb/identifiers.py :: rekey_unique_id
+    Return ``unique_id`` moved from node key ``old_key`` to ``new_key``, else None.
 custom_components/termoweb/identifiers.py :: build_heater_energy_unique_id
     Return the canonical unique ID for a heater energy sensor.
 custom_components/termoweb/identifiers.py :: build_power_monitor_unique_id
@@ -1888,6 +1904,8 @@ custom_components/termoweb/inventory.py :: Inventory.nodes
     Get the immutable tuple of node objects.
 custom_components/termoweb/inventory.py :: Inventory.has_node
     Return ``True`` when ``node_type``/``addr`` exists in the inventory.
+custom_components/termoweb/inventory.py :: Inventory.node_serial
+    Return the serial of the ``node_type``/``addr`` node, or None when unknown.
 custom_components/termoweb/inventory.py :: Inventory.iter_known_entries
     Yield ``(node_type, addr, entry)`` for payload entries in the inventory.
 custom_components/termoweb/inventory.py :: Inventory._ensure_addresses_by_type_cache
@@ -2106,8 +2124,18 @@ custom_components/termoweb/planner/radio_planner.py :: validate_commands
     Raise ValueError if any of ``commands`` cannot be encoded for ``dialect``.
 custom_components/termoweb/planner/radio_planner.py :: plan_commands
     Return the radio payloads for ``commands``, validating every one first.
+custom_components/termoweb/radio_identity.py :: async_learn_serials
+    Read and store the serial of each stored heater that has none (one try each).
+custom_components/termoweb/radio_identity.py :: async_rekey_node
+    Move a node's device and entities from ``old_key`` to ``new_key`` IDs.
+custom_components/termoweb/radio_identity.py :: async_rekey_inventory
+    Move every node with a known serial from address-keyed to serial-keyed IDs.
+custom_components/termoweb/radio_pairing.py :: default_node_name
+    Return a radio node's default name: "Heater <serial>" (or its address).
 custom_components/termoweb/radio_pairing.py :: radio_node
     Return the stored node entry for a heater with radio id ``addr``.
+custom_components/termoweb/radio_pairing.py :: with_serial
+    Return ``node`` carrying ``serial``; an address-based default name follows it.
 custom_components/termoweb/radio_pairing.py :: async_site_network_id
     Return this installation's network id for a gateway: hash of instance + gateway.
 custom_components/termoweb/radio_pairing.py :: _float_or_none
@@ -2125,7 +2153,7 @@ custom_components/termoweb/radio_pairing.py :: store_snapshot
 custom_components/termoweb/radio_pairing.py :: async_reset_keeping_settings
     Save heater ``addr``'s settings, then factory-reset it; True if any were saved.
 custom_components/termoweb/radio_pairing.py :: add_nodes
-    Add heaters to the entry's node list and reload it; False if none were new.
+    Add paired heaters to the entry's nodes and reload it; False if nothing changed.
 custom_components/termoweb/radio_rehome.py :: _addr
     Return a stored node's radio id, or None for an invalid address.
 custom_components/termoweb/radio_rehome.py :: _read_identities
@@ -2134,6 +2162,8 @@ custom_components/termoweb/radio_rehome.py :: _reset_all
     Save each heater's settings, then factory-reset it; stop at the first failure.
 custom_components/termoweb/radio_rehome.py :: _identified
     Return ``heater`` with its 5A identity, reading it again if pairing had none.
+custom_components/termoweb/radio_rehome.py :: _moved_node
+    Return the stored node of a heater that moved: new id, same name and serial.
 custom_components/termoweb/radio_rehome.py :: _match
     Return ``{new id: old id}``: direct for one heater, else by 5A identity.
 custom_components/termoweb/radio_rehome.py :: async_rehome
@@ -2172,6 +2202,8 @@ custom_components/termoweb/sensor.py :: HeaterTemperatureSensor.native_value
     Return the latest temperature reported by the heater.
 custom_components/termoweb/sensor.py :: HeaterTemperatureSensor.extra_state_attributes
     Return metadata describing the heater temperature source.
+custom_components/termoweb/sensor.py :: RadioAddressSensor.native_value
+    Return the heater's radio address; it changes when the heater re-pairs.
 custom_components/termoweb/sensor.py :: ThermostatBatterySensor.__init__
     Initialise the thermostat battery sensor entity.
 custom_components/termoweb/sensor.py :: ThermostatBatterySensor._coerce_level
@@ -2313,7 +2345,7 @@ custom_components/termoweb/utils.py :: build_gateway_device_info
 custom_components/termoweb/utils.py :: build_power_monitor_device_info
     Return canonical ``DeviceInfo`` for a TermoWeb power monitor.
 custom_components/termoweb/utils.py :: build_node_device_info
-    Return ``DeviceInfo`` for a heater, accumulator or thermostat node.
+    Return ``DeviceInfo`` for a heater, accumulator or thermostat node (``key``: node_key).
 custom_components/termoweb/utils.py :: translate_default_device_name
     Attach a device translation key when ``info`` carries a default node name.
 scripts/generate_function_map.py :: DocExtractor.__init__

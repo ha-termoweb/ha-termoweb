@@ -11,10 +11,15 @@ from custom_components.termoweb.identifiers import (
     build_heater_energy_unique_id,
     build_heater_unique_id,
     build_installation_entity_unique_id,
+    build_node_device_identifier,
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
     build_power_monitor_unique_id,
+    node_key,
+    rekey_unique_id,
 )
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.nodes import build_node_inventory
 
 
 def test_build_heater_unique_id_prefixes_suffix_with_colon() -> None:
@@ -105,3 +110,36 @@ def test_installation_entity_unique_id_is_site_scoped() -> None:
     for dev_id in ("", "   "):
         with pytest.raises(ValueError):
             build_installation_entity_unique_id(dev_id, "info")
+
+
+def test_node_key_is_the_serial_when_known_else_the_address() -> None:
+    """Radio heaters with a serial are keyed by it; everything else by address."""
+
+    nodes = build_node_inventory(
+        [
+            {"type": "htr", "addr": "2", "serial": "S000002"},
+            {"type": "htr", "addr": "3", "serial": " "},
+            {"type": "acm", "addr": "4"},
+        ]
+    )
+    inventory = Inventory("dev", nodes)
+    assert node_key(inventory, "htr", "2") == "S000002"
+    assert node_key(inventory, "htr", 3) == "3"
+    assert node_key(inventory, "acm", "4") == "4"
+    assert node_key(inventory, "thm", "9") == "9"  # not in the inventory
+    assert node_key(None, "htr", " 5 ") == "5"
+    assert build_node_device_identifier("dev", "S000002") == (DOMAIN, "dev", "S000002")
+
+
+def test_rekey_unique_id_moves_only_that_node() -> None:
+    """Only IDs of the old node key move; a longer address is another node."""
+
+    assert (
+        rekey_unique_id(f"{DOMAIN}:dev:htr:6:climate", "dev", "htr", "6", "S1")
+        == f"{DOMAIN}:dev:htr:S1:climate"
+    )
+    assert rekey_unique_id(f"{DOMAIN}:dev:htr:6", "dev", "htr", "6", "S1") == (
+        f"{DOMAIN}:dev:htr:S1"
+    )
+    assert rekey_unique_id(f"{DOMAIN}:dev:htr:60:temp", "dev", "htr", "6", "S1") is None
+    assert rekey_unique_id(f"{DOMAIN}:dev:acm:6:temp", "dev", "htr", "6", "S1") is None

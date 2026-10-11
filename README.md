@@ -146,6 +146,11 @@ What changed, and what you need to do:
 - **Unavailable when the cloud is down.** If the TermoWeb cloud cannot be reached, your entities show **unavailable** instead of old values. They come back by themselves when the cloud is back.
 - **Boost (accumulators).** Boost can last 60 to 600 minutes (in steps of 60). The boost buttons work again. The boost duration and boost temperature numbers now save to the device.
 - **Removed:** the `ws_debug_probe` action and the **debug** option. To collect logs, see [DEBUG.md](DEBUG.md).
+- **Radio heaters are named by serial number.** With the nanoCUL stick or the ESP32 radio gateway, a heater was called "Heater 2", from its radio number. That number depends on the pairing order and can change. Now each heater is called by its serial number, for example **Heater X123456**. When you pair a heater again, it keeps its device, entities and history.
+  - On the first start, the integration asks each heater for its serial number. A heater that does not answer keeps its old name until a later start.
+  - Your entity IDs stay the same (for example `climate.heater_2`). Home Assistant never renames entity IDs by itself. To change one, open the entity, click the **gear** icon and edit the **Entity ID**.
+  - A name you gave the device yourself is kept.
+  - To see a heater's radio number, enable its **Radio address** sensor: open the device, click **Radio address** under **Diagnostic**, click the **gear** icon, and turn on **Enabled**.
 
 ### Your password changed
 

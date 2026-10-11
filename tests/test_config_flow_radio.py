@@ -57,7 +57,7 @@ class FakeRadio:
         self.gateway: Any = GATEWAY_ID
         self.stick: Any = (GATEWAY_ID, True)
         self.discover: Any = (NetworkSighting(DIALECT_B, NET), {6: None, 7: None})
-        self.paired: Any = (DIALECT_B, [_paired(2), _paired(3)])
+        self.paired: Any = (DIALECT_B, [_paired(2), _paired(3, "S000003")])
         self.ports: list[config_flow_radio.SerialPort] = []
         self.calls: list[tuple[Any, ...]] = []
         self.kwargs: list[dict[str, Any]] = []
@@ -99,9 +99,9 @@ class FakeRadio:
         return self.paired
 
 
-def _paired(node_id: int) -> PairedHeater:
-    """Return a heater paired as ``node_id``."""
-    return PairedHeater(node_id, None)
+def _paired(node_id: int, serial: str | None = None) -> PairedHeater:
+    """Return a heater paired as ``node_id`` (with a synthetic ``serial``)."""
+    return PairedHeater(node_id, None, serial=serial)
 
 
 @pytest.fixture
@@ -712,7 +712,7 @@ async def test_pairing_creates_an_entry_on_the_site_network(
     assert result["data"]["network_id"] == site_net.hex().upper()
     assert result["data"]["nodes"] == [
         {"type": "htr", "addr": "2", "name": "Heater 2"},
-        {"type": "htr", "addr": "3", "name": "Heater 3"},
+        {"type": "htr", "addr": "3", "name": "Heater S000003", "serial": "S000003"},
     ]
     assert radio.calls[-1] == ("pair", "10.0.0.5", 2323, site_net)
     assert radio.kwargs[-1]["dialects"] == PAIRING_DIALECTS

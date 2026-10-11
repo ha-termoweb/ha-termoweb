@@ -45,7 +45,7 @@ from .entity import (
     resolve_acm_boost_setpoint,
     resolve_boost_runtime_minutes,
 )
-from .identifiers import build_heater_unique_id
+from .identifiers import build_heater_unique_id, node_key
 from .inventory import Inventory
 from .nodes import HeaterNode, normalize_node_addr, normalize_node_type
 from .runtime import require_runtime
@@ -102,7 +102,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         unique_id = build_heater_unique_id(
             dev_id,
             canonical_type,
-            addr,
+            node_key(inventory, canonical_type, addr),
             suffix=":climate",
         )
         entity_cls: type[HeaterClimateEntity]

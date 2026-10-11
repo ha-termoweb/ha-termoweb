@@ -8,7 +8,7 @@ import platform
 import typing
 from typing import Any, Final
 
-from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
@@ -61,6 +61,21 @@ def _extract_websocket_clients(runtime: EntryRuntime) -> list[dict[str, Any]]:
     return clients
 
 
+def _redact_serial_names(
+    entries: typing.Iterable[Mapping[str, Any]], nodes: typing.Iterable[Any]
+) -> list[dict[str, Any]]:
+    """Return the node entries with radio heater serials masked in their names."""
+
+    serials = [serial for node in nodes if (serial := getattr(node, "serial", None))]
+    redacted = []
+    for entry in entries:
+        name = entry.get("name")
+        for serial in serials if isinstance(name, str) else ():
+            name = name.replace(serial, REDACTED)
+        redacted.append({**entry, "name": name})
+    return redacted
+
+
 def _radio_section(runtime: EntryRuntime, entry: ConfigEntry) -> dict[str, Any] | None:
     """Return the backend's own facts plus the last radio survey and capture."""
 
@@ -88,7 +103,7 @@ async def async_get_config_entry_diagnostics(
     snapshot = inventory.snapshot()
     raw_count = snapshot.raw_count
     filtered_count = snapshot.filtered_count
-    node_inventory = list(snapshot.node_inventory)
+    node_inventory = _redact_serial_names(snapshot.node_inventory, inventory.nodes)
 
     installation_section: dict[str, Any] = {
         "node_inventory": node_inventory,

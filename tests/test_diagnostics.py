@@ -27,6 +27,7 @@ from custom_components.termoweb.domain.state import GeoData
 from tests.fakes.cloud import DEV_ID, PASSWORD, USERNAME, VERSION, FakeCloud
 from tests.fakes.radio_link import FakeRadioLink, gateway_info
 from tests.fakes.runtime import build_entry_runtime
+from tests.fakes.sensors import fake_radio_links, radio_entry, setup_entry
 
 # Synthetic location only.
 GEO = GeoData(
@@ -178,6 +179,28 @@ async def test_diagnostics_radio_section_without_mac_or_network_id(
     text = repr(radio)
     assert "AA:BB" not in text
     assert "1234" not in text
+
+
+async def test_diagnostics_redact_radio_heater_serials(
+    hass: HomeAssistant, hass_client: Any
+) -> None:
+    """A radio heater's serial is redacted, also inside its serial-based name."""
+    nodes = [
+        {"type": "htr", "addr": "6", "name": "Heater X123456", "serial": "X123456"},
+        {"type": "htr", "addr": "7", "name": "Hall"},
+    ]
+    entry = radio_entry("radio", nodes)
+    with fake_radio_links():
+        await setup_entry(hass, entry)
+        result = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert result["site"]["node_inventory"] == [
+        {"name": f"Heater {REDACTED}", "addr": "6", "type": "htr"},
+        {"name": "Hall", "addr": "7", "type": "htr"},
+    ]
+    assert "X123456" not in json.dumps(result)
 
 
 LOGGER = "custom_components.termoweb"

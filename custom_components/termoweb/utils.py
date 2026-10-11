@@ -8,6 +8,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration
 
 from .const import CLOUD_CONFIGURATION_URL, DOMAIN, get_brand_label
+from .identifiers import build_node_device_identifier
 from .nodes import normalize_node_addr
 from .runtime import EntryRuntime, require_runtime
 
@@ -188,21 +189,24 @@ def build_node_device_info(
     hass: HomeAssistant | None,
     entry_id: str | None,
     dev_id: str,
-    addr: str,
+    key: str,
     *,
     name: str,
     node_type: str,
+    serial: str | None = None,
 ) -> DeviceInfo:
-    """Return ``DeviceInfo`` for a heater, accumulator or thermostat node."""
+    """Return ``DeviceInfo`` for a heater, accumulator or thermostat node (``key``: node_key)."""
 
     info: DeviceInfo = DeviceInfo(
-        identifiers={(DOMAIN, str(dev_id), str(addr))},
+        identifiers={build_node_device_identifier(dev_id, key)},
         name=name,
         manufacturer="TermoWeb",
         model=_NODE_MODELS.get(node_type, "Heater"),
     )
+    if serial:
+        info["serial_number"] = serial
     _link_via_device(info, hass, entry_id, (DOMAIN, str(dev_id)))
-    translate_default_device_name(info, str(addr))
+    translate_default_device_name(info, str(key))
     return apply_entry_device_overrides(info, _entry_gateway_record(hass, entry_id))
 
 

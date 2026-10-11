@@ -200,6 +200,7 @@
       "heater_temperature": { "name": "Temperature" },
       "heater_energy_total": { "name": "Energy" },
       "heater_power": { "name": "Power" },
+      "radio_address": { "name": "Radio address" },
       "power_monitor_energy": { "name": "Energy" },
       "power_monitor_power": { "name": "Power" },
       "installation_total_energy": { "name": "Total energy" },

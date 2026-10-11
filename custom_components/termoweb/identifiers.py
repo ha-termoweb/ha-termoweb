@@ -5,8 +5,13 @@ Every entity unique ID follows one scheme and is built only here:
     termoweb:<dev_id>[:<device>]:<key>
 
 ``<device>`` names the device the entity belongs to: nothing for the gateway,
-``site`` for the site (installation), ``<node_type>:<addr>`` for a node.
+``site`` for the site (installation), ``<node_type>:<node_key>`` for a node.
 ``<key>`` is one snake_case token. ``migrate_unique_id`` maps older formats.
+
+A node's key (:func:`node_key`) is its address, except for a radio heater whose
+serial is known: then it is the serial, so a heater that is paired again at
+another address keeps its devices and entities. Node devices use the same key:
+``(termoweb, <dev_id>, <node_key>)``.
 """
 
 from __future__ import annotations
@@ -90,7 +95,7 @@ def build_heater_unique_id(
     *,
     suffix: str | None = None,
 ) -> str:
-    """Return the canonical unique ID for a node entity (``suffix`` is its key)."""
+    """Return the unique ID for a node entity; ``addr`` is its node_key, ``suffix`` its key."""
 
     dev = normalize_node_addr(dev_id)
     node = normalize_node_type(node_type)
@@ -100,6 +105,30 @@ def build_heater_unique_id(
 
     suffix_str = f":{_key(suffix)}" if suffix else ""
     return f"{DOMAIN}:{dev}:{node}:{address}{suffix_str}"
+
+
+def node_key(inventory: Any, node_type: Any, addr: Any) -> str:
+    """Return a node's ID key: its serial when the inventory knows one, else its address."""
+
+    serial = None if inventory is None else inventory.node_serial(node_type, addr)
+    return serial or normalize_node_addr(addr, use_default_when_falsey=True)
+
+
+def build_node_device_identifier(dev_id: Any, key: Any) -> tuple[str, str, str]:
+    """Return the device registry identifier of the node with ID key ``key``."""
+
+    return (DOMAIN, str(dev_id), str(key))
+
+
+def rekey_unique_id(
+    unique_id: str, dev_id: Any, node_type: Any, old_key: Any, new_key: Any
+) -> str | None:
+    """Return ``unique_id`` moved from node key ``old_key`` to ``new_key``, else None."""
+
+    old = build_heater_unique_id(dev_id, node_type, old_key)
+    if unique_id != old and not unique_id.startswith(f"{old}:"):
+        return None
+    return build_heater_unique_id(dev_id, node_type, new_key) + unique_id[len(old) :]
 
 
 def build_heater_energy_unique_id(dev_id: Any, node_type: Any, addr: Any) -> str:

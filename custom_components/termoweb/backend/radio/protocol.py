@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import enum
 import math
+import re
 
 from .dialect import DIALECT_B, Dialect, Frame
 
@@ -162,6 +163,9 @@ IDENTITY_SHORT_FORM = 0x55
 IDENTITY_RATED_POWER_INDEX = 10  # short form: rated power in 100 W units
 RATED_POWER_UNIT_W = 100
 RATED_POWER_RANGE_W = (100, 4000)  # anything else is not taken as a rating
+SERIAL_HEX_BYTES = 4  # no ASCII serial: the identity's last 4 bytes as 8 hex digits
+# An ASCII serial usable as a name and identifier: no spaces or colons, has a digit.
+_SERIAL_RE = re.compile(r"(?=[^0-9]*[0-9])[A-Za-z0-9._-]{4,32}")
 
 ENERGY_MARKER = OP_ENERGY + 1  # BD
 
@@ -520,6 +524,11 @@ class IdentityRecord:
         return self.tail[start:end].decode("ascii") if start < end else None
 
     @property
+    def serial(self) -> str:
+        """Return the heater's serial token (see :func:`serial_token`)."""
+        return serial_token(self.tail, self.ascii_serial)
+
+    @property
     def rated_power_w(self) -> int | None:
         """Return the short form's rated power in watts (byte 10 x 100 W), or None."""
         if self.form != "short":
@@ -527,6 +536,13 @@ class IdentityRecord:
         watts = self.raw[IDENTITY_RATED_POWER_INDEX] * RATED_POWER_UNIT_W
         low, high = RATED_POWER_RANGE_W
         return watts if low <= watts <= high else None
+
+
+def serial_token(identity: bytes, ascii_serial: str | None = None) -> str:
+    """Return a heater's stable serial: its ASCII serial, else the identity's last 8 hex digits."""
+    if ascii_serial is not None and _SERIAL_RE.fullmatch(ascii_serial):
+        return ascii_serial
+    return bytes(identity)[-SERIAL_HEX_BYTES:].hex()
 
 
 def decode_identity(payload: bytes) -> IdentityRecord | None:

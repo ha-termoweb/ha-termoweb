@@ -15,8 +15,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import instance_id
 
-from .backend.radio.pairing import site_network_id
+from .backend.radio.pairing import PairedHeater, site_network_id
 from .backend.radio_client import RadioUnsupportedError
+from .backend.sanitize import mask_identifier
 from .const import CONF_NODES, CONF_RADIO_RESTORE
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,10 +32,33 @@ RESTORE_MODES = {
 }
 
 
-def radio_node(addr: int) -> dict[str, str]:
+# Default device name per radio node type; a thermostat would be "Thermostat <serial>".
+_DEFAULT_NAMES = {"htr": "Heater", "thm": "Thermostat"}
+
+
+def default_node_name(node_type: str, token: Any) -> str:
+    """Return a radio node's default name: "Heater <serial>" (or its address)."""
+
+    return f"{_DEFAULT_NAMES.get(node_type, 'Heater')} {token}"
+
+
+def radio_node(addr: int, serial: str | None = None) -> dict[str, str]:
     """Return the stored node entry for a heater with radio id ``addr``."""
 
-    return {"type": "htr", "addr": str(addr), "name": f"Heater {addr}"}
+    node = {"type": "htr", "addr": str(addr), "name": default_node_name("htr", addr)}
+    return with_serial(node, serial) if serial else node
+
+
+def with_serial(node: Mapping[str, Any], serial: str) -> dict[str, Any]:
+    """Return ``node`` carrying ``serial``; an address-based default name follows it."""
+
+    updated = {**node, "serial": serial}
+    node_type = str(node.get("type") or "htr")
+    if not node.get("name") or node["name"] == default_node_name(
+        node_type, node.get("addr")
+    ):
+        updated["name"] = default_node_name(node_type, serial)
+    return updated
 
 
 async def async_site_network_id(hass: HomeAssistant, gateway_id: str) -> bytes:
@@ -141,18 +165,44 @@ async def async_reset_keeping_settings(
     return snapshot is not None
 
 
-def add_nodes(hass: HomeAssistant, entry: ConfigEntry, addrs: Iterable[int]) -> bool:
-    """Add heaters to the entry's node list and reload it; False if none were new."""
+def add_nodes(
+    hass: HomeAssistant, entry: ConfigEntry, heaters: Iterable[PairedHeater]
+) -> bool:
+    """Add paired heaters to the entry's nodes and reload it; False if nothing changed.
+
+    A heater whose serial is already stored moves that node to its new address,
+    so its devices and entities (keyed by the serial) stay the same.
+    """
 
     nodes = [dict(node) for node in entry.data.get(CONF_NODES, [])]
+    by_serial = {node["serial"]: node for node in nodes if node.get("serial")}
     known = {str(node.get("addr")) for node in nodes}
-    new = [radio_node(addr) for addr in sorted(set(addrs)) if str(addr) not in known]
-    if not new:
+    added = moved = 0
+    for heater in sorted(heaters, key=lambda heater: heater.node_id):
+        addr = str(heater.node_id)
+        stored = by_serial.get(heater.serial) if heater.serial else None
+        if stored is not None:
+            if stored["addr"] != addr:
+                _LOGGER.info(
+                    "Heater %s moved from radio id %s to %s",
+                    mask_identifier(heater.serial),
+                    stored["addr"],
+                    addr,
+                )
+                stored["addr"] = addr
+                moved += 1
+        elif addr not in known:
+            nodes.append(radio_node(heater.node_id, heater.serial))
+            added += 1
+        known.add(addr)
+    if not added and not moved:
         return False
     hass.config_entries.async_update_entry(
-        entry, data={**entry.data, CONF_NODES: nodes + new}
+        entry, data={**entry.data, CONF_NODES: nodes}
     )
-    _LOGGER.info("Added %d paired heater(s); reloading the entry", len(new))
+    _LOGGER.info(
+        "Added %d and moved %d paired heater(s); reloading the entry", added, moved
+    )
     # The inventory is fixed for the entry's lifetime: a reload picks the nodes up.
     hass.config_entries.async_schedule_reload(entry.entry_id)
     return True
@@ -162,10 +212,12 @@ __all__ = [
     "add_nodes",
     "async_reset_keeping_settings",
     "async_site_network_id",
+    "default_node_name",
     "heater_snapshot",
     "radio_node",
     "saved_snapshot",
     "settings_snapshot",
     "store_snapshot",
     "with_manual_target",
+    "with_serial",
 ]

@@ -11,7 +11,12 @@ from homeassistant.config_entries import ConfigEntry
 import voluptuous as vol
 
 from .backend.radio import RadioLinkError
-from .backend.radio.pairing import IDLE_STOP_S, PAIR_WINDOW_S, PairingError
+from .backend.radio.pairing import (
+    IDLE_STOP_S,
+    PAIR_WINDOW_S,
+    PairedHeater,
+    PairingError,
+)
 from .const import CONF_NODES
 from .radio_pairing import add_nodes
 from .radio_rehome import RehomeError, async_rehome, rehome_summary
@@ -28,7 +33,7 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
         self.entry = entry
         self._pair_task: asyncio.Task[Any] | None = None
         self._pair_error: str | None = None
-        self._paired: list[int] = []
+        self._paired: list[PairedHeater] = []
         self._rehome_task: asyncio.Task[Any] | None = None
         self._rehome_summary = ""
         self._rehome_summary_shown = False
@@ -77,7 +82,7 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
         except Exception:
             _LOGGER.exception("Unexpected error while pairing radio heaters")
             paired, self._pair_error = [], "unknown"
-        self._paired = [heater.node_id for heater in paired]
+        self._paired = list(paired)
         if not self._paired and self._pair_error is None:
             self._pair_error = "no_heaters_paired"
         return self.async_show_progress_done(next_step_id="pair_done")

@@ -96,7 +96,7 @@ def normalize_node_addr(
 class Node:
     """Base representation of a TermoWeb node."""
 
-    __slots__ = ("_node_name", "addr", "type")
+    __slots__ = ("_node_name", "addr", "serial", "type")
     NODE_TYPE = ""
 
     def __init__(
@@ -124,6 +124,7 @@ class Node:
 
         self.addr = addr_str
         self.type = resolved_type
+        self.serial: str | None = None  # radio heaters: stable serial token
         self._node_name = ""
         self.name = name if name is not None else ""
 
@@ -278,6 +279,9 @@ def build_node_inventory(raw_nodes: Any) -> list[Node]:
             )
             continue
 
+        serial = payload.get("serial")
+        if isinstance(serial, str) and serial.strip():
+            node.serial = serial.strip()
         inventory.append(node)
 
     return inventory

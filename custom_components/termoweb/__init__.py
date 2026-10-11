@@ -49,6 +49,7 @@ from .energy import energy_import_store
 from .identifiers import build_cloud_unique_id, migrate_unique_id
 from .inventory import Inventory
 from .nodes import build_node_inventory, normalize_node_addr, normalize_node_type
+from .radio_identity import async_learn_serials, async_rekey_inventory
 from .runtime import EntryRuntime, TermoWebConfigEntry
 from .services.energy_history import async_register_import_energy_history_service
 from .services.radio_capture import async_register_radio_capture_service
@@ -222,6 +223,9 @@ async def async_setup_entry(  # noqa: C901
             geo_data=geo_data,
         )
 
+    if backend.capabilities.local_radio:
+        # Before the inventory is frozen: heaters are keyed by serial once known.
+        await async_learn_serials(hass, entry, client)
     try:
         nodes = await client.get_nodes(dev_id)
     except BackendAuthError as err:
@@ -232,6 +236,7 @@ async def async_setup_entry(  # noqa: C901
     # Inventory-centric design: build and freeze the gateway/node topology once
     # during setup so every runtime component can trust the shared metadata.
     inventory = Inventory(dev_id, node_inventory)
+    async_rekey_inventory(hass, entry.entry_id, inventory)
     _log_unknown_node_types(inventory)
     if inventory.nodes:
         type_counts = Counter(node.type for node in inventory.nodes)

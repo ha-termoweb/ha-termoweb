@@ -39,6 +39,7 @@ from custom_components.termoweb.identifiers import (
     build_installation_entity_unique_id,
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
+    node_key,
 )
 from custom_components.termoweb.inventory import Inventory
 from custom_components.termoweb.nodes import (
@@ -146,12 +147,31 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 include_energy=capabilities.energy,
             )
         )
+        if capabilities.local_radio:
+            new_entities.append(
+                RadioAddressSensor(
+                    coordinator,
+                    entry.entry_id,
+                    dev_id,
+                    addr,
+                    None,
+                    build_heater_unique_id(
+                        dev_id,
+                        canonical_type,
+                        node_key(inventory, canonical_type, addr),
+                        suffix="radio_address",
+                    ),
+                    device_name=base_name,
+                    node_type=canonical_type,
+                    inventory=inventory,
+                )
+            )
 
         if canonical_type == "thm":
             battery_unique_id = build_heater_unique_id(
                 dev_id,
                 canonical_type,
-                addr,
+                node_key(inventory, canonical_type, addr),
                 suffix=":battery",
             )
             new_entities.append(
@@ -273,6 +293,20 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
             "addr": self._addr,
             "units": getattr(state, "units", None),
         }
+
+
+class RadioAddressSensor(HeaterNodeBase, SensorEntity):
+    """Diagnostic sensor showing a radio heater's current pairing address."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _attr_has_entity_name = True
+    _attr_translation_key = "radio_address"
+
+    @property
+    def native_value(self) -> int | str:
+        """Return the heater's radio address; it changes when the heater re-pairs."""
+        return int(self._addr) if self._addr.isdigit() else self._addr
 
 
 class ThermostatBatterySensor(HeaterNodeBase, SensorEntity):
@@ -629,10 +663,11 @@ def _create_heater_sensors(
     canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
 
     target_type = canonical_type or "htr"
+    key = node_key(inventory, target_type, canonical_addr)
     temperature_unique_id = build_heater_unique_id(
         dev_id,
         target_type,
-        canonical_addr,
+        key,
         suffix=":temp",
     )
 
@@ -653,19 +688,19 @@ def _create_heater_sensors(
         charging_unique_id = build_heater_unique_id(
             dev_id,
             target_type,
-            canonical_addr,
+            key,
             suffix=":charging",
         )
         current_charge_unique_id = build_heater_unique_id(
             dev_id,
             target_type,
-            canonical_addr,
+            key,
             suffix=":current_charge_per",
         )
         target_charge_unique_id = build_heater_unique_id(
             dev_id,
             target_type,
-            canonical_addr,
+            key,
             suffix=":target_charge_per",
         )
         sensors.extend(
@@ -707,13 +742,9 @@ def _create_heater_sensors(
         )
 
     if target_type != "thm" and include_energy:
-        energy_unique_id = build_heater_energy_unique_id(
-            dev_id,
-            target_type,
-            canonical_addr,
-        )
+        energy_unique_id = build_heater_energy_unique_id(dev_id, target_type, key)
         power_unique_id = build_heater_unique_id(
-            dev_id, target_type, canonical_addr, suffix="power"
+            dev_id, target_type, key, suffix="power"
         )
         sensors.extend(
             (
@@ -765,6 +796,7 @@ def _create_boost_sensors(
     """Create the boost-related sensors for a heater node."""
 
     uid_type = node_type or "htr"
+    key = node_key(inventory, uid_type, addr)
     minutes = minutes_cls(
         coordinator,
         entry_id,
@@ -772,7 +804,7 @@ def _create_boost_sensors(
         addr,
         name=None,
         unique_id=build_heater_unique_id(
-            dev_id, uid_type, addr, suffix="boost_minutes_remaining"
+            dev_id, uid_type, key, suffix="boost_minutes_remaining"
         ),
         device_name=base_name,
         node_type=node_type,
@@ -784,7 +816,7 @@ def _create_boost_sensors(
         dev_id,
         addr,
         name=None,
-        unique_id=build_heater_unique_id(dev_id, uid_type, addr, suffix="boost_end"),
+        unique_id=build_heater_unique_id(dev_id, uid_type, key, suffix="boost_end"),
         device_name=base_name,
         node_type=node_type,
         inventory=inventory,

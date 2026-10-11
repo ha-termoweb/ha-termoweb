@@ -382,8 +382,9 @@ async def test_radio_energy_and_power_use_the_rating_from_the_heater_identity(
     with fake_radio_links(_rated_heater, clock=lambda: now[0]) as links:
         await setup_entry(hass, entry)
         await hass.async_block_till_done()
-        assert links[0].payloads()[:4] == [b"\xb8", b"\xb0", b"\x5a", b"\xbc"]
-        energy = "sensor.heater_6_energy"
+        # Setup reads the identity first: the serial names the heater.
+        assert links[0].payloads()[:4] == [b"\x5a", b"\xb8", b"\xb0", b"\xbc"]
+        energy = "sensor.heater_x123456_energy"
         assert float(hass.states.get(energy).state) == 0.0
 
         # 15 minutes heating at a 12 % duty on a 1500 W rating: 45 Wh, 180 W.
@@ -393,7 +394,7 @@ async def test_radio_energy_and_power_use_the_rating_from_the_heater_identity(
         await runtime.energy_coordinator.async_refresh()
         await hass.async_block_till_done()
         assert float(hass.states.get(energy).state) == pytest.approx(0.045)
-        power = hass.states.get("sensor.heater_6_power")
+        power = hass.states.get("sensor.heater_x123456_power")
         assert float(power.state) == pytest.approx(180.0)
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
