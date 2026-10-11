@@ -21,22 +21,13 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.termoweb import radio_discovery
 from custom_components.termoweb.backend.radio import DIALECT_B, RadioLinkError
-from custom_components.termoweb.backend.radio.discovery import NetworkSighting
 from custom_components.termoweb.backend.radio.pairing import PairedHeater
 from custom_components.termoweb.backend.radio.survey import analyse
-from custom_components.termoweb.config_flow_radio import (
-    RadioSetupError,
-    UnknownDialectError,
-)
+from custom_components.termoweb.backend.radio_client import RadioError
 from custom_components.termoweb.const import DOMAIN
+from custom_components.termoweb.radio_pairing import async_site_network_id
 from tests.fakes.cloud import VERSION
-from tests.fakes.radio_link import (
-    NET,
-    REGISTRATION,
-    STATUS_SHORT,
-    FakeRadioLink,
-    received,
-)
+from tests.fakes.radio_link import REGISTRATION, STATUS_SHORT, FakeRadioLink, received
 from tests.fakes.radio_setup import record_reloads
 from tests.fakes.sensors import fake_radio_links, radio_entry, setup_entry
 
@@ -123,87 +114,188 @@ def _no_scan_gap(monkeypatch: pytest.MonkeyPatch) -> None:
 
 # --- an entry that does not know its heater network yet ---------------------------
 
+FOREIGN = bytes.fromhex("5678")  # synthetic network of another installation
 
-async def test_setup_does_not_wait_for_the_network_and_unload_stops_the_search(
-    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+
+async def test_learning_entry_runs_on_the_site_network_without_scanning(
+    hass: HomeAssistant,
 ) -> None:
-    """Setup returns while listening runs; unloading cancels the listening."""
-    started, cancelled = asyncio.Event(), asyncio.Event()
-
-    async def _listen_forever(*_args: Any, **_kwargs: Any) -> Any:
-        started.set()
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            cancelled.set()
-            raise
-
-    monkeypatch.setattr(radio_discovery, "find_network", _listen_forever)
+    """No network yet: the entry runs on its own network and asks no heater."""
     entry = _pending_entry()
+    with fake_radio_links(_heaters(4)) as links:
+        await setup_entry(hass, entry)
 
-    await setup_entry(hass, entry)
-
-    assert entry.state is ConfigEntryState.LOADED
-    assert started.is_set()
-    await _unload(hass, entry)
-    assert cancelled.is_set()
-    assert entry.state is ConfigEntryState.NOT_LOADED
+        assert entry.state is ConfigEntryState.LOADED
+        site = await async_site_network_id(hass, "test")
+        assert links[0].network_id == site and links[0].dialect is DIALECT_B
+        assert not [dst for dst, payload in links[0].sent if payload == b"\x5a"]
+        await _unload(hass, entry)  # the pending survey timer goes with it
 
 
-async def test_heard_network_is_stored_and_the_entry_reloads(
+async def test_network_heard_twice_is_stored_and_the_entry_reloads(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The network heard in the background is stored; a reload then finds heaters."""
-    calls: list[tuple[Any, ...]] = []
-    outcomes: list[Any] = [
-        RadioSetupError("no_traffic"),
-        RadioLinkError("gateway busy"),
-        RuntimeError("bug"),
-        NetworkSighting(DIALECT_B, NET, frozenset({7})),
-    ]
-
-    async def _find(*args: Any, **kwargs: Any) -> Any:
-        calls.append((*args, kwargs["link_factory"]))
-        outcome = outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-    monkeypatch.setattr(radio_discovery, "find_network", _find)
-    monkeypatch.setattr(radio_discovery, "NETWORK_RETRY_S", 0.0)
+    """Frames from a heater on another network: stored once it repeats."""
     reloads = record_reloads(monkeypatch, hass)
     entry = _pending_entry(dialect="B")
+    with fake_radio_links() as links:
+        await setup_entry(hass, entry)
+        links[0].deliver(received(7, REGISTRATION, network_id=b"\x00\x00"))  # noise
+        links[0].deliver(received(7, REGISTRATION, network_id=FOREIGN))
+        await hass.async_block_till_done()
+        assert reloads == []
+        links[0].deliver(received(7, REGISTRATION, network_id=FOREIGN, dst=9))
+        links[0].deliver(received(7, REGISTRATION, network_id=FOREIGN))  # done
+        await hass.async_block_till_done()
 
-    await _setup(hass, entry)
+        assert entry.data["dialect"] == "B" and entry.data["network_id"] == "5678"
+        assert reloads == [entry.entry_id]
+        await _unload(hass, entry)
 
-    assert entry.data["dialect"] == "B" and entry.data["network_id"] == "1234"
+
+async def test_stock_nanocul_runs_dialect_a_at_once(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stock nanoCUL firmware speaks dialect A only, whose network is fixed."""
+
+    async def _probe(device: str) -> tuple[str, bool]:
+        return "stick", capable
+
+    monkeypatch.setattr(radio_discovery, "probe_nanocul", _probe)
+    data = {"radio_type": "nanocul", "device": "/dev/ttyUSB0"}
+    capable = True
+    entry = _pending_entry(**data)
+    entry.add_to_hass(hass)
+    site = await async_site_network_id(hass, "test")
+    assert await radio_discovery.async_learning_network(hass, entry) == ("B", site)
+    capable = False
+    assert await radio_discovery.async_learning_network(hass, entry) is None
+    assert entry.data["dialect"] == "A" and entry.data["network_id"] == "1B30"
+
+
+async def test_unplugged_stick_retries_setup(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A nanoCUL that cannot be opened to check its firmware: setup retries."""
+
+    async def _probe(device: str) -> tuple[str, bool]:
+        raise RadioLinkError("cannot open the port")
+
+    monkeypatch.setattr(radio_discovery, "probe_nanocul", _probe)
+    entry = _pending_entry(radio_type="nanocul", device="/dev/ttyUSB0")
+    entry.add_to_hass(hass)
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+
+
+class _SurveyClient:
+    """A learning entry's client whose surveys are scripted."""
+
+    dialect = DIALECT_B
+
+    def __init__(self, *outcomes: Any) -> None:
+        self.outcomes = list(outcomes)
+
+    async def async_survey(self, seconds: int) -> list[Any]:
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return []
+
+
+def _report(verdict: str, dialect: str | None = None, nets: tuple = ()) -> Any:
+    """Return a survey report with the given verdict, dialect and network ids."""
+    report = analyse([])
+    return report.__class__(
+        **{
+            **report.__dict__,
+            "verdict": verdict,
+            "dialect": dialect,
+            "network_ids": nets,
+        }
+    )
+
+
+async def _learner(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, reports: list[Any], *outcomes
+) -> Any:
+    """Return a learner for a stored pending entry whose surveys give ``reports``."""
+    entry = _pending_entry()
+    entry.add_to_hass(hass)
+
+    async def _analyse(_hass: HomeAssistant, _bursts: Any) -> Any:
+        return reports.pop(0)
+
+    monkeypatch.setattr(radio_discovery, "async_analyse", _analyse)
+    client = _SurveyClient(*(outcomes or [[]] * len(reports)))
+    return radio_discovery.NetworkLearner(hass, entry, client), entry
+
+
+@pytest.mark.parametrize(
+    ("report", "stored"),
+    [
+        (_report("known", "B", ("0000", "5678")), ("B", "5678")),
+        (_report("known", "A"), ("A", "1B30")),
+    ],
+)
+async def test_survey_stores_the_network_of_a_known_dialect(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, report: Any, stored: tuple
+) -> None:
+    """A survey that decodes heaters stores their network (not a pairing sweep)."""
+    reloads = record_reloads(monkeypatch, hass)
+    learner, entry = await _learner(hass, monkeypatch, [report])
+    await learner.async_survey()
+    assert (entry.data["dialect"], entry.data["network_id"]) == stored
     assert reloads == [entry.entry_id]
-    assert len(calls) == 4  # silence, a busy gateway and a bug are retried
-    assert calls[0][:4] == ("10.0.0.5", 2323, "B", None)
-    await _unload(hass, entry)
+    learner.async_heard(FOREIGN)  # done: ignored
+    learner.async_heard(FOREIGN)
+    assert reloads == [entry.entry_id]
+
+
+async def test_survey_runs_again_until_something_is_heard(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Silence, sweeps only and a busy gateway are surveyed again 10 minutes later."""
+    reports = [_report("silent"), _report("known", "B", ("0000",))]
+    learner, entry = await _learner(
+        hass, monkeypatch, reports, [], RadioLinkError("busy"), []
+    )
+    learner.async_schedule_survey()
+    for _ in range(3):
+        async_fire_time_changed(
+            hass,
+            dt_util.utcnow() + timedelta(seconds=radio_discovery.NETWORK_RETRY_S + 1),
+        )
+        await hass.async_block_till_done()
+    assert learner._unsub_timer is not None  # still learning
+    learner.async_stop()
+    assert "network_id" not in entry.data
+
+
+async def test_survey_stops_without_firmware_support_or_once_paired(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Firmware without a survey ends surveys; a known network skips them."""
+    learner, entry = await _learner(hass, monkeypatch, [], RadioError("no raw survey"))
+    await learner.async_survey()
+    assert learner._unsub_timer is None
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, "dialect": "B", "network_id": "1234"}
+    )
+    await learner.async_survey()  # nothing to learn any more
+    learner._done = False
+    learner._adopt("B", FOREIGN)  # a heater was paired meanwhile: kept
+    assert entry.data["network_id"] == "1234"
 
 
 async def test_unknown_dialect_saves_a_report_and_tells_the_user(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Bursts no known dialect decodes: a report is saved, listening stops."""
+    """Bursts no known dialect decodes: a report is saved, learning stops."""
     hass.config.config_dir = str(tmp_path)
-    report = analyse([])
-    calls: list[Any] = []
+    learner, entry = await _learner(hass, monkeypatch, [_report("undecodable")])
+    await learner.async_survey()
 
-    async def _find(*_args: Any, **kwargs: Any) -> Any:
-        calls.append(kwargs)
-        assert (await kwargs["analyse_survey"]([])).verdict == "silent"  # executor
-        raise UnknownDialectError(
-            report.__class__(**{**report.__dict__, "verdict": "undecodable"})
-        )
-
-    monkeypatch.setattr(radio_discovery, "find_network", _find)
-    entry = _pending_entry()
-
-    await _setup(hass, entry)
-
-    assert len(calls) == 1
     files = list(tmp_path.glob("termoweb_radio_survey_setup_*.json"))
     saved = json.loads(files[0].read_text())
     assert saved["integration_version"] == VERSION
@@ -212,7 +304,8 @@ async def test_unknown_dialect_saves_a_report_and_tells_the_user(
     note = _notifications(hass)[f"{DOMAIN}_{entry.entry_id}_unknown_dialect"]
     assert str(files[0]) in note["message"]
     assert "network_id" not in entry.data
-    await _unload(hass, entry)
+    learner.async_schedule_survey()
+    assert learner._unsub_timer is None
 
 
 async def test_unknown_dialect_report_that_cannot_be_saved(
@@ -220,16 +313,10 @@ async def test_unknown_dialect_report_that_cannot_be_saved(
 ) -> None:
     """When the report cannot be written the notification says so."""
     hass.config.config_dir = str(tmp_path / "missing")
-
-    async def _find(*_args: Any, **_kwargs: Any) -> Any:
-        raise UnknownDialectError(analyse([]))
-
-    monkeypatch.setattr(radio_discovery, "find_network", _find)
-    entry = _pending_entry()
-    await _setup(hass, entry)
+    learner, entry = await _learner(hass, monkeypatch, [_report("undecodable")])
+    await learner.async_survey()
     note = _notifications(hass)[f"{DOMAIN}_{entry.entry_id}_unknown_dialect"]
     assert "could not be saved" in note["message"]
-    await _unload(hass, entry)
 
 
 # --- an entry that knows its network ------------------------------------------------
@@ -463,22 +550,19 @@ async def test_paired_heaters_join_the_batch_without_a_second_identity_read(
 
 
 async def test_new_gateway_finds_its_network_then_its_heaters(
-    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+    hass: HomeAssistant,
 ) -> None:
     """End to end: network heard, reload, scan, heater added, reload, heater shown."""
-
-    async def _find(*_args: Any, **_kwargs: Any) -> Any:
-        return NetworkSighting(DIALECT_B, NET)
-
-    monkeypatch.setattr(radio_discovery, "find_network", _find)
     entry = _pending_entry()
-    with fake_radio_links(_heaters(4)):
-        await _setup(hass, entry)  # stores the network and reloads
-        await _settle(hass)  # scan, reload
-        await _settle(hass)
+    with fake_radio_links(_heaters(4)) as links:
+        await setup_entry(hass, entry)
+        for _ in range(2):
+            links[0].deliver(received(7, REGISTRATION, network_id=FOREIGN))
+        await _settle(hass)  # stores the network, reloads, scans
+        await _settle(hass)  # reload with the heater
 
         assert entry.state is ConfigEntryState.LOADED
-        assert entry.data["network_id"] == "1234"
+        assert entry.data["network_id"] == "5678"
         assert [node["serial"] for node in entry.data["nodes"]] == ["S000004"]
         assert hass.states.get("climate.heater_s000004") is not None
         await _unload(hass, entry)

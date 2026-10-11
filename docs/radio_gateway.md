@@ -180,6 +180,33 @@ networks block discovery), add it by hand:
 5. A heater that was quiet is added later, as soon as it talks. You do not
    need to do anything.
 
+### Add new heaters
+
+New heaters pair by themselves. During the first 30 minutes you do not
+start anything in Home Assistant.
+
+1. Put the heater into pairing mode **within 30 minutes of adding the
+   gateway**. The heater's manual tells you which buttons to press.
+   Later, first press **Pair new heaters** on the gateway device
+   (**Settings → Devices & Services → TermoWeb →** your gateway). Pairing
+   is then open for 10 minutes.
+2. Wait about 10 seconds. The heater is paired and gets its clock.
+3. To add more heaters, put the next heater into pairing mode. Do one heater
+   at a time. Each press of **Pair new heaters** gives you 10 more minutes.
+4. After a few seconds you get a notification: "Found TermoWeb heater ...".
+   The heater appears under **Devices**.
+
+The gateway device shows **Pairing open**. It is on while heaters are
+paired. Its attribute **Ends at** shows when pairing closes. When pairing is
+closed, a heater in pairing mode is ignored. This keeps a neighbour's heater
+out of your installation.
+
+A heater that you had before keeps its device, entities and name when you
+pair it again, and it gets its saved settings back.
+
+If the gateway has not found any heater yet, restarting Home Assistant (or
+reloading the integration) opens pairing for 30 minutes again.
+
 ### Pair new heaters
 
 1. Read the steps on the screen, then press **Submit**. You have 5 minutes.
@@ -202,11 +229,14 @@ If no heater shows up after 15 minutes:
 - Turn one heater's temperature up so that it starts heating. A heater that
   wants heat talks every few minutes.
 - Move the gateway closer to a heater (a few metres is best).
+- Or pair the heater with this gateway: press **Pair new heaters** on the
+  gateway device and put the heater into pairing mode (see "Add new
+  heaters"). This also works for a heater that is idle, or that belongs to
+  another gateway or another Home Assistant.
 
-The integration keeps listening by itself: it tries again every 10 minutes.
-
-When it hears nothing, it also records the radio signals for 2 minutes. It
-finds your heaters if their signal is weak. If it hears signals it cannot
+The integration keeps listening by itself. Every 10 minutes it also records
+the radio signals for 2 minutes. It
+then finds your heaters even if their signal is weak. If it hears signals it cannot
 read, you get the notification "TermoWeb heaters not recognised", and it
 stops listening. This has two possible causes:
 
@@ -272,14 +302,14 @@ If you found your heaters with **Add the gateway and find my heaters**, they
 still use the radio network of their old TermoWeb gateway. You can move them
 to a network of their own. Only dialect-B heaters can be moved.
 
-1. Open the integration and choose **Configure**.
-2. Choose **Move heaters to this installation's own network**.
-3. Read the steps on the screen and press **Submit**.
-4. Wait about 10 seconds. Home Assistant saves the settings of each heater
+1. Open the integration and choose **Configure**. The screen **Move heaters
+   to this installation's own network** opens.
+2. Read the steps on the screen and press **Submit**.
+3. Wait about 10 seconds. Home Assistant saves the settings of each heater
    and resets it.
-5. Put one heater into pairing mode. Wait about 10 seconds, then the next
+4. Put one heater into pairing mode. Wait about 10 seconds, then the next
    heater. Do one heater at a time. You have 5 minutes.
-6. Read the result. It tells you the new number of each heater, for example
+5. Read the result. It tells you the new number of each heater, for example
    "Heater 6 is now heater 2". The settings are restored. The entity ids
    change, so check your automations and dashboards.
 
@@ -306,9 +336,9 @@ the settings first, so the pairing can give them back.
 Only heaters that use radio dialect B can be reset. The integration's
 diagnostics download shows the dialect.
 
-To add a new heater later, open the integration, choose **Configure**, then
-**Pair a new heater**, and follow the steps on the screen. The integration
-reloads when the heater is paired.
+To add a new heater later, press **Pair new heaters** on the gateway device,
+then put the heater into pairing mode within 10 minutes (see "Add new
+heaters" above).
 
 A heater that is already paired to your heaters' network is added by itself
 when it talks. If you removed a heater, open the integration, choose

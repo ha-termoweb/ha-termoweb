@@ -10,10 +10,15 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import CALLBACK_TYPE, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.boost import supports_boost
+from custom_components.termoweb.const import signal_radio_pairing_window
 from custom_components.termoweb.coordinator.state import StateCoordinator
 from custom_components.termoweb.domain import GatewayConnectionState
 from custom_components.termoweb.domain.ids import HEATER_NODE_TYPES
@@ -31,6 +36,10 @@ from custom_components.termoweb.identifiers import (
 )
 from custom_components.termoweb.inventory import Inventory
 from custom_components.termoweb.nodes import normalize_node_addr, normalize_node_type
+from custom_components.termoweb.radio_autopair import (
+    pairing_supported,
+    pairing_window_end,
+)
 from custom_components.termoweb.runtime import require_runtime
 from custom_components.termoweb.utils import (
     build_gateway_device_info,
@@ -85,7 +94,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
 
     log_skipped_nodes("binary_sensor", inventory, logger=_LOGGER)
-    async_add_entities([gateway, *boost_entities])
+    pairing: list[BinarySensorEntity] = []
+    if pairing_supported(runtime):
+        pairing.append(PairingWindowBinarySensor(entry, dev_id))
+    async_add_entities([gateway, *pairing, *boost_entities])
 
 
 class GatewayOnlineBinarySensor(
@@ -138,6 +150,74 @@ class GatewayOnlineBinarySensor(
             "ws_last_event_at": connection_state.last_event_at,
             "ws_healthy_minutes": connection_state.healthy_minutes,
         }
+
+
+class PairingWindowBinarySensor(BinarySensorEntity):
+    """On while the radio gateway pairs heaters that are put into pairing mode."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "pairing_open"
+    _attr_should_poll = False
+
+    def __init__(self, entry: ConfigEntry, dev_id: str) -> None:
+        """Initialise the sensor for the gateway of ``entry``."""
+        self._entry = entry
+        self._dev_id = str(dev_id)
+        self._attr_unique_id = build_gateway_entity_unique_id(
+            self._dev_id, "pairing_open"
+        )
+        self._unsub_end: CALLBACK_TYPE | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Follow window changes and close the window on time."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                signal_radio_pairing_window(self._entry.entry_id),
+                self._async_window_changed,
+            )
+        )
+        self.async_on_remove(self._cancel_end)
+        self._schedule_end()
+
+    @callback
+    def _cancel_end(self) -> None:
+        """Cancel the timer that closes the window."""
+        if self._unsub_end is not None:
+            self._unsub_end()
+            self._unsub_end = None
+
+    @callback
+    def _schedule_end(self) -> None:
+        """Update the state when the open window ends."""
+        self._cancel_end()
+        end = pairing_window_end(self.hass, self._entry)
+        if end is not None:
+            self._unsub_end = async_track_point_in_utc_time(
+                self.hass, self._async_window_changed, end
+            )
+
+    @callback
+    def _async_window_changed(self, _now: Any = None) -> None:
+        """Write the new state and follow the new window end."""
+        self._schedule_end()
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool:
+        """Return True while heaters in pairing mode are paired."""
+        return pairing_window_end(self.hass, self._entry) is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return when the pairing window closes."""
+        end = pairing_window_end(self.hass, self._entry)
+        return {"ends_at": None if end is None else end.isoformat()}
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return Home Assistant device metadata for the gateway."""
+        return build_gateway_device_info(self.hass, self._entry.entry_id, self._dev_id)
 
 
 class HeaterBoostActiveBinarySensor(

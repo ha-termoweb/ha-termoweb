@@ -56,6 +56,11 @@ repository.
 6. Your heaters appear under **Devices**. A heater that was quiet is added
    later, as soon as it talks.
 
+To add a new heater, put it into pairing mode within 30 minutes of adding the
+stick, or press **Pair new heaters** on the stick's device first. Pairing is
+then open for 10 minutes. The heater is added by itself, and you get a
+notification. See [Add new heaters](radio_gateway.md#add-new-heaters).
+
 If you see "Cannot open the nanoCUL stick": check the cable, the port and the
 firmware (step 1).
 

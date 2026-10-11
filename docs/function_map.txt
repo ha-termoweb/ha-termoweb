@@ -33,7 +33,7 @@ custom_components/termoweb/__init__.py :: _async_shutdown_entry
 custom_components/termoweb/__init__.py :: async_unload_entry
     Unload the platforms; the runtime shuts down afterwards via async_on_unload.
 custom_components/termoweb/__init__.py :: async_remove_entry
-    Delete the entry's stored energy import progress.
+    Delete the entry's stored energy import progress and pairing window.
 custom_components/termoweb/__init__.py :: _cloud_unique_id
     Return the entry's canonical account unique ID, or its own on a collision.
 custom_components/termoweb/__init__.py :: _migrate_to_1_2
@@ -326,8 +326,6 @@ custom_components/termoweb/backend/radio/dialect.py :: _network_id
     Return a validated two-byte network id, defaulting to the dialect's own.
 custom_components/termoweb/backend/radio/dialect.py :: detect_dialect
     Return the first dialect under which ``air`` has a valid length and CRC.
-custom_components/termoweb/backend/radio/discovery.py :: PairingAnnounced.__init__
-    Store the dialect the announcement was heard in.
 custom_components/termoweb/backend/radio/discovery.py :: listen_once
     Listen in ``dialect`` for up to ``window_s``; return the first network heard.
 custom_components/termoweb/backend/radio/discovery.py :: listen_once._on_frame
@@ -1038,6 +1036,22 @@ custom_components/termoweb/binary_sensor.py :: GatewayOnlineBinarySensor.device_
     Return Home Assistant device metadata for the gateway.
 custom_components/termoweb/binary_sensor.py :: GatewayOnlineBinarySensor.extra_state_attributes
     Return additional gateway diagnostics and websocket state.
+custom_components/termoweb/binary_sensor.py :: PairingWindowBinarySensor.__init__
+    Initialise the sensor for the gateway of ``entry``.
+custom_components/termoweb/binary_sensor.py :: PairingWindowBinarySensor.async_added_to_hass
+    Follow window changes and close the window on time.
+custom_components/termoweb/binary_sensor.py :: PairingWindowBinarySensor._cancel_end
+    Cancel the timer that closes the window.
+custom_components/termoweb/binary_sensor.py :: PairingWindowBinarySensor._schedule_end
+    Update the state when the open window ends.
+custom_components/termoweb/binary_sensor.py :: PairingWindowBinarySensor._async_window_changed
+    Write the new state and follow the new window end.
+custom_components/termoweb/binary_sensor.py :: PairingWindowBinarySensor.is_on
+    Return True while heaters in pairing mode are paired.
+custom_components/termoweb/binary_sensor.py :: PairingWindowBinarySensor.extra_state_attributes
+    Return when the pairing window closes.
+custom_components/termoweb/binary_sensor.py :: PairingWindowBinarySensor.device_info
+    Return Home Assistant device metadata for the gateway.
 custom_components/termoweb/binary_sensor.py :: HeaterBoostActiveBinarySensor.__init__
     Initialise the boost activity binary sensor.
 custom_components/termoweb/binary_sensor.py :: HeaterBoostActiveBinarySensor.is_on
@@ -1086,6 +1100,12 @@ custom_components/termoweb/button.py :: StateRefreshButton.device_info
     Return the Home Assistant device metadata for this gateway.
 custom_components/termoweb/button.py :: StateRefreshButton.async_press
     Request an immediate coordinator refresh when pressed.
+custom_components/termoweb/button.py :: PairNewHeatersButton.__init__
+    Initialise the button for the gateway of ``entry``.
+custom_components/termoweb/button.py :: PairNewHeatersButton.device_info
+    Return the Home Assistant device metadata for this gateway.
+custom_components/termoweb/button.py :: PairNewHeatersButton.async_press
+    Open the pairing window: heaters put into pairing mode are paired.
 custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.__init__
     Initialise an accumulator boost helper button.
 custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.boost_context
@@ -1578,6 +1598,8 @@ custom_components/termoweb/const.py :: signal_radio_frames
     Signal name for the frame count of a listen-only radio entry.
 custom_components/termoweb/const.py :: signal_radio_unknown_heater
     Signal name for a frame heard from a heater that is not in the inventory.
+custom_components/termoweb/const.py :: signal_radio_network_heard
+    Signal name for a frame a radio entry's listener heard on another network.
 custom_components/termoweb/const.py :: signal_radio_pairing_announcement
     Signal name for a pairing announcement heard by a radio entry's listener.
 custom_components/termoweb/const.py :: signal_radio_pairing_window
@@ -2119,13 +2141,7 @@ custom_components/termoweb/number.py :: PowerLimitNumber.async_set_native_value
 custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.__init__
     Store the entry being configured.
 custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_init
-    Let the user choose pairing or rehoming.
-custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_pair_heaters
-    Explain pairing mode; start pairing into this entry's network on submit.
-custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_pair_run
-    Pair heaters with the running gateway connection while showing progress.
-custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_pair_done
-    Add the paired heaters and reload, or show the pairing form with the error.
+    Offer the network move; heaters are paired with the gateway's button.
 custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_rehome
     Explain the network move; start it when the user submits.
 custom_components/termoweb/options_flow.py :: TermoWebOptionsFlow.async_step_rehome_run
@@ -2148,14 +2164,56 @@ custom_components/termoweb/planner/radio_planner.py :: validate_commands
     Raise ValueError if any of ``commands`` cannot be encoded for ``dialect``.
 custom_components/termoweb/planner/radio_planner.py :: plan_commands
     Return the radio payloads for ``commands``, validating every one first.
+custom_components/termoweb/radio_autopair.py :: pairing_supported
+    Return True for a running radio entry that finds heaters and may transmit.
+custom_components/termoweb/radio_autopair.py :: pairing_window_end
+    Return when the entry's pairing window closes, or None while it is closed.
+custom_components/termoweb/radio_autopair.py :: async_open_pairing_window
+    Open (or extend) the entry's pairing window for ``duration``; return its end.
+custom_components/termoweb/radio_autopair.py :: async_forget_pairing_window
+    Drop a removed entry's pairing window.
+custom_components/termoweb/radio_autopair.py :: _stored_addr
+    Return the stored radio id of the heater with ``serial``, if it is known.
+custom_components/termoweb/radio_autopair.py :: HeaterPairer.__init__
+    Store collaborators; nothing transmits until a heater announces itself.
+custom_components/termoweb/radio_autopair.py :: HeaterPairer.async_announced
+    Pair the announcing heater when the window is open; else ignore it.
+custom_components/termoweb/radio_autopair.py :: HeaterPairer._async_pair
+    Pair one heater, give its settings back and hand it to the finder.
+custom_components/termoweb/radio_autopair.py :: HeaterPairer._async_pair_one
+    Run one short pairing exchange; return the paired heater or None.
+custom_components/termoweb/radio_autopair.py :: HeaterPairer._async_restore
+    Send the clock; a known heater also gets its saved settings back.
+custom_components/termoweb/radio_autopair.py :: HeaterPairer.async_stop
+    Stop on unload: later announcements are ignored.
+custom_components/termoweb/radio_autopair.py :: async_start_auto_pairing
+    Answer the listener's pairing announcements while the window is open.
 custom_components/termoweb/radio_discovery.py :: network_pending
     Return True for a radio entry that has not learned its heater network yet.
-custom_components/termoweb/radio_discovery.py :: async_start_network_search
-    Listen for the entry's heater network in the background (stops on unload).
-custom_components/termoweb/radio_discovery.py :: async_search_network
-    Listen until the heater network is heard; store it and reload the entry.
+custom_components/termoweb/radio_discovery.py :: async_learning_network
+    Return (dialect, site network) for an entry still learning its network.
+custom_components/termoweb/radio_discovery.py :: gateway_id
+    Return the gateway id from a radio entry's unique id (``radio:<dev_id>``).
+custom_components/termoweb/radio_discovery.py :: _store_network
+    Store the heaters' dialect and network id in the entry data.
+custom_components/termoweb/radio_discovery.py :: NetworkLearner.__init__
+    Store collaborators; nothing runs until frames arrive or a survey is due.
+custom_components/termoweb/radio_discovery.py :: NetworkLearner.async_heard
+    Count a frame from another network; adopt it once it repeats.
+custom_components/termoweb/radio_discovery.py :: NetworkLearner.async_schedule_survey
+    Run the next raw survey in 10 minutes.
+custom_components/termoweb/radio_discovery.py :: NetworkLearner._async_survey_due
+    Start the due survey as an entry background task.
+custom_components/termoweb/radio_discovery.py :: NetworkLearner.async_survey
+    Survey the air once; store a network in a known dialect, else go on.
+custom_components/termoweb/radio_discovery.py :: NetworkLearner._adopt
+    Store the heard network and reload the entry (once).
+custom_components/termoweb/radio_discovery.py :: NetworkLearner.async_stop
+    Stop learning: drop a pending survey.
+custom_components/termoweb/radio_discovery.py :: async_start_network_learning
+    Learn the heaters' network in the background (stops on unload).
 custom_components/termoweb/radio_discovery.py :: _async_report_unknown_dialect
-    Save the survey report and tell the user where it is; listening stops.
+    Save the survey report and tell the user where it is; learning stops.
 custom_components/termoweb/radio_discovery.py :: HeaterFinder.__init__
     Store collaborators; nothing runs until a heater is heard or scanned.
 custom_components/termoweb/radio_discovery.py :: HeaterFinder.async_heard

@@ -1,4 +1,4 @@
-"""Options flow for radio gateway entries: pairing and rehoming."""
+"""Options flow for radio gateway entries: moving heaters to the site network."""
 
 from __future__ import annotations
 
@@ -10,15 +10,8 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
 import voluptuous as vol
 
-from .backend.radio import RadioLinkError
-from .backend.radio.pairing import (
-    IDLE_STOP_S,
-    PAIR_WINDOW_S,
-    PairedHeater,
-    PairingError,
-)
+from .backend.radio.pairing import PAIR_WINDOW_S
 from .const import CONF_NODES
-from .radio_pairing import add_nodes
 from .radio_rehome import RehomeError, async_rehome, rehome_summary
 from .runtime import require_runtime
 
@@ -26,73 +19,18 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class TermoWebOptionsFlow(config_entries.OptionsFlow):
-    """Options flow for radio gateway entries: pairing and rehoming."""
+    """Options flow for radio gateway entries: moving heaters to the site network."""
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Store the entry being configured."""
         self.entry = entry
-        self._pair_task: asyncio.Task[Any] | None = None
-        self._pair_error: str | None = None
-        self._paired: list[PairedHeater] = []
         self._rehome_task: asyncio.Task[Any] | None = None
         self._rehome_summary = ""
         self._rehome_summary_shown = False
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
-        """Let the user choose pairing or rehoming."""
-        return self.async_show_menu(
-            step_id="init", menu_options=["pair_heaters", "rehome"]
-        )
-
-    async def async_step_pair_heaters(self, user_input: dict[str, Any] | None = None):
-        """Explain pairing mode; start pairing into this entry's network on submit."""
-        if user_input is None:
-            errors = {"base": self._pair_error} if self._pair_error else {}
-            return self.async_show_form(
-                step_id="pair_heaters", data_schema=vol.Schema({}), errors=errors
-            )
-        return await self.async_step_pair_run()
-
-    async def async_step_pair_run(self, user_input: dict[str, Any] | None = None):
-        """Pair heaters with the running gateway connection while showing progress."""
-        if self._pair_task is None:
-            try:
-                client = require_runtime(self.hass, self.entry.entry_id).client
-            except LookupError:
-                return self.async_abort(reason="not_loaded")
-            self._pair_task = self.hass.async_create_task(
-                client.async_pair(PAIR_WINDOW_S, idle_stop_s=IDLE_STOP_S)
-            )
-        if not self._pair_task.done():
-            return self.async_show_progress(
-                step_id="pair_run",
-                progress_action="pair_heaters",
-                progress_task=self._pair_task,
-            )
-        task, self._pair_task = self._pair_task, None
-        self._pair_error = None
-        try:
-            paired = task.result()
-        except PairingError as err:
-            paired = err.paired
-            if not paired:
-                self._pair_error = "no_free_address"
-        except RadioLinkError:
-            paired, self._pair_error = [], "cannot_connect_radio"
-        except Exception:
-            _LOGGER.exception("Unexpected error while pairing radio heaters")
-            paired, self._pair_error = [], "unknown"
-        self._paired = list(paired)
-        if not self._paired and self._pair_error is None:
-            self._pair_error = "no_heaters_paired"
-        return self.async_show_progress_done(next_step_id="pair_done")
-
-    async def async_step_pair_done(self, user_input: dict[str, Any] | None = None):
-        """Add the paired heaters and reload, or show the pairing form with the error."""
-        if not self._paired:
-            return await self.async_step_pair_heaters()
-        add_nodes(self.hass, self.entry, self._paired)
-        return self.async_create_entry(title="", data=dict(self.entry.options))
+        """Offer the network move; heaters are paired with the gateway's button."""
+        return await self.async_step_rehome(user_input)
 
     async def async_step_rehome(self, user_input: dict[str, Any] | None = None):
         """Explain the network move; start it when the user submits."""

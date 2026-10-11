@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+- Radio: heaters pair by themselves. Put the heater into pairing mode within 30 minutes of adding the gateway, or press **Pair new heaters** on the gateway device first (this opens pairing for 10 minutes). The heater is paired, gets its clock (and, for a heater you had before, its settings) back, and appears under **Devices** with a "Found TermoWeb heater" notification. You can pair several heaters, one after the other.
+- Radio: the gateway device has a **Pairing open** sensor. It is on while new heaters are paired, and shows when pairing closes.
+- Radio: a new gateway that has not found its heaters yet now sets up at once (gateway device, **Pair new heaters**, **Pairing open**). It runs on your installation's own radio network, so a heater can be paired even when it is idle or belongs to another gateway or Home Assistant. Heaters that already work with another gateway are still found in the background.
+
+### Changed
+- Radio: outside the pairing time, a heater in pairing mode is ignored. This keeps a neighbour's heater out of your installation.
+- Radio: the options no longer have **Pair a new heater**; use the **Pair new heaters** button instead. **Configure** now opens **Move heaters to this installation's own network** directly.
+
 ### Fixed
 - Radio: while a new gateway is still looking for your heaters, a heater in pairing mode is no longer mistaken for your heaters' radio network.
 
