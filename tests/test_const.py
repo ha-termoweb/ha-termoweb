@@ -41,10 +41,10 @@ def _device_names(path: Path) -> dict[str, str]:
 def test_strings_and_english_match_default_names() -> None:
     """strings.json and en.json carry exactly the English defaults in code."""
 
-    assert _device_names(COMPONENT / "strings.json") == _DEFAULT_DEVICE_NAMES
-    assert (
-        _device_names(COMPONENT / "translations" / "en.json") == _DEFAULT_DEVICE_NAMES
-    )
+    for path in (COMPONENT / "strings.json", COMPONENT / "translations" / "en.json"):
+        names = _device_names(path)
+        assert names.pop("site") == "Home"  # the radio site device, no ``addr``
+        assert names == _DEFAULT_DEVICE_NAMES
 
 
 @pytest.mark.parametrize("path", TRANSLATION_FILES, ids=lambda path: path.stem)
@@ -57,6 +57,7 @@ def test_translated_device_names_format_with_addr(path: Path) -> None:
     """
 
     names = _device_names(path)
+    names.pop("site", None)  # a fixed name, no ``addr`` placeholder
     assert set(names) <= set(_DEFAULT_DEVICE_NAMES)
     for name in names.values():
         formatted = name.format(addr="12")

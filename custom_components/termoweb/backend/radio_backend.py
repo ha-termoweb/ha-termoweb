@@ -15,7 +15,12 @@ from custom_components.termoweb.backend.base import (
 from custom_components.termoweb.backend.radio.link import supports_survey
 from custom_components.termoweb.backend.radio_client import RadioClient
 from custom_components.termoweb.backend.radio_ws import RadioListener
-from custom_components.termoweb.const import CONF_RADIO_TYPE, RADIO_TYPE_ESP32
+from custom_components.termoweb.const import (
+    CONF_RADIO_TYPE,
+    RADIO_NODE_MANUFACTURER,
+    RADIO_SITE_NAME,
+    RADIO_TYPE_ESP32,
+)
 from custom_components.termoweb.inventory import Inventory
 
 _LOGGER = logging.getLogger(__name__)
@@ -57,6 +62,8 @@ class RadioBackend(Backend):
         local_radio=True,
         options_flow=True,
         web_portal=False,
+        node_manufacturer=RADIO_NODE_MANUFACTURER,
+        site_name=RADIO_SITE_NAME,
     )
 
     def diagnostics(self, entry_data: Mapping[str, Any]) -> dict[str, Any] | None:

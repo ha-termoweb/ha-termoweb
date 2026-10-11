@@ -204,6 +204,9 @@
     },
     "node": {
       "name": "Node {addr}"
+    },
+    "site": {
+      "name": "Home"
     }
   },
   "entity": {

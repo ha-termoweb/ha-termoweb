@@ -78,6 +78,7 @@ GATEWAY_NAME = "Radio gateway"
 MONITOR_NAME = "Radio monitor"  # device name of a listen-only entry
 GATEWAY_MODEL = "ESP32 + CC1101 radio gateway"
 NANOCUL_MODEL = "nanoCUL USB stick"
+NANOCUL_NAME = "nanoCUL stick"
 # A listen-only station never transmits; an id no heater sends to keeps it that
 # way even if a firmware auto-ack were ever switched on behind our back.
 LISTEN_ONLY_STATION_ID = 0xFE
@@ -152,12 +153,13 @@ class RadioClient:
         power: PowerManager | None = None,
         device_id: str | None = None,
         model: str = GATEWAY_MODEL,
+        name: str = GATEWAY_NAME,
         listen_only: bool = False,
     ) -> None:
         """Store the gateway address, dialect and stored node list; nothing connects.
 
         ``device_id`` names a gateway whose firmware reports no MAC address
-        (a nanoCUL stick); ``model`` is what Home Assistant shows for it.
+        (a nanoCUL stick); ``model`` and ``name`` are what Home Assistant shows for it.
         A ``listen_only`` client never transmits: its link refuses every
         transmit and its own commands raise TransmitBlockedError.
         """
@@ -174,6 +176,7 @@ class RadioClient:
         self._station_id = station_id
         self._device_id = device_id
         self._model = model
+        self._name = name
         self._listen_only = listen_only
         self._link_factory = link_factory
         self._clock = clock
@@ -661,7 +664,7 @@ class RadioClient:
         return [
             {
                 "dev_id": dev_id,
-                "name": MONITOR_NAME if self._listen_only else GATEWAY_NAME,
+                "name": MONITOR_NAME if self._listen_only else self._name,
                 "model": f"{self._model} ({detail})",
                 "serial_id": dev_id,
                 "fw_version": info.version,
