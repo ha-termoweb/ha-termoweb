@@ -4,7 +4,7 @@ A survey (``R<seconds>`` on the ESP32 gateway) captures every RF burst on the
 heater band, whatever its dialect. The analysis recognises the known dialects
 and otherwise proposes the framing a new dialect probably uses. The saved
 report is redacted (network ids masked, identity payloads cut) so a user can
-attach it to a GitHub issue. See ``docs/research/protocol.md``.
+attach it to a GitHub issue. See ``docs/radio_protocol.md``.
 """
 
 from __future__ import annotations

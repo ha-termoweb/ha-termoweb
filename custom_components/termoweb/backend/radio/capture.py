@@ -7,7 +7,7 @@ that are not frames, and frames no known dialect decodes, are kept as raw text.
 :func:`redact` masks network ids, identity/serial bytes and on-air hex so a
 capture can be shared. :class:`FrameLog` keeps the last frames heard and sent,
 masked when read, for diagnostics. This module has no Home Assistant
-dependency. See ``docs/research/protocol.md`` (section 10).
+dependency. See ``docs/radio_protocol.md`` (section 10).
 """
 
 from __future__ import annotations
