@@ -25,7 +25,11 @@ from .entity import (
     log_skipped_nodes,
     resolve_boost_runtime_minutes,
 )
-from .identifiers import build_gateway_entity_unique_id, build_heater_unique_id
+from .identifiers import (
+    build_gateway_entity_unique_id,
+    build_heater_unique_id,
+    node_key,
+)
 from .inventory import Inventory
 from .nodes import AccumulatorNode
 from .runtime import require_runtime
@@ -43,6 +47,7 @@ class DisplayFlashContext:
     node_type: str
     addr: str
     name: str
+    key: str  # node_key: the address, or a radio heater's serial
 
     @property
     def unique_id(self) -> str:
@@ -51,7 +56,7 @@ class DisplayFlashContext:
         return build_heater_unique_id(
             self.dev_id,
             self.node_type,
-            self.addr,
+            self.key,
             suffix=":flash_display",
         )
 
@@ -69,6 +74,7 @@ def _iter_display_flash_contexts(
             node_type=metadata.node_type,
             addr=metadata.addr,
             name=metadata.name,
+            key=node_key(inventory, metadata.node_type, metadata.addr),
         )
 
 
@@ -111,11 +117,17 @@ class AccumulatorBoostContext:
 
         return self.node.addr
 
+    @property
+    def key(self) -> str:
+        """Return the node key (address, or a radio heater's serial) for IDs."""
+
+        return node_key(self.inventory, self.node_type, self.addr)
+
     def unique_id(self, suffix: str) -> str:
         """Return the unique ID for a boost helper with ``suffix``."""
 
         return build_heater_unique_id(
-            self.dev_id, self.node_type, self.addr, suffix=f"boost_{suffix}"
+            self.dev_id, self.node_type, self.key, suffix=f"boost_{suffix}"
         )
 
 
@@ -248,7 +260,7 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
             self.hass,
             self.boost_context.entry_id,
             self.boost_context.dev_id,
-            self.boost_context.addr,
+            self.boost_context.key,
             name=self.boost_context.base_name,
             node_type=self.boost_context.node_type,
         )
@@ -403,7 +415,7 @@ class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
             self.hass,
             self._flash_context.entry_id,
             self._flash_context.dev_id,
-            self._flash_context.addr,
+            self._flash_context.key,
             name=self._flash_context.name,
             node_type=self._flash_context.node_type,
         )

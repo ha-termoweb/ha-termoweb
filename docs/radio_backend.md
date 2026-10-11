@@ -28,6 +28,7 @@ Legend:
 | `backend/radio_backend.py` | `RadioBackend`: capabilities, `create_ws_client`, `fetch_hourly_samples`. |
 | `codecs/radio_codec.py` | Radio records ↔ the canonical settings dict; canonical commands → radio payloads. |
 | `planner/radio_planner.py` | Settings write → ordered list of commands/payloads. |
+| `radio_identity.py` | Reads missing heater serials at setup; moves registry entries from address to serial IDs. |
 
 The planner is small. A radio write is one frame per command, so the planner
 only orders the commands (presets, program, then mode/setpoint) and validates
@@ -292,6 +293,51 @@ Both run in the client (`async_pair`, `async_factory_reset`,
 `async_restore`). Pairing holds the exchange lock, so heater commands wait.
 Protocol details: [radio protocol §7-8](radio_protocol.md#7-pairing).
 
+## Heater identity and names
+
+A heater's radio address (`addr`) follows the pairing order, so it can change
+when the heater is paired again. Its serial does not. Each stored node keeps
+both: `addr` addresses radio frames; `serial` names and identifies it.
+
+- **Serial token** (`protocol.serial_token`, `IdentityRecord.serial`): the
+  ASCII serial at the end of a dialect-B `5B 55` identity reply. A dialect-A
+  heater (`5B 77` E0 reply, or its pairing announcement) has no printable
+  serial: its token is the last 8 hex digits (lowercase) of the 12-byte
+  identity, e.g. `1a2b3c4d`. An ASCII serial that is not 4-32 characters of
+  `A-Z a-z 0-9 . _ -` with at least one digit also falls back to the hex form.
+- **Default name**: `Heater <serial>` (`Thermostat <serial>` for a
+  thermostat), set by `radio_pairing.radio_node`/`with_serial`. A node keeps a
+  name the user gave it; only the address default `Heater <addr>` is replaced.
+  The device name in Home Assistant is the user's to change.
+- **Where the serial comes from**: pairing (`PairedHeater.serial`, from the
+  `5A` reply or the dialect-A announcement), the network move (the identities
+  it reads anyway), and setup. Discovery only probes `B8`, so discovered
+  heaters get their serial at the first setup.
+- **Setup** (`radio_identity.async_learn_serials`): before the inventory is
+  built, every stored node without a serial gets one `5A` read (10 s limit).
+  Learned serials are saved in the entry data. A heater that does not answer
+  keeps its address identity for this run; an INFO line says so, and the next
+  setup tries again.
+- **IDs**: device identifiers and entity unique IDs use the node key
+  (`identifiers.node_key`): the serial when known, else the address. See
+  [architecture: entity unique IDs](architecture.md#entity-unique-ids).
+- **Registry move** (`radio_identity.async_rekey_node`): at every setup, each
+  node with a serial has its address-keyed device and entities (if any) moved
+  to the serial in the device and entity registries. Entity IDs, history and
+  customisations stay. A target that is already taken is skipped with a
+  WARNING.
+- **Pairing again**: `add_nodes` matches a paired heater by serial. A known
+  serial at a new address updates that node's `addr`; name and serial stay, so
+  its devices and entities stay the same. The network move does the same and
+  moves the registry entries of heaters that had no serial yet.
+- **Radio address sensor**: each radio heater has a diagnostic sensor
+  `Radio address` (`radio_address`, disabled by default) whose value is the
+  current address. Its unique ID uses the node key, so it survives pairing
+  again while its value changes. The serial is the device's `serial_number`.
+- **Privacy**: serials identify a device. Logs at INFO and above mask them
+  (`mask_identifier`); diagnostics redact the `serial` field and the serial
+  inside node names.
+
 ## Known gaps
 
 - Keypad lock on dialect B: acked; whether the keypad locks is not yet confirmed.
@@ -363,7 +409,8 @@ The radio form asks for host, port (2323), an optional dialect (`auto`, `A`,
 3. The entry stores `brand: radio`, `host`, `port`, `dialect`, `network_id`
    (hex) and `nodes` as `[{"type": "htr", "addr": "6", "name": "Heater 6"}]`.
    Addresses are plain decimal strings: the listener matches frames by
-   `str(src)`.
+   `str(src)`. Once known, a node also stores its `serial` and is named
+   `Heater <serial>` (see [Heater identity and names](#heater-identity-and-names)).
 
 Errors: `cannot_connect_radio`, `no_gateway_mac`, `no_traffic`,
 `no_heaters`, `invalid_network_id`.

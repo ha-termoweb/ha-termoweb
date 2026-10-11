@@ -28,7 +28,11 @@ from .entity import (
     heater_platform_details_for_entry,
     to_device_temperature,
 )
-from .identifiers import build_heater_unique_id, build_installation_entity_unique_id
+from .identifiers import (
+    build_heater_unique_id,
+    build_installation_entity_unique_id,
+    node_key,
+)
 from .inventory import Inventory
 from .nodes import normalize_node_addr, normalize_node_type
 from .runtime import require_runtime
@@ -119,7 +123,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     addr_str,
                     base_name,
                     build_heater_unique_id(
-                        dev_id, node_type, addr_str, suffix="boost_duration"
+                        dev_id,
+                        node_type,
+                        node_key(heater_details.inventory, node_type, addr_str),
+                        suffix="boost_duration",
                     ),
                     node_type=node_type,
                     inventory=heater_details.inventory,
@@ -131,7 +138,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     addr_str,
                     base_name,
                     build_heater_unique_id(
-                        dev_id, node_type, addr_str, suffix="boost_temperature"
+                        dev_id,
+                        node_type,
+                        node_key(heater_details.inventory, node_type, addr_str),
+                        suffix="boost_temperature",
                     ),
                     node_type=node_type,
                     inventory=heater_details.inventory,
@@ -152,7 +162,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
         canonical_addr = normalize_node_addr(addr_str, use_default_when_falsey=True)
         priority_unique_id = build_heater_unique_id(
-            dev_id, canonical_type, canonical_addr, suffix=":priority"
+            dev_id,
+            canonical_type,
+            node_key(heater_details.inventory, canonical_type, canonical_addr),
+            suffix=":priority",
         )
         new_entities.append(
             HeaterPriorityNumber(

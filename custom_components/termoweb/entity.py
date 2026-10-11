@@ -29,7 +29,7 @@ from custom_components.termoweb.domain.state import (
     HeaterState,
     ThermostatState,
 )
-from custom_components.termoweb.identifiers import build_heater_unique_id
+from custom_components.termoweb.identifiers import build_heater_unique_id, node_key
 from custom_components.termoweb.inventory import Inventory
 from custom_components.termoweb.nodes import (
     Node,
@@ -486,8 +486,15 @@ class HeaterNodeBase(CoordinatorEntity):
             or "htr"
         )
         self._node_type = resolved_type
+        # Unique IDs and the device follow the node key (a radio heater's serial).
+        self._node_key = node_key(inventory, resolved_type, self._addr)
+        self._serial = (
+            None
+            if inventory is None
+            else inventory.node_serial(resolved_type, self._addr)
+        )
         self._attr_unique_id = unique_id or build_heater_unique_id(
-            dev_id, resolved_type, self._addr
+            dev_id, resolved_type, self._node_key
         )
         self._device_name = device_name or name
         self._inventory = inventory
@@ -565,7 +572,8 @@ class HeaterNodeBase(CoordinatorEntity):
             self.hass,
             self._entry_id,
             self._dev_id,
-            self._addr,
+            self._node_key,
             name=self._device_name,
             node_type=self._node_type,
+            serial=self._serial,
         )

@@ -27,6 +27,7 @@ from custom_components.termoweb.entity import (
 from custom_components.termoweb.identifiers import (
     build_gateway_entity_unique_id,
     build_heater_unique_id,
+    node_key,
 )
 from custom_components.termoweb.inventory import Inventory
 from custom_components.termoweb.nodes import normalize_node_addr, normalize_node_type
@@ -54,7 +55,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         unique_id = build_heater_unique_id(
             dev_id,
             node_type,
-            addr_str,
+            node_key(inventory, node_type, addr_str),
             suffix=":boost_active",
         )
         settings_resolver = build_settings_resolver(
@@ -217,7 +218,7 @@ class HeaterBoostActiveBinarySensor(
             self.hass,
             self._entry_id,
             self._dev_id,
-            self._addr,
+            node_key(self._inventory, self._node_type, self._addr),
             name=self._device_name,
             node_type=self._node_type,
         )

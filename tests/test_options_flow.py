@@ -23,9 +23,9 @@ from tests.fakes.runtime import build_entry_runtime
 NODES = [{"type": "htr", "addr": "6", "name": "Heater 6"}]
 
 
-def _paired(node_id: int) -> PairedHeater:
-    """Return a heater paired as ``node_id``."""
-    return PairedHeater(node_id, None)
+def _paired(node_id: int, serial: str | None = None) -> PairedHeater:
+    """Return a heater paired as ``node_id`` (with a synthetic ``serial``)."""
+    return PairedHeater(node_id, None, serial=serial)
 
 
 # --- options flow ------------------------------------------------------------------
@@ -72,7 +72,7 @@ class PairingClient:
 
     def __init__(self) -> None:
         """Pair heater 2 by default."""
-        self.result: Any = [_paired(2)]
+        self.result: Any = [_paired(2, "S000002")]
         self.calls: list[Any] = []
 
     async def async_pair(self, window_s: float, **kwargs: Any) -> Any:
@@ -120,7 +120,12 @@ async def test_options_pairing_adds_heaters_and_reloads(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert dict(entry.options) == {"energy_history_imported": True}
     assert client.calls == [(300.0, {"idle_stop_s": 60.0})]
-    assert entry.data["nodes"][-1] == {"type": "htr", "addr": "2", "name": "Heater 2"}
+    assert entry.data["nodes"][-1] == {
+        "type": "htr",
+        "addr": "2",
+        "name": "Heater S000002",
+        "serial": "S000002",
+    }
     assert reloads == [entry.entry_id]
 
 

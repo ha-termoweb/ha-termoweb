@@ -93,7 +93,7 @@ class PairedHeater:
     node_id: int
     status: protocol.StatusRecord
     identity: bytes | None = None  # from the announcement or the 5A reply
-    serial: str | None = None  # dialect B: ASCII serial from the 5A reply
+    serial: str | None = None  # stable serial token (protocol.serial_token)
 
 
 def classify_announcement(dialect: Dialect, frame: Frame) -> Announcement | None:
@@ -164,7 +164,7 @@ async def _read_identity(
     record = None if reply is None else protocol.decode_identity(reply.payload)
     if record is None:
         return None, None
-    return record.tail, record.ascii_serial
+    return record.tail, record.serial
 
 
 async def _confirm(
@@ -184,6 +184,8 @@ async def _confirm(
     else:
         return None
     read_identity, serial = await _read_identity(link, node_id)
+    if serial is None and identity is not None:
+        serial = protocol.serial_token(identity)  # dialect A: from the announcement
     return PairedHeater(node_id, status, identity or read_identity, serial)
 
 

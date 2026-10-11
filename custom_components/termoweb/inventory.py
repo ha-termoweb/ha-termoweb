@@ -129,6 +129,16 @@ class Inventory:
         addresses = self._ensure_addresses_by_type_cache()
         return normalized_addr in addresses.get(normalized_type, ())
 
+    def node_serial(self, node_type: Any, addr: Any) -> str | None:
+        """Return the serial of the ``node_type``/``addr`` node, or None when unknown."""
+
+        normalized_type = normalize_node_type(node_type, use_default_when_falsey=True)
+        normalized_addr = normalize_node_addr(addr, use_default_when_falsey=True)
+        for node in self._ensure_nodes_by_type_cache().get(normalized_type, ()):
+            if getattr(node, "addr", None) == normalized_addr:
+                return getattr(node, "serial", None)
+        return None
+
     def iter_known_entries(
         self, entries: Iterable[Any]
     ) -> Iterator[tuple[str, str, Mapping[str, typing.Any]]]:

@@ -350,6 +350,17 @@ def test_identity_e0_form() -> None:
     assert record.ascii_serial is None
 
 
+def test_identity_serial_token() -> None:
+    """The serial is the ASCII serial, else the identity's last 8 hex digits."""
+    assert p.decode_identity(B_IDENTITY).serial == "X123456"
+    assert p.decode_identity(A_IDENTITY).serial == "29304a5b"  # dialect A: hex
+    no_ascii = p.decode_identity(bytes([0x5B, 0x55]) + bytes(15) + b"\x01")
+    assert no_ascii.serial == "00000001"
+    tail = bytes(range(12))
+    for unusable in ("AB:12", "ABCDEF", "X1", None):  # colon, no digit, too short
+        assert p.serial_token(tail, unusable) == "08090a0b"
+
+
 def _rated_identity(rating: int) -> bytes:
     """Return a synthetic 5B 55 identity whose rating byte (payload[10]) is ``rating``."""
     return (

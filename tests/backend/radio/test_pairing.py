@@ -316,7 +316,8 @@ async def test_dialect_a_direct_announcement_keeps_the_identity() -> None:
     link = await air.link(DIALECT_A, heater)
     paired = await air.pair(link, window_s=15)
     assert [h.node_id for h in paired] == [2]
-    assert paired[0].identity == IDENTITY_A and paired[0].serial is None
+    assert paired[0].identity == IDENTITY_A
+    assert paired[0].serial == IDENTITY_A[-4:].hex()  # no ASCII serial in dialect A
     assert len(heater.assignments) == 1  # duplicate, relayed and repeat ignored
 
 

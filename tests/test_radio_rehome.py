@@ -9,6 +9,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -17,6 +18,10 @@ from custom_components.termoweb.backend.radio.link import RadioLinkError
 from custom_components.termoweb.backend.radio.pairing import (
     NoFreeAddressError,
     PairedHeater,
+)
+from custom_components.termoweb.backend.radio.protocol import (
+    IdentityRecord,
+    decode_identity,
 )
 from custom_components.termoweb.backend.radio_client import (
     RadioClient,
@@ -29,8 +34,17 @@ from tests.fakes.radio_setup import add_radio_entry, record_reloads
 
 OLD_NET = "1234"  # synthetic legacy network id
 ENTRY_ID = "radio-entry"
-ID_6 = bytes(range(16))
-ID_7 = bytes(range(1, 17))
+
+
+def _identity(serial: str) -> IdentityRecord:
+    """Return a synthetic dialect-B identity record carrying ASCII ``serial``."""
+    record = decode_identity(b"\x5b\x55" + serial.encode().rjust(16, b"\x00"))
+    assert record is not None
+    return record
+
+
+ID_6 = _identity("S000006")  # synthetic serials
+ID_7 = _identity("S000007")
 STATE = HeaterState(mode="auto", stemp="18.5", ptemp=["7", "17", "20"])
 SNAPSHOT = {"mode": "auto", "ptemp": [7.0, 17.0, 20.0], "manual_stemp": 20.0}
 
@@ -53,7 +67,7 @@ class Radio(RadioClient):
         """Every heater's last manual target is 20 °C."""
         return 20.0
 
-    async def async_read_identity(self, addr: int) -> bytes:
+    async def async_read_identity(self, addr: int) -> IdentityRecord:
         """Return the scripted identity, or raise for a silent heater."""
         self.calls.append(("identity", addr))
         value = self.identities.get(addr)
@@ -167,7 +181,7 @@ async def test_single_heater_moves_restores_and_keeps_its_name(rig: Rig) -> None
     assert rig.entry.data["network_id"] == site_net.hex().upper()
     assert rig.entry.data["nodes"] == [
         {"type": "htr", "addr": "bogus"},
-        {"type": "htr", "addr": "2", "name": "Room 6"},
+        {"type": "htr", "addr": "2", "name": "Room 6", "serial": "S000006"},
     ]
     assert rig.entry.options["radio_restore"] == {}
     assert rig.entry.options["energy_history_imported"] is True
@@ -176,13 +190,35 @@ async def test_single_heater_moves_restores_and_keeps_its_name(rig: Rig) -> None
     assert "Heater 6 is now heater 2. Its settings were restored." in summary
 
 
+async def test_moved_heater_keeps_its_device_and_entities(rig: Rig) -> None:
+    """Address-keyed registry entries of a moved heater move to its serial."""
+    device = dr.async_get(rig.hass).async_get_or_create(
+        config_entry_id=ENTRY_ID, identifiers={(DOMAIN, "dev", "6")}
+    )
+    entity = er.async_get(rig.hass).async_get_or_create(
+        "climate",
+        DOMAIN,
+        f"{DOMAIN}:dev:htr:6:climate",
+        config_entry=rig.entry,
+        device_id=device.id,
+    )
+    rig.client.paired = [_paired(2)]
+
+    await rig.rehome()
+
+    moved = er.async_get(rig.hass).async_get(entity.entity_id)
+    assert moved.unique_id == f"{DOMAIN}:dev:htr:S000006:climate"
+    identifiers = dr.async_get(rig.hass).async_get(device.id).identifiers
+    assert identifiers == {(DOMAIN, "dev", "S000006")}
+
+
 async def test_two_heaters_are_matched_by_identity(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Paired heaters are matched to their old numbers by identity."""
     rig = Rig(hass, monkeypatch, (6, 7))
     rig.client.identities[9] = ID_6  # heater 9 had no identity after pairing
-    rig.client.paired = NoFreeAddressError("x", [_paired(8, ID_7), _paired(9)])
+    rig.client.paired = NoFreeAddressError("x", [_paired(8, ID_7.tail), _paired(9)])
 
     result = await rig.rehome()
 
@@ -193,6 +229,8 @@ async def test_two_heaters_are_matched_by_identity(
     assert result["waiting"] == []
     names = {n["addr"]: n.get("name") for n in rig.entry.data["nodes"]}
     assert names == {"bogus": None, "8": "Room 7", "9": "Room 6"}
+    serials = {n["addr"]: n.get("serial") for n in rig.entry.data["nodes"]}
+    assert serials == {"bogus": None, "8": "S000007", "9": "S000006"}
 
 
 async def test_unrecognised_and_unpaired_heaters_are_reported(

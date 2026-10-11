@@ -28,7 +28,7 @@ from .backend.radio.discovery import (
     survey_network,
 )
 from .backend.radio.link import DEFAULT_PORT as RADIO_DEFAULT_PORT
-from .backend.radio.pairing import PAIRING_DIALECTS, pair_new_network
+from .backend.radio.pairing import PAIRING_DIALECTS, PairedHeater, pair_new_network
 from .backend.radio.serial_link import serial_device_id, serial_opener
 from .backend.radio.survey import RawBurst, SurveyReport, analyse
 from .backend.radio_client import dev_id_from_mac
@@ -451,7 +451,12 @@ def radio_entry_data(
         **_radio_connection(radio),
         CONF_DIALECT: sighting.dialect.name,
         CONF_NETWORK_ID: sighting.network_id.hex().upper(),
-        CONF_NODES: [radio_node(addr) for addr in sorted(heaters)],
+        CONF_NODES: [
+            radio_node(
+                addr, heater.serial if isinstance(heater, PairedHeater) else None
+            )
+            for addr, heater in sorted(heaters.items())
+        ],
     }
 
 

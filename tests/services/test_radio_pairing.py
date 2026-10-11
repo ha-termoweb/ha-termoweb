@@ -100,8 +100,8 @@ class Rig:
         )
 
 
-def _paired(node_id: int) -> PairedHeater:
-    return PairedHeater(node_id, SimpleNamespace())
+def _paired(node_id: int, serial: str | None = None) -> PairedHeater:
+    return PairedHeater(node_id, SimpleNamespace(), serial=serial)
 
 
 @pytest.fixture
@@ -136,11 +136,38 @@ async def test_store_snapshot_and_add_nodes(rig: Rig) -> None:
     rp.store_snapshot(hass, entry, 6, None)
     assert entry.options["radio_restore"] == {}
 
-    assert rp.add_nodes(hass, entry, [6]) is False
+    assert rp.add_nodes(hass, entry, [_paired(6)]) is False
     assert rig.reloads == []
-    assert rp.add_nodes(hass, entry, [9, 3, 9]) is True
+    assert rp.add_nodes(hass, entry, [_paired(9), _paired(3), _paired(9)]) is True
     assert entry.data["nodes"][-2:] == [rp.radio_node(3), rp.radio_node(9)]
     assert rig.reloads == [ENTRY_ID]
+
+
+async def test_add_nodes_names_by_serial_and_moves_a_known_serial(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A new heater is named by its serial; a known serial moves its stored node."""
+    rig = Rig(hass, monkeypatch)
+    nodes = [{"type": "htr", "addr": "6", "name": "Lounge", "serial": "S000006"}]
+    hass.config_entries.async_update_entry(rig.entry, data={"nodes": nodes})
+
+    assert rp.add_nodes(hass, rig.entry, [_paired(6, "S000006")]) is False
+    assert rp.add_nodes(hass, rig.entry, [_paired(2, "S000006"), _paired(3, "S000003")])
+    assert rig.entry.data["nodes"] == [
+        {"type": "htr", "addr": "2", "name": "Lounge", "serial": "S000006"},
+        {"type": "htr", "addr": "3", "name": "Heater S000003", "serial": "S000003"},
+    ]
+    assert rig.reloads == [ENTRY_ID]
+
+
+def test_radio_node_default_names() -> None:
+    """Default names use the serial; a custom or serial name is kept."""
+    assert rp.radio_node(2) == {"type": "htr", "addr": "2", "name": "Heater 2"}
+    assert rp.radio_node(2, "1a2b3c4d")["name"] == "Heater 1a2b3c4d"
+    assert rp.with_serial({"type": "htr", "addr": "2"}, "S1")["name"] == "Heater S1"
+    custom = {"type": "htr", "addr": "2", "name": "Hall"}
+    assert rp.with_serial(custom, "S1")["name"] == "Hall"
+    assert rp.default_node_name("thm", "S1") == "Thermostat S1"
 
 
 # --- registration and validation ----------------------------------------------

@@ -988,7 +988,8 @@ async def test_network_id_switch_and_identity_read() -> None:
     assert links[0].network_ids == [bytes.fromhex("ABCD")]
     assert client._network_id == bytes.fromhex("ABCD")
     links[0].reply(0x5A, IDENTITY_SHORT, bytes.fromhex("5B56") + bytes(16))
-    assert await client.async_read_identity(HEATER) == IDENTITY_SHORT[2:]
+    record = await client.async_read_identity(HEATER)
+    assert record.tail == IDENTITY_SHORT[2:]
     with pytest.raises(RadioCommandError, match="unknown identity reply"):
         await client.async_read_identity(HEATER)
 
