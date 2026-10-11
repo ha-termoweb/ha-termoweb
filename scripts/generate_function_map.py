@@ -71,11 +71,12 @@ def iter_python_files(root: Path) -> Iterable[Path]:
     """Yield Python files under ``root`` excluding tests directories."""
 
     for path in sorted(root.rglob("*.py")):
-        if any(part == "tests" for part in path.parts):
+        parts = path.relative_to(root).parts
+        if "tests" in parts:
             continue
-        if any(".git" in part for part in path.parts):
-            continue
-        if any(".venv" in part for part in path.parts):
+        # Hidden directories (.git, .venv, .claude agent worktrees, ...) never
+        # hold integration code.
+        if any(part.startswith(".") for part in parts[:-1]):
             continue
         yield path
 
