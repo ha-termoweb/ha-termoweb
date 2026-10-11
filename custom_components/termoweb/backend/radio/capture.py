@@ -5,14 +5,16 @@ transmits. Each decoded frame becomes a JSON-able record (UTC time with
 milliseconds, RSSI, dialect, network id, header fields, payload); gateway lines
 that are not frames, and frames no known dialect decodes, are kept as raw text.
 :func:`redact` masks network ids, identity/serial bytes and on-air hex so a
-capture can be shared. This module has no Home Assistant dependency. See
-``docs/radio_protocol.md`` (section 10).
+capture can be shared. :class:`FrameLog` keeps the last frames heard and sent,
+masked when read, for diagnostics. This module has no Home Assistant
+dependency. See ``docs/radio_protocol.md`` (section 10).
 """
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import re
 from typing import Any
@@ -20,7 +22,7 @@ from typing import Any
 from . import protocol
 from .dialect import Dialect, Frame, decode, detect_dialect
 from .link import ReceivedFrame
-from .pairing import ANNOUNCE_LEN_A, ANNOUNCE_MARKER_A
+from .pairing import ANNOUNCE_LEN_A, ANNOUNCE_MARKER_A, classify_announcement
 
 KIND_DATA = "data"
 KIND_ACK = "ack"
@@ -30,6 +32,15 @@ MASK_BYTE = "XX"
 MAC_FIELD = re.compile(r"\bmac=\S+")
 NET_FIELD = re.compile(r"\bnet=\S+")
 HEX_RUN = re.compile(r"\b[0-9A-Fa-f]{12,}\b")  # on-air bytes in TX/ACK/RX lines
+FRAME_LOG_SIZE = 200
+# Frame log kinds; each is counted for every frame since the client started.
+LOG_OWN = "own_network"  # data frames on this station's network
+LOG_ACK = "ack"  # link-layer acks on this station's network
+LOG_FOREIGN = "foreign_network"  # data frames or acks on another network id
+LOG_PAIRING = "pairing_announcement"  # a heater in pairing mode, any network
+LOG_TX = "tx"  # frames this station transmitted
+LOG_UNDECODABLE = "undecodable"  # no known dialect verifies its length and CRC
+LOG_KINDS = (LOG_OWN, LOG_ACK, LOG_FOREIGN, LOG_PAIRING, LOG_TX, LOG_UNDECODABLE)
 
 
 def _utcnow() -> datetime:
@@ -190,6 +201,114 @@ def redact(
     return redacted, lines
 
 
+@dataclass(frozen=True, slots=True)
+class _LoggedFrame:
+    """One frame log entry: when, direction, kind, dialect and the frame."""
+
+    at: datetime
+    direction: str
+    kind: str
+    dialect: str
+    frame: Frame
+    own: bool  # on the station's network id at the time
+
+
+class FrameLog:
+    """Keep the last frames heard and sent plus a count per kind; no I/O."""
+
+    def __init__(
+        self, size: int = FRAME_LOG_SIZE, *, now: Callable[[], datetime] = _utcnow
+    ) -> None:
+        """Create an empty log that holds at most ``size`` frames."""
+        self._entries: deque[_LoggedFrame] = deque(maxlen=size)
+        self._counts: Counter[str] = Counter()
+        self._now = now
+
+    def on_rx(
+        self, received: ReceivedFrame, dialect: Dialect, network_id: bytes
+    ) -> None:
+        """Log a received frame; one failing in ``dialect`` is tried in every dialect."""
+        frame = received.frame
+        if not frame.ok:
+            other = detect_dialect(frame.air)
+            if other is not None:
+                dialect, frame = other, decode(other, frame.air)
+        if not frame.ok:
+            kind = LOG_UNDECODABLE
+        elif classify_announcement(dialect, frame) is not None:
+            kind = LOG_PAIRING
+        elif frame.network_id != network_id:
+            kind = LOG_FOREIGN
+        else:
+            kind = LOG_ACK if frame.is_ack else LOG_OWN
+        self._add("rx", kind, dialect, frame, network_id)
+
+    def on_tx(self, air: bytes, dialect: Dialect, network_id: bytes) -> None:
+        """Log a frame this station transmitted."""
+        self._add("tx", LOG_TX, dialect, decode(dialect, air), network_id)
+
+    def _add(
+        self, direction: str, kind: str, dialect: Dialect, frame: Frame, net: bytes
+    ) -> None:
+        """Append one entry and count its kind."""
+        self._counts[kind] += 1
+        self._entries.append(
+            _LoggedFrame(
+                self._now(),
+                direction,
+                kind,
+                dialect.name,
+                frame,
+                frame.network_id == net,
+            )
+        )
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return the counts and the logged frames, oldest first, safe to share.
+
+        Network ids become ``own`` or ``NET1``, ``NET2``... in order of
+        appearance, identity and serial bytes are masked and undecodable
+        frames keep only their length.
+        """
+        aliases: dict[bytes | None, str] = {}
+        return {
+            "size": self._entries.maxlen,
+            "counts": {kind: self._counts[kind] for kind in LOG_KINDS},
+            "frames": [_log_record(entry, aliases) for entry in self._entries],
+        }
+
+
+def _log_record(
+    entry: _LoggedFrame, aliases: dict[bytes | None, str]
+) -> dict[str, Any]:
+    """Return one frame log entry as a masked diagnostics record."""
+    record: dict[str, Any] = {
+        "t": timestamp(entry.at),
+        "dir": entry.direction,
+        "kind": entry.kind,
+    }
+    frame = entry.frame
+    if entry.kind == LOG_UNDECODABLE:
+        record["len"] = len(frame.air)
+        return record
+    net = frame.network_id
+    alias = "own" if entry.own else aliases.setdefault(net, f"NET{len(aliases) + 1}")
+    data = not frame.is_ack
+    op, name = opcode_key(frame) if data else (None, None)
+    payload = _hex(frame.payload) if data and frame.payload else None
+    record.update(
+        dialect=entry.dialect,
+        net=alias,
+        src=frame.src,
+        dst=frame.dst,
+        tag=frame.tag if data else None,
+        op=op,
+        name=name,
+        payload=None if payload is None else _mask_identity(payload),
+    )
+    return record
+
+
 def summarise(frames: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     """Return frame and ack counts, networks, node ids and a named opcode histogram."""
     frames = list(frames)
@@ -212,6 +331,7 @@ def summarise(frames: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
 
 __all__ = [
     "FrameCapture",
+    "FrameLog",
     "frame_record",
     "mask_mac",
     "opcode_key",

@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from datetime import datetime
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.util import dt as dt_util
 
@@ -37,13 +37,14 @@ from custom_components.termoweb.planner.radio_planner import (
 )
 
 from .radio import protocol
-from .radio.capture import FrameCapture
+from .radio.capture import FrameCapture, FrameLog
 from .radio.dialect import DIALECTS, Dialect, Frame, build_frame
 from .radio.link import (
     DEFAULT_PORT,
     GatewayInfo,
     RadioLink,
     RadioLinkError,
+    ReceivedFrame,
     TransmitBlockedError,
     supports_survey,
 )
@@ -196,6 +197,7 @@ class RadioClient:
         self._identity_failures: dict[int, float] = {}  # last unanswered 5A read
         self.power = power or PowerManager()
         self.energy = EnergyEstimator(self.power.rated_power)
+        self.frame_log = FrameLog()  # recent frames for diagnostics
 
     # --- connection ----------------------------------------------------------
 
@@ -259,10 +261,24 @@ class RadioClient:
                     on_disconnect=self._handle_disconnect,
                     **listen,
                 )
+                link.add_listener(self._log_rx)
+                link.add_tx_listener(self._log_tx)
                 self._link = link
             if not link.connected:
                 await link.connect()
             return link
+
+    def _log_rx(self, received: ReceivedFrame) -> None:
+        """Log a frame the link heard, with its current dialect and network id."""
+
+        link = cast(RadioLink, self._link)
+        self.frame_log.on_rx(received, link.dialect, link.network_id)
+
+    def _log_tx(self, air: bytes) -> None:
+        """Log a frame the link transmitted, with its current dialect and network id."""
+
+        link = cast(RadioLink, self._link)
+        self.frame_log.on_tx(air, link.dialect, link.network_id)
 
     async def async_close(self) -> None:
         """Close the gateway connection for good; later use raises RadioLinkError."""

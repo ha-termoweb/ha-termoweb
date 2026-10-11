@@ -307,6 +307,16 @@ says so.
   connection, gateway firmware/frequency/sync/dialect/auto-ack/station id,
   survey support and the last survey summary. MAC and network id are left
   out.
+- `radio.recent_frames` (`capture.FrameLog`, kept by `RadioClient` in memory,
+  no I/O): `size` (200), `counts` since the client started (`own_network`
+  data, `ack`, `foreign_network`, `pairing_announcement` from any network,
+  `tx`, `undecodable`) and `frames`, the last 200 frames oldest first. Each
+  frame: `t` (ISO UTC, ms), `dir` (`rx`/`tx`), `kind`, `dialect`, `net`
+  (`own`, or `NET1`, `NET2`... in order of appearance; never the id), `src`,
+  `dst`, `tag`, `op`, `name` (`OPCODE_NAMES` / `TAG_NAMES`) and `payload`
+  (hex; identity and serial bytes masked as in `capture.redact`). An
+  undecodable frame keeps only `len`. Transmits are logged when the gateway
+  confirms them (`RadioLink.add_tx_listener`).
 - Report file: `format`, `created`, `integration_version`, `radio_type`,
   `configured_dialect`, `gateway` (firmware, freq, sync; no MAC),
   `survey_seconds`, and `report` (`redact(report).as_dict()`).

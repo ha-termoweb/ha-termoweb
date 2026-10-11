@@ -201,7 +201,7 @@ async def test_capture_records_frames_and_lines_while_commands_wait() -> None:
     assert [r["line"] for r in capture.raw] == ["# survey off"]
     assert capture.started is not None and capture.ended >= capture.started
     assert link.line_listeners == []
-    assert len(link.listeners) == 0
+    assert link.listeners == [client._log_rx]  # only the frame log stays
     link.deliver(received(HEATER, POWER_REQUEST))
     assert len(capture.frames) == 2
     assert link.sent == []
@@ -217,7 +217,7 @@ async def test_capture_removes_listeners_when_cancelled() -> None:
 
     with pytest.raises(asyncio.CancelledError):
         await client.async_capture(10, sleep=cancelled)
-    assert links[0].listeners == [] and links[0].line_listeners == []
+    assert links[0].listeners == [client._log_rx] and links[0].line_listeners == []
     await client.async_close()
 
 

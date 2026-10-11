@@ -137,6 +137,7 @@ class FakeRadioLink:
         self.gateway_info: GatewayInfo | None = None
         self.listeners: list[Callable[[ReceivedFrame], None]] = []
         self.line_listeners: list[Callable[[str], None]] = []
+        self.tx_listeners: list[Callable[[bytes], None]] = []
         self.dialects: list[str] = []
         self.dialect_error: Exception | None = None
         self.kwargs = _kwargs
@@ -211,6 +212,10 @@ class FakeRadioLink:
 
         return _remove
 
+    def add_tx_listener(self, callback: Callable[[bytes], None]):
+        self.tx_listeners.append(callback)
+        return lambda: None
+
     async def set_dialect(self, dialect: Dialect) -> None:
         if self.dialect_error is not None:
             raise self.dialect_error
@@ -223,6 +228,8 @@ class FakeRadioLink:
         frame = decode(self.dialect, air)
         assert frame.ok and frame.src == self.station_id and frame.dst == dst
         self.sent.append((dst, frame.payload))
+        for listener in list(self.tx_listeners):
+            listener(bytes(air))
         if self.on_send is not None:
             self.on_send(dst, frame.payload)
         if dst in self.no_ack:

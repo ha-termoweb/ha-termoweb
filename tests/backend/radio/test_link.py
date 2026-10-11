@@ -412,6 +412,30 @@ async def test_txerr_bad_hex_is_resent_once() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tx_listeners_get_each_confirmed_transmit_once(caplog) -> None:
+    """A TX listener sees the air bytes after TX, not for a refused bad-hex send."""
+    gw, ft, link = await connected()
+    sent: list[bytes] = []
+    remove = link.add_tx_listener(sent.append)
+
+    def broken(_air: bytes) -> None:
+        raise RuntimeError("boom")
+
+    link.add_tx_listener(broken)
+    gw.tx_overrides.append(link_mod.TXERR_BAD_HEX)
+    air = build_frame(DIALECT_B, 1, HEATER, b"\xb8", network_id=NET)
+    await link.send_frame(HEATER, air, wait_ack=False)
+    assert sent == [air]
+    assert "Radio TX listener failed" in caplog.text
+
+    remove()
+    remove()  # idempotent
+    await link.send_frame(HEATER, air, wait_ack=False)
+    assert sent == [air]
+    await link.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
@@ -926,6 +950,11 @@ class InfoLink:
     def __init__(self, info: GatewayInfo) -> None:
         self.gateway_info = info
         self.connected = True
+
+    def add_listener(self, _callback):
+        return lambda: None
+
+    add_tx_listener = add_listener
 
 
 @pytest.mark.asyncio

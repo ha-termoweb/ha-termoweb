@@ -16,6 +16,8 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
     get_diagnostics_for_config_entry,
 )
 
+from custom_components.termoweb.backend.radio import protocol as p
+from custom_components.termoweb.backend.radio.capture import LOG_KINDS
 from custom_components.termoweb.backend.radio_backend import RadioBackend
 from custom_components.termoweb.backend.radio_client import RadioClient
 from custom_components.termoweb.backend.sanitize import mask_identifier, redact_text
@@ -25,7 +27,13 @@ from custom_components.termoweb.const import BRAND_RADIO, CONF_BRAND, DOMAIN
 from custom_components.termoweb.diagnostics import async_get_config_entry_diagnostics
 from custom_components.termoweb.domain.state import GeoData
 from tests.fakes.cloud import DEV_ID, PASSWORD, USERNAME, VERSION, FakeCloud
-from tests.fakes.radio_link import FakeRadioLink, gateway_info
+from tests.fakes.radio_link import (
+    IDENTITY_SHORT,
+    NET,
+    FakeRadioLink,
+    gateway_info,
+    received,
+)
 from tests.fakes.runtime import build_entry_runtime
 from tests.fakes.sensors import fake_radio_links, radio_entry, setup_entry
 
@@ -156,6 +164,11 @@ async def test_diagnostics_radio_section_without_mac_or_network_id(
         "connected": False,
         "listen_only": False,
         "gateway": None,
+        "recent_frames": {
+            "size": 200,
+            "counts": dict.fromkeys(LOG_KINDS, 0),
+            "frames": [],
+        },
     }
 
     await client.async_connect()
@@ -179,6 +192,53 @@ async def test_diagnostics_radio_section_without_mac_or_network_id(
     text = repr(radio)
     assert "AA:BB" not in text
     assert "1234" not in text
+
+
+async def test_diagnostics_radio_recent_frames_mask_serials(
+    hass: HomeAssistant,
+) -> None:
+    """Frames sent and heard appear in diagnostics, serial bytes and net ids masked."""
+
+    links: list[FakeRadioLink] = []
+
+    def _link(host, port, dialect, **kwargs) -> FakeRadioLink:
+        link = FakeRadioLink(host, port, dialect, **kwargs)
+        links.append(link)
+        return link
+
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_BRAND: BRAND_RADIO})
+    entry.add_to_hass(hass)
+    client = RadioClient("10.0.0.5", 2323, "B", [], network_id=NET, link_factory=_link)
+    build_entry_runtime(
+        hass=hass,
+        dev_id="aabbcc001122",
+        brand=BRAND_RADIO,
+        client=client,
+        backend=RadioBackend(brand=BRAND_RADIO, client=client),
+        config_entry=entry,
+    )
+    await client.async_connect()
+    (link,) = links
+    link.reply(p.OP_IDENTITY, IDENTITY_SHORT)
+    await client.async_read_identity(6)
+    link.deliver(received(0xFF, b"\x55", tag=0x03, network_id=bytes.fromhex("5678")))
+
+    result = await async_get_config_entry_diagnostics(hass, entry)
+    await client.async_close()
+
+    log = result["radio"]["recent_frames"]
+    assert log["counts"]["tx"] == 1
+    assert log["counts"]["own_network"] == 1
+    assert log["counts"]["pairing_announcement"] == 1
+    tx, reply, announce = log["frames"]
+    assert (tx["dir"], tx["dst"], tx["name"]) == ("tx", 6, "identity request")
+    assert (reply["dir"], reply["src"], reply["name"]) == ("rx", 6, "identity reply")
+    assert reply["payload"] == "5B55" + "XX" * (len(IDENTITY_SHORT) - 2)
+    assert announce["net"] == "NET1"
+    text = json.dumps(result)
+    assert IDENTITY_SHORT[-7:].hex().upper() not in text
+    assert "X123456" not in text
+    assert "1234" not in text and "5678" not in text
 
 
 async def test_diagnostics_redact_radio_heater_serials(

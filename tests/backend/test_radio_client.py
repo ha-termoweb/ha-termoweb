@@ -326,7 +326,7 @@ async def test_status_read_failures_return_none() -> None:
 
     link.reply(0xB8, IDENTITY_SHORT)  # a reply, but not a status record
     assert await client.get_node_settings("dev", ("htr", "6")) is None
-    assert link.listeners == []  # the reply listener is always removed
+    assert link.listeners == [client._log_rx]  # the reply listener is removed
 
     link.drop()
     link.connect_errors.append(RadioLinkError("cannot connect"))
