@@ -1,0 +1,72 @@
+name: Firmware
+
+# Builds the nanoCUL radio firmware (firmware/nanocul) with avr-gcc and keeps
+# the .hex as a build artifact. When a GitHub Release is published, the same
+# build is attached to it as termoweb_rx-<version>.hex, so users can flash
+# the stick without a compiler (see docs/radio_nanocul.md).
+# The portable core (firmware/radio_core) is unit-tested on the host by the
+# Tests workflow (tests/firmware).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  nanocul:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install the AVR toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-avr avr-libc binutils-avr
+
+      - name: Build
+        run: make -C firmware/nanocul
+
+      - name: Check flash and RAM budget
+        run: |
+          read -r text data bss _ < <(avr-size firmware/nanocul/termoweb_rx.elf | tail -1)
+          flash=$((text + data)); ram=$((data + bss))
+          echo "flash ${flash} / 30720 bytes (32 KB minus the bootloader), static RAM ${ram} / 2048 bytes"
+          test "$flash" -le 30720
+          test "$ram" -le 1536  # leave at least 512 bytes for the stack
+
+      - name: Name the hex after the firmware version
+        id: hex
+        run: |
+          version=$(sed -n 's/^VERSION *= *//p' firmware/nanocul/Makefile)
+          cp firmware/nanocul/termoweb_rx.hex "termoweb_rx-${version}.hex"
+          echo "file=termoweb_rx-${version}.hex" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the hex
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nanocul-firmware
+          path: ${{ steps.hex.outputs.file }}
+
+  release:
+    needs: nanocul
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the hex
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: nanocul-firmware
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" termoweb_rx-*.hex --clobber --repo "${{ github.repository }}"

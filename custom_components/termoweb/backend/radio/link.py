@@ -46,8 +46,9 @@ DEFAULT_REPLY_TIMEOUT_S = 0.3
 SURVEY_OFF = "# survey off"
 SURVEY_GRACE_S = 10.0  # extra wait for the gateway's "survey off" line
 MAX_SURVEY_S = 3600
-SURVEY_MIN_VERSION = (3, 7)  # first ESP32 firmware with the R<seconds> survey
-SURVEY_FIRMWARE_SUFFIX = "-esp32"
+SURVEY_MIN_VERSION = (3, 7)  # first firmware with the R<seconds> survey
+# Ports with the survey: the ESP32 gateway and (from 3.7) the nanoCUL stick.
+SURVEY_FIRMWARE_SUFFIXES = ("-esp32", "-nanocul")
 # Every command a listen-only link may write: station id, auto-ack OFF, dialect,
 # network id, status query, banner and raw survey. Nothing that transmits.
 LISTEN_ONLY_COMMAND = re.compile(r"I[0-9A-F]{2}|A0|Y[0-9]|N[0-9A-F]{4}|Q|V|R[0-9]+")
@@ -158,11 +159,14 @@ def parse_query_line(line: str) -> GatewayInfo | None:
 
 
 def supports_survey(info: GatewayInfo | None) -> bool:
-    """Return True when the gateway firmware has the raw survey (ESP32 3.7+)."""
+    """Return True when the radio firmware has the raw survey (ESP32/nanoCUL 3.7+)."""
     version = None if info is None else info.version
-    if not version or not version.endswith(SURVEY_FIRMWARE_SUFFIX):
+    if not version:
         return False
-    parts = version.removesuffix(SURVEY_FIRMWARE_SUFFIX).split(".")
+    suffix = next((s for s in SURVEY_FIRMWARE_SUFFIXES if version.endswith(s)), None)
+    if suffix is None:
+        return False
+    parts = version.removesuffix(suffix).split(".")
     try:
         number = tuple(int(part) for part in parts[:2])
     except ValueError:

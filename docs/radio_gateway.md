@@ -264,8 +264,9 @@ heater does not show up, or when a developer asks for a report.
 5. The response shows the result and the name of the report file. The
    integration's diagnostics download also shows the last result.
 
-The survey needs gateway firmware 3.7-esp32 or newer (step 3). The nanoCUL
-stick cannot record surveys.
+The survey needs gateway firmware 3.7-esp32 or newer (step 3), or nanoCUL
+firmware 3.7-nanocul or newer. The nanoCUL keeps the first ~20 bytes of each
+burst, which is enough to recognise a dialect; the ESP32 keeps whole frames.
 
 ### Move your heaters to this installation's own network
 
@@ -326,9 +327,10 @@ What works over the radio, and what does not yet, is listed in
 ## For developers: the line protocol
 
 The gateway serves a line protocol on TCP port 2323. It is the protocol of
-`termoweb_rx` 3.5, the nanoCUL868 firmware in ha-termoweb-local, with a few
-additions. The full reference is the comment at the top of
-`esphome/termoweb_radio.h`.
+`termoweb_rx`, the same protocol the nanoCUL stick speaks over USB
+(`firmware/nanocul`, version 3.7-nanocul). The full reference is the comment
+at the top of `esphome/termoweb_radio.h`; `firmware/README.md` compares the
+two firmwares.
 
 The firmware is a **transparent radio**. RX lines carry the on-air bytes
 exactly as received, and `T` transmits the given bytes exactly as given. The
