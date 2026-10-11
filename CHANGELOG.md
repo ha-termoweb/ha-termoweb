@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.4.0b6 (pre-release, 2026-10-11)
+
+Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
 
 ### Added
 - Radio: **Download diagnostics** now includes the last 200 radio messages the gateway heard and sent, with counts per kind (own network, other networks, pairing announcements, acks, sent). Heater serial numbers and network ids are hidden. This helps us find out why a heater does not pair.
