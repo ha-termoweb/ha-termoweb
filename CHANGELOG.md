@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.4.0b4 (pre-release, 2026-10-11)
+
+Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
 
 ### Changed
 - Radio setup (ESP32 gateway and nanoCUL) no longer waits up to 6 minutes for your heaters. Choose **Add the gateway and find my heaters**: setup finishes at once. The integration then listens in the background and adds each heater by itself, usually within a few minutes. You get a notification for each heater it finds.
