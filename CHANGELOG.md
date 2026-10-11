@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.4.0b5 (pre-release, 2026-10-11)
+
+Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
 
 ### Added
 - Radio: heaters pair by themselves. Put the heater into pairing mode within 30 minutes of adding the gateway, or press **Pair new heaters** on the gateway device first (this opens pairing for 10 minutes). The heater is paired, gets its clock (and, for a heater you had before, its settings) back, and appears under **Devices** with a "Found TermoWeb heater" notification. You can pair several heaters, one after the other.
