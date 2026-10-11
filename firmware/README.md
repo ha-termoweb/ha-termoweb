@@ -67,10 +67,10 @@ and every CI run keeps one as an artifact.
 Wiring (a-culfw nanoCUL board): MOSI D11, MISO D12, SCK D13, CS D10,
 GDO0 D3 (INT1), GDO2 D2 (INT0).
 
-Expected size, ATmega328P: about 7-9 KB of the 30 KB flash left by the
-bootloader, and about 1.1 KB of static RAM (two 257-byte packet buffers,
-the 255-byte `T` buffer, the 256-byte serial input ring), leaving the rest
-of the 2 KB for the stack. CI fails the build above 30720 bytes of flash or
+Size, ATmega328P (avr-gcc, 3.7-nanocul): 9088 bytes of flash (of the 30 KB
+left by the bootloader) and 1112 bytes of static RAM (two 257-byte packet
+buffers, the 255-byte `T` buffer, the 256-byte serial input ring), leaving
+about 900 bytes of the 2 KB for the stack. CI fails the build above 30720 bytes of flash or
 1536 bytes of static RAM.
 
 ## Differences between the ports
