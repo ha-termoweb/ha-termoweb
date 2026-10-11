@@ -286,17 +286,22 @@ migration removes stored values.
 
 | Service | What it does |
 |---|---|
-| `termoweb.radio_pair` | Pairs one heater: back to its old address (then restores its mode, presets and program), or as a new heater (added to the entry, which reloads). |
 | `termoweb.radio_factory_reset` | Saves a heater's settings, then factory-resets it (dialect B only; dialect A raises `RadioUnsupportedError`). Destructive: the heater also leaves the network. |
 
-Both run in the client (`async_pair`, `async_factory_reset`,
-`async_restore`). Pairing holds the exchange lock, so heater commands wait.
-Protocol details: [radio protocol §7-8](radio_protocol.md#7-pairing).
+There is one pairing path: the pairing window below. A user pairs by putting
+a heater into pairing mode within 30 minutes of adding the gateway, or after
+pressing **Pair new heaters**. A reset heater is paired the same way and gets
+its saved settings back when its serial is recognised. The network move
+(`radio_rehome`) runs the same pairing exchange internally. Pairing runs in
+the client (`async_pair`, then `async_restore`) and holds the exchange lock,
+so heater commands wait. Protocol details:
+[radio protocol §7-8](radio_protocol.md#7-pairing).
 
 ### Automatic pairing (pairing window)
 
 `radio_autopair` pairs heaters by themselves while the entry's pairing window
-is open. The options flow has no pairing step: the button replaces it.
+is open. Neither the config flow nor the options flow has a pairing step,
+and there is no pairing service: the window and the button replace them.
 
 - **Window.** `pairing_window_end(hass, entry)` is the later of
   `entry.created_at + 30 min` (`FIRST_WINDOW`) and the end stored in
@@ -319,8 +324,7 @@ is open. The options flow has no pairing step: the button replaces it.
   relayed dialect-A copies are dropped. Listening is passive: no lock is
   taken. `HeaterPairer.async_announced` ignores the announcement (DEBUG log)
   when the window is closed, while a pairing run holds the entry's
-  `radio_pairing_lock` (the `radio_pair` service and the network move hold
-  it for their whole run), while its own attempt runs, or for 30 s
+  `radio_pairing_lock` (the network move holds it for its whole run), while its own attempt runs, or for 30 s
   (`RETRY_PAUSE_S`) after an attempt that paired nothing. Otherwise it runs
   one `client.async_pair(20 s, max_heaters=1)` (`PAIR_ATTEMPT_S`): the
   exchange lock is held for that attempt only, far below the 150 s keepalive
@@ -453,9 +457,10 @@ The manual radio form asks only for the host. Port (2323) and dialect
 1. `probe_gateway` connects with auto-ack off (nothing is transmitted) and
    reads the gateway MAC from the `# Q` line. The MAC becomes the `dev_id`
    and the entry's unique id (`radio:<mac>`). No MAC → error
-   `no_gateway_mac`. A menu (`radio_method`) then offers discovery (below),
-   pairing new heaters (`radio_pair`, see
-   [radio protocol §7](radio_protocol.md#7-pairing)), or **listen only**
+   `no_gateway_mac`. A menu (`radio_method`) then offers **Add the gateway**
+   (`radio_discover`, below; it finds known heaters and pairs new ones by
+   itself, see [Automatic pairing](#automatic-pairing-pairing-window)) or
+   **listen only**
    (`radio_monitor`): an entry with `brand: radio_monitor`, no heaters and no
    network id, which never transmits and records traffic with the
    `radio_capture` service
@@ -463,7 +468,7 @@ The manual radio form asks only for the host. Port (2323) and dialect
    It has its own unique id, `radio_monitor:<dev_id>`; only one entry can
    use the gateway's port at a time (the newest connection wins). A listen-only entry cannot be
    reconfigured (`monitor_reconfigure`): delete it and add it again.
-2. `radio_discover` ("Add the gateway and find my heaters") creates the
+2. `radio_discover` ("Add the gateway") creates the
    entry at once, with no progress step and no heaters
    (`radio_new_entry_data`): `brand: radio`, the connection, `nodes: []`,
    and the dialect only when the user chose one. Dialect A has a fixed

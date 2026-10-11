@@ -5,6 +5,9 @@
 ### Added
 - Radio: **Download diagnostics** now includes the last 200 radio messages the gateway heard and sent, with counts per kind (own network, other networks, pairing announcements, acks, sent). Heater serial numbers and network ids are hidden. This helps us find out why a heater does not pair.
 
+### Removed
+- Radio: the separate ways to pair heaters are gone, because heaters now pair by themselves. The setup menu offers **Add the gateway** and **Listen only**; the **Pair new heaters** menu choice and the **TermoWeb: Radio pair** action were removed. To pair a heater, put it into pairing mode within 30 minutes of adding the gateway, or press **Pair new heaters** on the gateway device first. A heater you reset gets its saved settings back when it is recognised.
+
 ## 2.4.0b5 (pre-release, 2026-10-11)
 
 Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.

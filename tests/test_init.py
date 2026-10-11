@@ -53,7 +53,6 @@ SERVICES = {
     "import_energy_history",
     "radio_survey",
     "radio_capture",
-    "radio_pair",
     "radio_factory_reset",
     "radio_rehome",
 }
@@ -146,6 +145,7 @@ async def test_services_registered_once_and_refuse_without_loaded_entry(
     """
     assert await _setup(hass, config_entry)
     assert set(hass.services.async_services_for_domain(DOMAIN)) >= SERVICES
+    assert "radio_pair" not in hass.services.async_services_for_domain(DOMAIN)
 
     assert await hass.config_entries.async_unload(config_entry.entry_id)
     await hass.async_block_till_done()

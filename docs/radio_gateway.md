@@ -147,11 +147,14 @@ The device page also shows:
 2. Click **Add** (or **Configure**). Home Assistant asks "Found a TermoWeb
    radio gateway at ... Set it up?". Press **Submit**. You do not type
    anything.
-3. Choose one:
-   - **Add the gateway and find my heaters**: your heaters already work
-     with a TermoWeb gateway or app. Go to "Find paired heaters" below.
-   - **Pair new heaters**: your heaters are new, or you reset them. Go to
-     "Pair new heaters" below.
+3. Choose **Add the gateway**. Setup finishes at once.
+   - Your heaters already work with a TermoWeb gateway or app: go to
+     "Find paired heaters" below.
+   - Your heaters are new, or you reset them: go to "Add new heaters"
+     below.
+
+   (**Listen only** is for tests: it records radio traffic next to a
+   TermoWeb gateway that still runs, and never transmits.)
 
 If the gateway is not under **Discovered** after a few minutes (some
 networks block discovery), add it by hand:
@@ -207,20 +210,10 @@ pair it again, and it gets its saved settings back.
 If the gateway has not found any heater yet, restarting Home Assistant (or
 reloading the integration) opens pairing for 30 minutes again.
 
-### Pair new heaters
-
-1. Read the steps on the screen, then press **Submit**. You have 5 minutes.
-2. Put one heater into pairing mode. The heater's manual tells you which
-   buttons to press.
-3. Wait about 10 seconds. Then put the next heater into pairing mode. Do one
-   heater at a time.
-4. Setup stops 1 minute after the last heater was paired (or after 5
-   minutes). Your heaters appear under **Devices** as "Heater 2",
-   "Heater 3", and so on.
-
-The integration gives your heaters their own radio network. It does not use
-the network of an old TermoWeb gateway. If you see "No heater was paired",
-move the gateway closer to the heater and try again.
+A gateway that has not found any heater yet gives your heaters their own
+radio network. It does not use the network of an old TermoWeb gateway. If a
+heater is not paired, move the gateway closer to the heater, press **Pair
+new heaters** and try again.
 
 ### If no heater is found
 
@@ -274,31 +267,9 @@ heater does not show up, or when a developer asks for a report.
 The survey needs gateway firmware 3.7-esp32 or newer (step 3). The nanoCUL
 stick cannot record surveys.
 
-### Pair a heater
-
-Home Assistant can pair a heater with the gateway itself. You need this for
-a new heater, or for a heater that you reset (below).
-
-1. Go to **Developer tools → Actions**.
-2. Choose **TermoWeb: Radio pair**.
-3. Choose your radio gateway.
-   - For a **new heater**, leave **Heater number** empty.
-   - For a heater that you **reset**, enter its old number. For "Heater 6",
-     enter 6.
-4. Press **Perform action**. You have 5 minutes for the next step.
-5. On the heater, start pairing mode. The heater's manual tells you which
-   buttons to press. Put **only one** heater into pairing mode at a time.
-6. When the action finishes, the response shows the heater number.
-   - A new heater appears under **Devices** after the integration reloads.
-   - A heater with its old number gets its settings back: mode, preset
-     temperatures and weekly program.
-
-Heater control pauses while pairing runs. If the action says that no heater
-was paired, move the gateway closer to the heater and try again.
-
 ### Move your heaters to this installation's own network
 
-If you found your heaters with **Add the gateway and find my heaters**, they
+If the gateway found heaters that already worked with a TermoWeb gateway, they
 still use the radio network of their old TermoWeb gateway. You can move them
 to a network of their own. Only dialect-B heaters can be moved.
 
@@ -313,8 +284,9 @@ to a network of their own. Only dialect-B heaters can be moved.
    "Heater 6 is now heater 2". The settings are restored. The entity ids
    change, so check your automations and dashboards.
 
-If a heater was not paired in time, the result says so. Pair it later with
-**TermoWeb: Radio pair** and its old number: it gets its settings back.
+If a heater was not paired in time, the result says so. Pair it later: press
+**Pair new heaters** on the gateway device and put the heater into pairing
+mode. It gets its saved settings back when Home Assistant recognises it.
 
 You can also start the move with the action **TermoWeb: Radio move heaters
 to own network**.
@@ -330,8 +302,9 @@ the settings first, so the pairing can give them back.
 2. Choose **TermoWeb: Radio factory reset**.
 3. Choose your radio gateway and enter the heater number.
 4. Press **Perform action**.
-5. Pair the heater again with **TermoWeb: Radio pair** and the same heater
-   number (see above).
+5. Pair the heater again: press **Pair new heaters** on the gateway device
+   and put the heater into pairing mode (see "Add new heaters" above). It
+   keeps its device and gets its saved settings back.
 
 Only heaters that use radio dialect B can be reset. The integration's
 diagnostics download shows the dialect.

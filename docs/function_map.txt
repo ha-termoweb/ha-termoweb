@@ -450,10 +450,6 @@ custom_components/termoweb/backend/radio/pairing.py :: pair_heaters
     Answer pairing announcements on a connected ``link`` and return the paired heaters.
 custom_components/termoweb/backend/radio/pairing.py :: pair_heaters._on_frame
     Queue every pairing announcement with the time it was heard.
-custom_components/termoweb/backend/radio/pairing.py :: pair_new_network
-    Pair heaters into ``network_id``, alternating ``dialects`` until one answers.
-custom_components/termoweb/backend/radio/pairing.py :: pair_new_network._pair
-    Pair in ``dialect`` for one slice; None when no heater was paired.
 custom_components/termoweb/backend/radio/protocol.py :: _half_degrees
     Return ``celsius`` in half degrees, the wire unit for temperatures.
 custom_components/termoweb/backend/radio/protocol.py :: _check_setpoint
@@ -1542,8 +1538,6 @@ custom_components/termoweb/config_flow_radio.py :: find_network
     Return the heater network: the known one, else learned by listening.
 custom_components/termoweb/config_flow_radio.py :: discover_radio
     Learn the network (unless given), then confirm heaters by address.
-custom_components/termoweb/config_flow_radio.py :: pair_radio
-    Pair new heaters into ``network_id``; return them like discover_radio does.
 custom_components/termoweb/config_flow_radio.py :: _radio_connection
     Return the entry data that says how to reach the gateway or stick.
 custom_components/termoweb/config_flow_radio.py :: radio_monitor_entry_data
@@ -1567,27 +1561,23 @@ custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._update_monit
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_zeroconf_confirm
     Ask before setting up a discovered gateway, then check it answers.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_method
-    Offer to add the gateway now (heaters found later), to pair, or to listen.
+    Offer to add the gateway (it finds and pairs heaters itself) or to listen.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_monitor
     Create a listen-only entry: it records traffic and never transmits.
-custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_pair
-    Explain pairing mode; start pairing when the user submits.
-custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_pair_run
-    Pair heaters into the site network while showing progress.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_discover
     Create the entry at once; its heaters are found in the background.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_rescan
     Scan the entry's known network for heaters while showing progress.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._radio_task_done
-    Collect the finished scan or pairing task and move to radio_finish.
+    Collect the finished scan task and move to radio_finish.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_finish
-    Create (or update) the radio entry, or return to the form with the error.
+    Update the rescanned entry and reload it, or show the form with the error.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._nanocul_flow
     Return True while the flow sets up (or reconfigures) a nanoCUL.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._connect_error
     Return the flow error key for a radio that cannot be reached.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._radio_form
-    Return the step id and schema to show again after a failed pairing or rescan.
+    Return the step id and schema to show again after a failed rescan.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_nanocul
     Choose the nanoCUL's serial port (or a manual path), then discover.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_nanocul_manual
@@ -1598,8 +1588,6 @@ custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._start_nanocu
     Probe the stick, check its firmware can speak the dialect, discover.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_reconfigure_nanocul
     Change the nanoCUL's port; optionally scan for heaters again.
-custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._reconfigure_entry
-    Return the entry being reconfigured, or None during initial setup.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_reconfigure_radio
     Change the gateway address; optionally scan for heaters again.
 custom_components/termoweb/const.py :: get_brand_api_base
@@ -2290,8 +2278,6 @@ custom_components/termoweb/radio_pairing.py :: merge_heaters
     Return ``(nodes, added nodes, moved count)`` after merging ``heaters`` in.
 custom_components/termoweb/radio_pairing.py :: async_notify_added
     Tell the user which heaters were added to ``entry`` (nothing when none).
-custom_components/termoweb/radio_pairing.py :: add_nodes
-    Add paired heaters to the entry's nodes and reload it; False if nothing changed.
 custom_components/termoweb/radio_rehome.py :: _addr
     Return a stored node's radio id, or None for an invalid address.
 custom_components/termoweb/radio_rehome.py :: _read_identities
@@ -2447,11 +2433,9 @@ custom_components/termoweb/services/radio_pairing.py :: _radio_runtime
 custom_components/termoweb/services/radio_pairing.py :: _require_node
     Raise unless heater ``addr`` is one of the entry's stored nodes.
 custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services
-    Register the radio_factory_reset, radio_pair and radio_rehome services once.
+    Register the radio_factory_reset and radio_rehome services once.
 custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services._async_factory_reset
     Save the heater's settings, then factory-reset it (it leaves the network).
-custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services._async_pair
-    Pair one heater: to its old address (and restore it), or as a new heater.
 custom_components/termoweb/services/radio_pairing.py :: async_register_radio_pairing_services._async_rehome
     Move every heater onto this installation's own network and restore it.
 custom_components/termoweb/services/radio_survey.py :: async_register_radio_survey_service

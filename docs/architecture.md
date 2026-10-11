@@ -140,13 +140,13 @@ This map defines responsibilities for each module family in the final design.
 - `config_flow.py` — `TermoWebConfigFlow` (the class HA registers): the
   setup menu, cloud login, reconfigure dispatch and reauth.
   `config_flow_radio.py` holds the radio setup helpers (serial ports, probes,
-  discovery, pairing, entry data) and `RadioConfigFlow`, the unregistered base
+  discovery, entry data) and `RadioConfigFlow`, the unregistered base
   class with the ESP32 gateway and nanoCUL steps. `options_flow.py` holds
   `TermoWebOptionsFlow` (radio rehoming).
 - `services/` — one module per registered service, each with an
   `async_register_*` function called once from `async_setup`:
-  `energy_history` (`import_energy_history`), `radio_pairing`, `radio_survey`,
-  `radio_capture`. Services look up loaded entries with
+  `energy_history` (`import_energy_history`), `radio_pairing`
+  (`radio_factory_reset`, `radio_rehome`), `radio_survey`, `radio_capture`. Services look up loaded entries with
   `runtime.loaded_runtimes(hass)`. Climate entity services are registered in
   `climate.py`.
 - `energy.py` — the energy history import (see below). `throttle.py` — the

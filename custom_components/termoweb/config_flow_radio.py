@@ -12,11 +12,7 @@ import re
 from typing import Any
 
 from homeassistant import config_entries
-from homeassistant.config_entries import (
-    SOURCE_RECONFIGURE,
-    ConfigEntry,
-    ConfigEntryState,
-)
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 import voluptuous as vol
@@ -32,7 +28,6 @@ from .backend.radio.discovery import (
     survey_network,
 )
 from .backend.radio.link import DEFAULT_PORT as RADIO_DEFAULT_PORT
-from .backend.radio.pairing import PAIRING_DIALECTS, PairedHeater, pair_new_network
 from .backend.radio.serial_link import serial_device_id, serial_opener
 from .backend.radio.survey import RawBurst, SurveyReport, analyse
 from .backend.radio_client import dev_id_from_mac
@@ -54,7 +49,7 @@ from .const import (
     RADIO_TYPE_ESP32,
     RADIO_TYPE_NANOCUL,
 )
-from .radio_pairing import async_site_network_id, radio_node
+from .radio_pairing import radio_node
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,9 +71,7 @@ ADVANCED = "advanced"  # collapsed form section: port and dialect
 SERIAL_BY_ID_DIR = "/dev/serial/by-id"
 NANOCUL_LABEL = "nanoCUL"
 MONITOR_LABEL = "Radio monitor"  # title of a listen-only entry
-_CAPABLE = "dialect_capable"  # flow state: firmware switches dialects at runtime
-_GATEWAY_ID = "gateway_id"  # flow state: the gateway's dev_id, seeds the network id
-_PAIRING = "pairing"  # flow state: the user chose to pair new heaters
+_GATEWAY_ID = "gateway_id"  # flow state: the gateway's dev_id
 
 
 @dataclass(frozen=True)
@@ -430,31 +423,6 @@ async def discover_radio(
     return sighting, heaters
 
 
-async def pair_radio(
-    host: str,
-    port: int,
-    dialect: str,
-    network_id: bytes,
-    *,
-    link_factory: Any = RadioLink,
-    dialect_capable: bool = True,
-) -> tuple[NetworkSighting, dict[int, Any]]:
-    """Pair new heaters into ``network_id``; return them like discover_radio does."""
-    if dialect != DIALECT_AUTO:
-        dialects: tuple[Any, ...] = (DIALECTS[dialect],)
-    elif dialect_capable:
-        dialects = PAIRING_DIALECTS
-    else:
-        dialects = (DIALECT_A,)  # stock nanoCUL firmware: dialect A only
-    paired_dialect, paired = await pair_new_network(
-        host, port, network_id, dialects=dialects, link_factory=link_factory
-    )
-    if paired_dialect is None or not paired:
-        raise RadioSetupError("no_heaters_paired")
-    heaters = {heater.node_id: heater for heater in paired}
-    return NetworkSighting(paired_dialect, network_id, frozenset(heaters)), heaters
-
-
 def _radio_connection(radio: Mapping[str, Any]) -> dict[str, Any]:
     """Return the entry data that says how to reach the gateway or stick."""
     if radio.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
@@ -506,12 +474,7 @@ def radio_entry_data(
         **_radio_connection(radio),
         CONF_DIALECT: sighting.dialect.name,
         CONF_NETWORK_ID: sighting.network_id.hex().upper(),
-        CONF_NODES: [
-            radio_node(
-                addr, heater.serial if isinstance(heater, PairedHeater) else None
-            )
-            for addr, heater in sorted(heaters.items())
-        ],
+        CONF_NODES: [radio_node(addr) for addr in sorted(heaters)],
     }
 
 
@@ -650,10 +613,10 @@ class RadioConfigFlow(config_entries.ConfigFlow):
     async def async_step_radio_method(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Offer to add the gateway now (heaters found later), to pair, or to listen."""
+        """Offer to add the gateway (it finds and pairs heaters itself) or to listen."""
         return self.async_show_menu(
             step_id="radio_method",
-            menu_options=["radio_discover", "radio_pair", "radio_monitor"],
+            menu_options=["radio_discover", "radio_monitor"],
         )
 
     async def async_step_radio_monitor(
@@ -670,46 +633,6 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         data = radio_monitor_entry_data(self._radio)
         where = data[CONF_DEVICE] if self._nanocul_flow() else data[CONF_HOST]
         return self.async_create_entry(title=f"{MONITOR_LABEL} ({where})", data=data)
-
-    async def async_step_radio_pair(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Explain pairing mode; start pairing when the user submits."""
-        if user_input is None:
-            return self.async_show_form(
-                step_id="radio_pair", data_schema=vol.Schema({})
-            )
-        self._radio[_PAIRING] = True
-        return await self.async_step_radio_pair_run()
-
-    async def async_step_radio_pair_run(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Pair heaters into the site network while showing progress."""
-        if self._radio_task is None:
-            self._radio_result = None
-            self._radio_error = None
-            network_id = await async_site_network_id(
-                self.hass, str(self._radio.get(_GATEWAY_ID))
-            )
-            host, port = radio_address(self._radio)
-            self._radio_task = self.hass.async_create_task(
-                pair_radio(
-                    host,
-                    port,
-                    self._radio.get(CONF_DIALECT, DIALECT_AUTO),
-                    network_id,
-                    link_factory=radio_link_factory(self._radio),
-                    dialect_capable=self._radio.get(_CAPABLE, True),
-                )
-            )
-        if not self._radio_task.done():
-            return self.async_show_progress(
-                step_id="radio_pair_run",
-                progress_action="radio_pair",
-                progress_task=self._radio_task,
-            )
-        return await self._radio_task_done()
 
     async def async_step_radio_discover(
         self, user_input: dict[str, Any] | None = None
@@ -744,7 +667,7 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         return await self._radio_task_done()
 
     async def _radio_task_done(self) -> FlowResult:
-        """Collect the finished scan or pairing task and move to radio_finish."""
+        """Collect the finished scan task and move to radio_finish."""
         task, self._radio_task = self._radio_task, None
         assert task is not None  # only called once the task finished
         try:
@@ -763,7 +686,7 @@ class RadioConfigFlow(config_entries.ConfigFlow):
     async def async_step_radio_finish(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Create (or update) the radio entry, or return to the form with the error."""
+        """Update the rescanned entry and reload it, or show the form with the error."""
         if self._radio_result is None:
             step_id, schema = self._radio_form()
             return self.async_show_form(
@@ -771,11 +694,9 @@ class RadioConfigFlow(config_entries.ConfigFlow):
                 data_schema=schema,
                 errors={"base": self._radio_error or "unknown"},
             )
-        data = self._radio_result
-        entry = self._reconfigure_entry()
-        if entry is not None:
-            return self.async_update_reload_and_abort(entry, data=data)
-        return self.async_create_entry(title=_entry_title(data), data=data)
+        return self.async_update_reload_and_abort(
+            self._get_reconfigure_entry(), data=self._radio_result
+        )
 
     def _nanocul_flow(self) -> bool:
         """Return True while the flow sets up (or reconfigures) a nanoCUL."""
@@ -788,9 +709,7 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         )
 
     def _radio_form(self) -> tuple[str, vol.Schema]:
-        """Return the step id and schema to show again after a failed pairing or rescan."""
-        if self._radio.get(_PAIRING):
-            return "radio_pair", vol.Schema({})
+        """Return the step id and schema to show again after a failed rescan."""
         if self._nanocul_flow():
             return "reconfigure_nanocul", _reconfigure_nanocul_schema(self._radio)
         return "reconfigure_radio", _reconfigure_radio_schema(self._radio)
@@ -879,7 +798,6 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         self._radio.update(
             {
                 CONF_RADIO_DEVICE_ID: dev_id,
-                _CAPABLE: capable,
                 _GATEWAY_ID: dev_id,
             }
         )
@@ -922,12 +840,6 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         return self.async_update_reload_and_abort(
             entry, data_updates={CONF_DEVICE: device}
         )
-
-    def _reconfigure_entry(self) -> ConfigEntry | None:
-        """Return the entry being reconfigured, or None during initial setup."""
-        if self.source != SOURCE_RECONFIGURE:
-            return None
-        return self._get_reconfigure_entry()
 
     async def async_step_reconfigure_radio(
         self, user_input: dict[str, Any] | None = None

@@ -16,7 +16,7 @@ and the network id. See ``docs/radio_protocol.md`` (section 7).
   would drop an assignment sent on this station's network id.
 
 This module has no Home Assistant dependency and transmits only while
-:func:`pair_heaters` or :func:`pair_new_network` runs.
+:func:`pair_heaters` runs.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ import logging
 import time
 
 from . import protocol
-from .dialect import DIALECT_A, DIALECT_B, Dialect, Frame, build_frame
-from .link import RadioLink, ReceivedFrame, rotate_dialects
+from .dialect import DIALECT_B, Dialect, Frame, build_frame
+from .link import RadioLink, ReceivedFrame
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +46,6 @@ MAX_NODE_ID = 0x41  # the stock gateway's node tables stop here
 RESERVED_NETWORK_IDS = frozenset({b"\x00\x00", b"\xff\xff", b"\x1b\x30"})
 
 PAIR_WINDOW_S = 300.0  # how long the owner has to press pairing on a heater
-PAIR_DIALECT_WINDOW_S = 15.0  # per-dialect listening slice when the dialect is unknown
 IDLE_STOP_S = 60.0  # after a pairing, stop this long after the last announcement
 SETTLE_S = 5.0  # ignore further sweeps this long after an assignment
 CONFIRM_TIMEOUT_S = 1.0
@@ -57,9 +56,7 @@ ASSIGN_GAP_S = 1.0
 ASSIGN_ACK_WAIT_S = 0.2
 ANSWER_MAX_AGE_S = 0.1
 POLL_STEP_S = 0.02
-PAIRING_DIALECTS: tuple[Dialect, ...] = (DIALECT_B, DIALECT_A)
 
-LinkFactory = Callable[..., RadioLink]
 Sleep = Callable[[float], Awaitable[None]]
 
 
@@ -304,55 +301,7 @@ async def pair_heaters(
     return paired
 
 
-async def pair_new_network(
-    host: str,
-    port: int,
-    network_id: bytes,
-    *,
-    dialects: Sequence[Dialect] = PAIRING_DIALECTS,
-    total_s: float = PAIR_WINDOW_S,
-    window_s: float = PAIR_DIALECT_WINDOW_S,
-    idle_stop_s: float = IDLE_STOP_S,
-    link_factory: LinkFactory = RadioLink,
-    clock: Callable[[], float] = time.monotonic,
-    sleep: Sleep = asyncio.sleep,
-) -> tuple[Dialect | None, list[PairedHeater]]:
-    """Pair heaters into ``network_id``, alternating ``dialects`` until one answers.
-
-    A dialect whose announcement is heard keeps its slice open (see
-    :func:`pair_heaters`); the first dialect that pairs a heater ends the
-    rotation. A dialect the gateway firmware cannot speak is dropped; if none
-    is left, the UnsupportedDialectError is raised.
-    """
-
-    async def _pair(
-        dialect: Dialect, left: float
-    ) -> tuple[Dialect, list[PairedHeater]] | None:
-        """Pair in ``dialect`` for one slice; None when no heater was paired."""
-        link = link_factory(host, port, dialect, network_id=network_id)
-        await link.connect()
-        try:
-            paired = await pair_heaters(
-                link,
-                window_s=min(window_s, left),
-                total_s=left,
-                idle_stop_s=idle_stop_s,
-                clock=clock,
-                sleep=sleep,
-            )
-        finally:
-            await link.close()
-        return (dialect, paired) if paired else None
-
-    result = await rotate_dialects(dialects, _pair, total_s, clock)
-    if result is None:
-        _LOGGER.info("No heater was paired on %s:%s", host, port)
-        return None, []
-    return result
-
-
 __all__ = [
-    "PAIRING_DIALECTS",
     "PAIR_WINDOW_S",
     "Announcement",
     "NoFreeAddressError",
@@ -362,6 +311,5 @@ __all__ = [
     "classify_announcement",
     "free_node_id",
     "pair_heaters",
-    "pair_new_network",
     "site_network_id",
 ]

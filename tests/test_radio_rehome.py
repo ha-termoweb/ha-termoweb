@@ -265,7 +265,7 @@ async def test_unrecognised_and_unpaired_heaters_are_reported(
     assert set(rig.entry.options["radio_restore"]) == {"6", "7"}
     summary = radio_rehome.rehome_summary(result)
     assert "Heater 8 was paired, but its old heater was not recognised" in summary
-    assert "heater number 7 to pair it" in summary
+    assert 'Heater 7 was not paired. It is reset and waits. Press "Pair new' in summary
     assert "may be one of the heaters that were not recognised" in summary
 
 
@@ -285,7 +285,7 @@ async def test_nothing_paired_still_moves_and_says_so(rig: Rig) -> None:
     result = await rig.rehome()
     assert result == {"moved": [], "unidentified": [], "waiting": [6]}
     assert rig.entry.data["network_id"] == (await _site_net(rig.hass)).hex().upper()
-    assert rp.saved_snapshot(rig.entry, 6) == SNAPSHOT  # for a later Radio pair
+    assert rp.saved_snapshot(rig.entry, 6) == SNAPSHOT  # until it is paired again
     summary = radio_rehome.rehome_summary(result)
     assert summary.splitlines()[1] == "No heater was paired in time."
 

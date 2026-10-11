@@ -12,12 +12,13 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.termoweb import radio_identity, radio_pairing as rp
+from custom_components.termoweb import radio_identity
 from custom_components.termoweb.backend.radio.pairing import PairedHeater
 from custom_components.termoweb.backend.radio_client import RadioClient
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.inventory import Inventory
 from custom_components.termoweb.nodes import build_node_inventory
+from custom_components.termoweb.radio_discovery import HeaterFinder
 from tests.fakes.radio_link import IDENTITY_RATED, MAC, NET, STATUS_SHORT, FakeRadioLink
 from tests.fakes.sensors import fake_radio_links, radio_entry, setup_entry
 
@@ -149,7 +150,8 @@ async def test_repaired_heater_keeps_its_entities_and_shows_its_new_address(
         assert dr.async_get(hass).async_get(device_id).serial_number == SERIAL
 
         repaired = PairedHeater(2, SimpleNamespace(), serial=SERIAL)
-        assert rp.add_nodes(hass, entry, [repaired])
+        # Automatic pairing hands a re-paired heater to the heater finder.
+        await HeaterFinder(hass, entry, None).async_add([], paired=[repaired])
         await hass.async_block_till_done()  # the scheduled reload
 
         assert entry.data["nodes"] == [{**node, "addr": "2"}]
