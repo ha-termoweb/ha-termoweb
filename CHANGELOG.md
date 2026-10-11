@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Heaters without boost no longer show a preset choice. Before, they offered only **None**, which did nothing useful. To end a temporary temperature change while in Auto, select **Auto** again. Accumulators and heaters with boost keep their presets.
+
 ## 2.4.0b7 (pre-release, 2026-10-11)
 
 Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.

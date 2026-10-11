@@ -87,7 +87,8 @@ derived or guessed.
 
 Mode: radio `03` is a temporary override that ends at the next program slot.
 That is exactly the cloud's `modified_auto`, which `climate.py` shows as HVAC
-mode Auto with preset `temporary_override`.
+mode Auto (with preset `temporary_override` on heaters that have boost; heaters
+without boost have no presets).
 
 Program order: the radio wire is Sunday-first; the integration (cloud codec,
 `climate.py` slot lookup `weekday() * 24 + hour`) is Monday-first.

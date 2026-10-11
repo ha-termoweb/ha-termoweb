@@ -276,20 +276,22 @@ def _require_boost(entity: HeaterClimateEntity, service: str) -> None:
         )
 
 
+_HEATER_FEATURES = (
+    ClimateEntityFeature.TARGET_TEMPERATURE
+    | ClimateEntityFeature.TURN_ON
+    | ClimateEntityFeature.TURN_OFF
+)
+
+
 class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     """HA climate entity representing a single TermoWeb heater."""
 
-    _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE
-        | ClimateEntityFeature.PRESET_MODE
-        | ClimateEntityFeature.TURN_ON
-        | ClimateEntityFeature.TURN_OFF
-    )
+    _attr_supported_features = _HEATER_FEATURES
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
-    # ``temporary_override`` (backend ``modified_auto``) is reported as the
-    # current preset but cannot be selected: changing the target temperature
-    # while in Auto starts it.
-    _attr_preset_modes = ["none"]
+    # Only heaters with boost offer presets. ``temporary_override`` (backend
+    # ``modified_auto``) is reported as the current preset but cannot be
+    # selected: changing the target temperature while in Auto starts it.
+    _attr_preset_modes: list[str] | None = None
     # Modes that turn_on may restore after a turn_off.
     _resume_modes: tuple[HVACMode, ...] = (HVACMode.HEAT, HVACMode.AUTO)
 
@@ -310,6 +312,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         HeaterNode.__init__(self, name=name, addr=addr)
         self._heater_boost = boost
         if boost:
+            self._attr_supported_features |= ClimateEntityFeature.PRESET_MODE
             self._attr_preset_modes = ["none", "boost"]
 
         default_type = (
@@ -888,6 +891,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 class AccumulatorClimateEntity(HeaterClimateEntity):
     """HA climate entity for TermoWeb accumulator nodes."""
 
+    _attr_supported_features = _HEATER_FEATURES | ClimateEntityFeature.PRESET_MODE
     _attr_hvac_modes: list[HVACMode] = [HVACMode.OFF, HVACMode.AUTO]
     _attr_preset_modes = ["none", "boost"]
     _resume_modes = (HVACMode.AUTO,)
