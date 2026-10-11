@@ -49,6 +49,12 @@ from .energy import energy_import_store
 from .identifiers import build_cloud_unique_id, migrate_unique_id
 from .inventory import Inventory
 from .nodes import build_node_inventory, normalize_node_addr, normalize_node_type
+from .radio_autopair import (
+    FIRST_WINDOW,
+    async_forget_pairing_window,
+    async_open_pairing_window,
+    async_start_auto_pairing,
+)
 from .radio_discovery import (
     async_start_heater_finder,
     async_start_network_search,
@@ -162,6 +168,8 @@ async def async_setup_entry(  # noqa: C901
     if network_pending(entry):
         # Nothing to set up until the heaters' network is heard; the search
         # stores it and reloads the entry. It needs the gateway to itself.
+        # With no heaters yet, every setup opens the pairing window again.
+        async_open_pairing_window(hass, entry, FIRST_WINDOW)
         async_start_network_search(hass, entry)
         return True
 
@@ -435,7 +443,8 @@ async def async_setup_entry(  # noqa: C901
     )
 
     if backend.capabilities.heater_discovery:
-        async_start_heater_finder(hass, entry, client, bool(inventory.nodes))
+        finder = async_start_heater_finder(hass, entry, client, bool(inventory.nodes))
+        async_start_auto_pairing(hass, runtime, finder)
 
     _register_hub_devices(hass, entry, runtime)
     platforms = _platforms_for_brand(brand)
@@ -567,8 +576,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: TermoWebConfigEntry) ->
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Delete the entry's stored energy import progress."""
+    """Delete the entry's stored energy import progress and pairing window."""
     await energy_import_store(hass, entry.entry_id).async_remove()
+    async_forget_pairing_window(hass, entry.entry_id)
 
 
 def _cloud_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> str | None:

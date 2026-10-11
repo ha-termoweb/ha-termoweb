@@ -49,7 +49,7 @@ decoders in `backend/radio/protocol.py` return frozen dataclasses.
 | `priority` | True (local power manager) | True | heater priority number entities |
 | `energy_history` | False | True | `import_energy_history` service (logs an error and skips the entry) |
 | `local_radio` | True | False | one entry per gateway/stick, link closed on unload, radio reconfigure steps |
-| `options_flow` | True | False | options flow (pairing, rehoming) |
+| `options_flow` | True | False | options flow (rehoming) |
 | `web_portal` | False | True | `configuration_url` on devices |
 
 `priority` and `energy_history` are new in this PR. Both cloud backends
@@ -293,6 +293,57 @@ Both run in the client (`async_pair`, `async_factory_reset`,
 `async_restore`). Pairing holds the exchange lock, so heater commands wait.
 Protocol details: [radio protocol §7-8](radio_protocol.md#7-pairing).
 
+### Automatic pairing (pairing window)
+
+`radio_autopair` pairs heaters by themselves while the entry's pairing window
+is open. The options flow has no pairing step: the button replaces it.
+
+- **Window.** `pairing_window_end(hass, entry)` is the later of
+  `entry.created_at + 30 min` (`FIRST_WINDOW`) and the end stored in
+  `hass.data[PAIRING_WINDOWS][entry_id]`, or None once both have passed. The
+  **Pair new heaters** button (`button.<gateway>_pair_new_heaters`, entity
+  category config, unique id `<dev_id>:pair_heaters`) calls
+  `async_open_pairing_window` (now + 10 min, `BUTTON_WINDOW`), which sends
+  `signal_radio_pairing_window(entry_id)`. The binary sensor **Pairing open**
+  (`pairing_open`) is on while the window is open; its `ends_at` attribute is
+  the end (ISO), and it schedules its own state change for that moment (the
+  timer is cancelled when the entity is removed). Both entities exist only
+  when `pairing_supported(runtime)`: the `heater_discovery` capability and a
+  client that may transmit. The window lives in `hass.data`, so it survives
+  the reload that adds a heater: several heaters pair in one window. A
+  network-pending entry opens a 30-minute window at every setup (it has no
+  heaters and no button yet). Removing the entry drops its window.
+- **Running entry.** `RadioListener` classifies every frame first
+  (`pairing.classify_announcement`, any network id, any swept destination).
+  A direct announcement is sent as `signal_radio_pairing_announcement`;
+  relayed dialect-A copies are dropped. Listening is passive: no lock is
+  taken. `HeaterPairer.async_announced` ignores the announcement (DEBUG log)
+  when the window is closed, while a pairing run holds the entry's
+  `radio_pairing_lock` (the `radio_pair` service and the network move hold
+  it for their whole run), while its own attempt runs, or for 30 s
+  (`RETRY_PAUSE_S`) after an attempt that paired nothing. Otherwise it runs
+  one `client.async_pair(20 s, max_heaters=1)` (`PAIR_ATTEMPT_S`): the
+  exchange lock is held for that attempt only, far below the 150 s keepalive
+  limit (#1040); a dialect-B sweep reaches this station within a few
+  seconds. New heaters get the lowest id not used by a stored node nor
+  assigned since setup (`reserved_ids`). A dialect-A announcement carries the
+  identity, so a known serial is paired back to its stored address
+  (`wanted_id`); a known dialect-B heater gets a new id and its node moves
+  (`merge_heaters`). After the pairing, `client.async_restore` sends the
+  clock; a known heater also gets its saved settings
+  (`saved_snapshot`, else the last state Home Assistant saw), which are then
+  dropped. The heater goes to `HeaterFinder.async_paired`: it joins the
+  10 s found-heater batch (identity already read), is stored, the entry
+  reloads once and the "Found TermoWeb heater" notification is shown.
+- **Network-pending entry.** `listen_once` never takes a pairing
+  announcement for network traffic (dialect B sends it on net `0000`). With
+  the window open it raises `PairingAnnounced(dialect)`, and
+  `async_search_network` calls `async_pair_new_network`: `pair_radio` on the
+  site network id (`async_site_network_id` of the gateway id from the entry's
+  unique id) in that dialect, then stores `dialect`, `network_id` and the
+  nodes, notifies and reloads. No heater paired: listening starts again at
+  once.
+
 ## Heater identity and names
 
 A heater's radio address (`addr`) follows the pairing order, so it can change
@@ -480,7 +531,9 @@ gateway backend, not listen-only entries).
    dialect saves the report file, shows a persistent notification ("TermoWeb
    heaters not recognised") with the file and the issue link, and stops; a
    reload listens again. A heard network is stored (`dialect`, `network_id`)
-   and the entry reloads into a normal setup with no heaters.
+   and the entry reloads into a normal setup with no heaters. A heater
+   announcing pairing while the window is open is paired instead (see
+   [Automatic pairing](#automatic-pairing-pairing-window)).
 2. **Scan** (network known, no heaters). `HeaterFinder.async_scan` asks every
    address 2-32 for its `5A` identity through the running client, 0.2 s
    apart (`SCAN_GAP_S`). Each read holds the exchange lock for one exchange
