@@ -292,6 +292,7 @@ listen-only entry first.
 | What you see | What to do |
 |---|---|
 | "Cannot open the nanoCUL stick" | Check the cable and the port. Check that the firmware is `termoweb_rx` (step 2), not culfw. Only one program can use the stick: stop any other program that uses it. |
+| "The stick answers, but its radio module is not connected" | The Arduino works, but its radio board (CC1101) does not answer. Check that the radio board is plugged in or soldered on, and check its wires (the pins are in [firmware/README.md](../firmware/README.md)). Then unplug the stick, plug it in again and try again. |
 | "The firmware on this nanoCUL stick is too old" | Put the newest firmware on the stick (step 2). |
 | The stick is not in the **USB port** list | Unplug it and plug it in again. Wait 10 seconds and open the form again. Or type the path yourself (step 4). |
 | No heater is found | Turn a heater's temperature up so that it starts heating. Move the stick closer to a heater (a USB extension cable helps). Check that the stick is the **868 MHz** version. Or pair the heater again (step 5). |

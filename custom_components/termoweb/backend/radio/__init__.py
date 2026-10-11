@@ -22,6 +22,7 @@ from .link import (
     GatewayInfo,
     RadioLink,
     RadioLinkError,
+    RadioMissingError,
     ReceivedFrame,
     UnsupportedDialectError,
 )
@@ -65,6 +66,7 @@ __all__ = [
     "ProgramRecord",
     "RadioLink",
     "RadioLinkError",
+    "RadioMissingError",
     "RawBurst",
     "ReceivedFrame",
     "StatusRecord",

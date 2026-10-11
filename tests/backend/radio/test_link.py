@@ -25,6 +25,7 @@ from custom_components.termoweb.backend.radio.link import (
     GatewayInfo,
     RadioLink,
     RadioLinkError,
+    RadioMissingError,
     TransmitBlockedError,
     UnsupportedDialectError,
     parse_query_line,
@@ -44,6 +45,7 @@ from custom_components.termoweb.backend.radio_client import (
 from tests.fakes.radio_gateway import (
     BANNER,
     NET,
+    Q_LINE,
     Q_LINE_NANOCUL,
     FakeGateway,
     FakeTime,
@@ -151,6 +153,7 @@ async def test_connect_handshake_dialect_b() -> None:
     assert link.connected
     info = link.gateway_info
     assert info.version == "3.6-esp32"
+    assert info.radio is None  # firmware without the radio check
     assert info.dialect == "B"
     assert info.sync == "2DD4"
     assert info.autoack is True
@@ -188,6 +191,27 @@ async def test_connect_q_without_sync() -> None:
     link = make_link(gw, FakeTime())
     info = await link.connect()
     assert info.sync is None
+    await link.close()
+
+
+@pytest.mark.asyncio
+async def test_connect_refuses_a_stick_without_its_radio(caplog) -> None:
+    """Q with radio=missing closes the link with a plain-English error."""
+    gw = FakeGateway()
+    gw.q_line = f"{Q_LINE} radio=missing"
+    with (
+        caplog.at_level(logging.ERROR),
+        pytest.raises(RadioMissingError, match="radio module is not connected"),
+    ):
+        await make_link(gw, FakeTime()).connect()
+    assert gw.writer.closed
+    assert "no CC1101" in caplog.text
+
+    gw = FakeGateway()
+    gw.q_line = f"{Q_LINE} radio=ok"
+    link = make_link(gw, FakeTime())
+    info = await link.connect()
+    assert info.radio == "ok"
     await link.close()
 
 

@@ -38,15 +38,18 @@ VERSION = nanocul_make_var("VERSION")
 BANNER = (
     f"# termoweb_rx {VERSION} freq=869.525 rate=9.6k sync=2DE5 mode=dynamic tx=paC0"
 )
-QUERY = (
+QUERY_FIELDS = (
     f"# Q termoweb_rx {VERSION} freq=869.525 pa=C0 sync=2DE5 mode=dynamic "
     "autoack=off id=01 dialect=A net=0000"
 )
+QUERY = f"{QUERY_FIELDS} radio=ok"
+NO_RADIO = "# error: no CC1101 radio found"
 NET_B = bytes.fromhex("1234")  # synthetic network id (both dialects)
 CC1101_PKTLEN, CC1101_PKTCTRL0 = 0x06, 0x08
 CC1101_SYNC0, CC1101_FREQ2, CC1101_FREQ1, CC1101_FREQ0 = 0x05, 0x0D, 0x0E, 0x0F
 CC1101_PATABLE, CC1101_SFRX, CC1101_SRX = 0x3E, 0x3A, 0x34
 CC1101_PKTSTATUS = 0x38
+CC1101_PARTNUM, CC1101_VERSION = 0x30, 0x31
 RX_IDLE, RX_DONE = 0, 3
 
 
@@ -164,7 +167,7 @@ def test_boot_prints_the_banner_and_arms_the_receiver(core_lib: Core) -> None:
 def test_mac_field_is_appended_when_the_port_has_one(core_lib: Core) -> None:
     """A port with a MAC (the ESP32) gets mac= appended to banner and Q."""
     assert core_lib.start(b"AA:BB:CC:DD:EE:FF") == [f"{BANNER} mac=AA:BB:CC:DD:EE:FF"]
-    assert core_lib.send("Q") == [f"{QUERY} mac=AA:BB:CC:DD:EE:FF"]
+    assert core_lib.send("Q") == [f"{QUERY_FIELDS} mac=AA:BB:CC:DD:EE:FF radio=ok"]
 
 
 def test_query_is_dialect_capable_for_the_integration(core: Core) -> None:
@@ -176,7 +179,67 @@ def test_query_is_dialect_capable_for_the_integration(core: Core) -> None:
     assert info.dialect == "A"
     assert info.mac is None
     assert info.station_id == 1 and info.autoack is False
+    assert info.radio == "ok"
     assert supports_survey(info)
+
+
+@pytest.mark.parametrize("level", [0x00, 0xFF])
+def test_missing_radio_is_reported_and_never_used(core_lib: Core, level: int) -> None:
+    """No CC1101 (MISO idles low or high): banner and Q say so, T/R refuse, no RX."""
+    lines = core_lib.start(absent_level=level)
+    assert lines == [f"{BANNER} radio=missing", NO_RADIO]
+    assert core_lib.host_radio_ok() == 0
+    assert core_lib.host_strobes(CC1101_SRX) == 0  # never configured or armed
+    assert core_lib.host_masked() == 1  # GDO edges stay masked
+    assert core_lib.send("Q\n") == [f"{QUERY_FIELDS} radio=missing"]
+    info = parse_query_line(f"{QUERY_FIELDS} radio=missing")
+    assert info is not None and info.radio == "missing"
+    assert core_lib.send("T0102\n") == ["TXERR no radio"]
+    assert core_lib.host_tx_count() == 0
+    assert core_lib.send("R10\n") == [NO_RADIO]
+    assert core_lib.host_survey_calls() == 0
+    # Session commands still answer, without touching the chip.
+    assert core_lib.send("Y1\nF868300\n") == [
+        "# dialect=B sync=2DD4",
+        "# freq=868.300 word=21656A",
+    ]
+    assert core_lib.host_strobes(CC1101_SRX) == 0
+    assert core_lib.host_masked() == 1
+    core_lib.rc_service()
+    assert core_lib.lines() == []
+
+
+def test_reset_probes_the_radio_again(core_lib: Core) -> None:
+    """Each reset re-reads the chip id: a radio plugged in later is found."""
+    core_lib.start(absent_level=0x00)
+    assert core_lib.host_radio_ok() == 0
+    assert core_lib.start() == [BANNER]
+    assert core_lib.host_radio_ok() == 1
+    assert core_lib.send("Q") == [QUERY]
+
+
+@pytest.mark.parametrize(
+    ("partnum", "version", "present"),
+    [
+        (0x00, 0x14, True),  # CC1101 today
+        (0x00, 0x04, True),  # older CC1101 silicon
+        (0x00, 0x17, True),  # an unknown clone still counts as a radio
+        (0x00, 0x00, False),
+        (0x00, 0xFF, False),
+        (0xFF, 0x14, False),
+    ],
+)
+def test_radio_probe_reads_partnum_and_version(
+    core_lib: Core, partnum: int, version: int, present: bool
+) -> None:
+    """VERSION 0x00/0xFF or PARTNUM 0xFF is an empty socket; other ids are a chip."""
+    core_lib.host_reset()
+    core_lib.host_set_status(CC1101_PARTNUM, partnum)
+    core_lib.host_set_status(CC1101_VERSION, version)
+    core_lib.rc_begin()
+    lines = core_lib.lines()
+    assert core_lib.host_radio_ok() == present
+    assert (NO_RADIO in lines) is not present
 
 
 # --------------------------------------------------------------- commands
@@ -195,7 +258,7 @@ def test_session_commands(core: Core) -> None:
     assert core.host_masked() == 0
     query_b = (
         f"# Q termoweb_rx {VERSION} freq=869.525 pa=C0 sync=2DD4 mode=dynamic "
-        "autoack=on id=22 dialect=B net=ABCD"
+        "autoack=on id=22 dialect=B net=ABCD radio=ok"
     )
     assert core.send("Q") == [query_b]
     assert core.send("X\nA0\nY0\n") == [

@@ -1625,7 +1625,7 @@ custom_components/termoweb/config_flow_radio.py :: radio_entry_data
 custom_components/termoweb/config_flow_radio.py :: _entry_title
     Return a new radio entry's title: the stick's port or the gateway's address.
 custom_components/termoweb/config_flow_radio.py :: _probe_error
-    Return the form error key for a failed gateway probe.
+    Return the form error key for a failed gateway or nanoCUL probe.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.__init__
     Initialise radio discovery state.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio
@@ -1650,8 +1650,6 @@ custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_ra
     Update the rescanned entry and reload it, or show the form with the error.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._nanocul_flow
     Return True while the flow sets up (or reconfigures) a nanoCUL.
-custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._connect_error
-    Return the flow error key for a radio that cannot be reached.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._radio_form
     Return the step id and schema to show again after a failed rescan.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_nanocul

@@ -63,6 +63,13 @@ void cc1101_write_sync(void) {
   rc_hal_write_reg(CC1101_SYNC0, rc.dialect == RC_DIALECT_B ? RC_SYNC0_B : RC_SYNC0_A);
 }
 
+uint8_t cc1101_present(void) {
+  rc_hal_chip_wake();
+  uint8_t partnum = rc_hal_read_status(CC1101_PARTNUM);
+  uint8_t version = rc_hal_read_status(CC1101_VERSION);
+  return partnum != 0xFF && version != 0x00 && version != 0xFF;
+}
+
 void cc1101_init(void) {
   rc_hal_chip_wake();
   rc_hal_strobe(CC1101_SRES);

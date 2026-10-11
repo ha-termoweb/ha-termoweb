@@ -61,6 +61,8 @@ class Core:
             "host_rx_push": (None, [buf, u32]),
             "host_set_rx_overflow": (None, [u8]),
             "host_set_status": (None, [u8, u8]),
+            "host_set_absent": (None, [ctypes.c_int]),
+            "host_radio_ok": (u8, []),
             "host_set_marcstate_tx": (None, [u8]),
             "host_reg": (u8, [u8]),
             "host_strobes": (u32, [u8]),
@@ -110,12 +112,20 @@ class Core:
             self.lib.rc_feed(bytes([char]))
         return self.lines()
 
-    def start(self, mac: bytes | None = None) -> list[str]:
-        """Reset the fake chip, boot the core and return the boot lines."""
+    def start(
+        self, mac: bytes | None = None, absent_level: int | None = None
+    ) -> list[str]:
+        """Reset the fake chip, boot the core and return the boot lines.
+
+        ``absent_level`` (0x00 or 0xFF) boots with no chip on the bus: every
+        status read returns that MISO idle level.
+        """
         self.lib.host_reset()
         self._mac = mac or b""  # keep the bytes alive while C points at them
         if mac is not None:
             self.lib.host_set_mac(self._mac)
+        if absent_level is not None:
+            self.lib.host_set_absent(absent_level)
         self.lib.rc_begin()
         return self.lines()
 

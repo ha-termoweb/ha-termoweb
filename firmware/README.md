@@ -66,11 +66,28 @@ and every CI run keeps one as an artifact.
 Wiring (a-culfw nanoCUL board): MOSI D11, MISO D12, SCK D13, CS D10,
 GDO0 D3 (INT1), GDO2 D2 (INT0).
 
-Size, ATmega328P (avr-gcc, 3.7-nanocul): 9088 bytes of flash (of the 30 KB
-left by the bootloader) and 1112 bytes of static RAM (two 257-byte packet
+Size, ATmega328P (avr-gcc, 3.7-nanocul): 9322 bytes of flash (of the 30 KB
+left by the bootloader) and 1113 bytes of static RAM (two 257-byte packet
 buffers, the 255-byte `T` buffer, the 256-byte serial input ring), leaving
 about 900 bytes of the 2 KB for the stack. CI fails the build above 30720 bytes of flash or
 1536 bytes of static RAM.
+
+## No radio chip
+
+At every reset (on the nanoCUL: every port open) the core reads the
+CC1101's PARTNUM and VERSION status registers (`cc1101_present()`). A
+CC1101 reports 00/14 (older silicon 00/04); an empty socket reads the MISO
+idle level, all 0x00 or all 0xFF (the nanoCUL port enables MISO's pull-up,
+so it reads 0xFF rather than noise). VERSION 0x00 or 0xFF, or PARTNUM 0xFF,
+means no radio; any other id, a clone's included, counts as one. Without a
+radio:
+
+- the banner ends ` radio=missing`, followed by `# error: no CC1101 radio found`;
+- `Q` ends ` radio=missing` (with a radio: ` radio=ok`), and the integration
+  stops the setup with "its radio module is not connected";
+- `T` replies `TXERR no radio`, `R` replies `# error: no CC1101 radio found`;
+- the chip is never configured, GDO edges stay masked, nothing is received.
+  `Y`, `F`, `N`, `I`, `A` still answer, so the host's handshake completes.
 
 ## Differences between the ports
 
@@ -96,6 +113,7 @@ against the ESP32's formats. The tests skip when `gcc` is missing.
 ## Needs testing on hardware
 
 - Flash on an Arduino Nano + CC1101; banner within 2 s of opening the port.
+- Without the CC1101 (unplugged module): `radio=missing` in the banner and `Q`.
 - Receive and auto-ack in dialect A and in dialect B (`Y1`, `N<net>`).
 - Long frames: a 99-byte program write sent (`T`) and received.
 - `F` retune and back; `D` counters.
@@ -110,12 +128,12 @@ ending with `\n`.
 | Command | Reply | Meaning |
 |---|---|---|
 | (connect) or `V` | `# termoweb_rx 3.7-esp32 freq=869.525 rate=9.6k sync=2DE5 mode=dynamic tx=paC0 mac=AA:BB:CC:DD:EE:FF` | Banner. Sent first on every new connection. |
-| `Q` | `# Q termoweb_rx 3.7-esp32 freq=869.525 pa=C0 sync=2DE5 mode=dynamic autoack=off id=01 dialect=A net=1234 mac=AA:BB:CC:DD:EE:FF` | Status. `mac` is the WiFi MAC: a stable device id. |
+| `Q` | `# Q termoweb_rx 3.7-esp32 freq=869.525 pa=C0 sync=2DE5 mode=dynamic autoack=off id=01 dialect=A net=1234 mac=AA:BB:CC:DD:EE:FF` | Status. `mac` is the WiFi MAC: a stable device id. The nanoCUL firmware (3.7-nanocul) appends `radio=ok`, or `radio=missing` when no CC1101 answered at the last reset; the integration then stops the setup. |
 | `Y0` / `Y1` | `# dialect=A sync=2DE5` / `# dialect=B sync=2DD4` | Select the on-air dialect (below). Error: `# Y? expected 0 or 1`. |
 | `N<hex4>`, e.g. `N1234` | `# net=1234` | Network id used in auto-acks. Error: `# N? expected 4 hex digits`. |
 | `I<hex2>`, e.g. `I01` | `# id=01` | Our station id, used by auto-ack. |
 | `A0` / `A1` | `# autoack=off` / `# autoack=on` | Auto-ack off/on. |
-| `T<hex>` | `TX <micros> <n> <hex>` | Transmit up to 255 bytes exactly as given. Errors: `TXERR empty or bad hex`, `TXERR underflow`, `TXERR marcstate=<hex>`. |
+| `T<hex>` | `TX <micros> <n> <hex>` | Transmit up to 255 bytes exactly as given. Errors: `TXERR empty or bad hex`, `TXERR underflow`, `TXERR marcstate=<hex>`, `TXERR no radio` (no CC1101; nanoCUL). |
 | `F<kHz>`, e.g. `F869525` | `# freq=869.525 word=21717A` | Retune (779000 to 928000). Error: `# F? expected kHz`. |
 | `X` | `# raw=on` / `# raw=off` | Append the 2 raw radio status bytes to RX lines. |
 | `D` | `# marcstate=.. pktstatus=.. rxbytes=.. syncs=<n> rxreset=<n>` | Radio chip state dump. |

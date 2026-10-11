@@ -107,6 +107,7 @@ struct rc_state {
   uint8_t dialect;
   uint8_t our_id;
   uint8_t raw_mode;
+  uint8_t radio_ok; /* a CC1101 answered the probe at the last reset */
   volatile uint8_t survey_active; /* set and cleared by the platform's survey */
   uint16_t net;
   uint32_t freq_khz;
@@ -153,8 +154,10 @@ int16_t rc_rssi_dbm10(uint8_t raw);
 uint8_t rc_self_test(void);
 
 /* ---- session ---- */
-/* Power-on / new-connection reset: session defaults, chip init, banner,
- * receiver armed. GDO edges are masked throughout. */
+/* Power-on / new-connection reset: session defaults, chip probe, chip
+ * init, banner, receiver armed. GDO edges are masked throughout. Without a
+ * CC1101 (cc1101_present() fails) it prints the banner with radio=missing
+ * and "# error: no CC1101 radio found", and leaves the edges masked. */
 void rc_begin(void);
 /* One input byte. Returns 1 when it completed a command that used the
  * radio, so a port can service GDO events before parsing more. */
@@ -174,6 +177,7 @@ void rc_on_gdo0(uint32_t edge_us);
 void rc_print_banner(void);
 void rc_print_query(void);
 void rc_print_overrun(void);
+void rc_print_no_radio(void);
 void rc_print_self_test_failed(void);
 /* Raw survey lines. dBm values are x10 (one decimal place is printed). */
 void rc_print_survey_on(uint16_t secs, int16_t floor_dbm10, int16_t thr_dbm10);

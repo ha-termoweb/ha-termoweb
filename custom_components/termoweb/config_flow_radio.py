@@ -18,7 +18,13 @@ from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 import voluptuous as vol
 
 from .backend import BackendCapabilities, backend_capabilities
-from .backend.radio import DIALECT_A, DIALECTS, RadioLink, RadioLinkError
+from .backend.radio import (
+    DIALECT_A,
+    DIALECTS,
+    RadioLink,
+    RadioLinkError,
+    RadioMissingError,
+)
 from .backend.radio.discovery import (
     DISCOVERY_DIALECTS,
     SCAN_ADDRESSES,
@@ -463,9 +469,13 @@ def _entry_title(data: Mapping[str, Any]) -> str:
     return f"{RADIO_GATEWAY_LABEL} ({data[CONF_HOST]})"
 
 
-def _probe_error(err: Exception) -> str:
-    """Return the form error key for a failed gateway probe."""
-    return err.reason if isinstance(err, RadioSetupError) else "cannot_connect_radio"
+def _probe_error(err: Exception, nanocul: bool = False) -> str:
+    """Return the form error key for a failed gateway or nanoCUL probe."""
+    if isinstance(err, RadioSetupError):
+        return err.reason
+    if isinstance(err, RadioMissingError):
+        return "nanocul_radio_missing" if nanocul else "gateway_radio_missing"
+    return "cannot_connect_nanocul" if nanocul else "cannot_connect_radio"
 
 
 class RadioConfigFlow(config_entries.ConfigFlow):
@@ -532,10 +542,8 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         if dev_id is None:
             try:
                 dev_id = await probe_gateway(host, port)
-            except RadioLinkError:
-                return self.async_abort(reason="cannot_connect_radio")
-            except RadioSetupError as err:
-                return self.async_abort(reason=err.reason)
+            except (RadioLinkError, RadioSetupError) as err:
+                return self.async_abort(reason=_probe_error(err))
         await self.async_set_unique_id(f"{BRAND_RADIO}:{dev_id}")
         self._update_monitor_address(dev_id, host, port)
         self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
@@ -658,8 +666,8 @@ class RadioConfigFlow(config_entries.ConfigFlow):
             sighting, heaters = task.result()
         except RadioSetupError as err:
             self._radio_error = err.reason
-        except RadioLinkError:
-            self._radio_error = self._connect_error()
+        except RadioLinkError as err:
+            self._radio_error = _probe_error(err, self._nanocul_flow())
         except Exception:
             _LOGGER.exception("Unexpected error during radio setup")
             self._radio_error = "unknown"
@@ -685,12 +693,6 @@ class RadioConfigFlow(config_entries.ConfigFlow):
     def _nanocul_flow(self) -> bool:
         """Return True while the flow sets up (or reconfigures) a nanoCUL."""
         return self._radio.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL
-
-    def _connect_error(self) -> str:
-        """Return the flow error key for a radio that cannot be reached."""
-        return (
-            "cannot_connect_nanocul" if self._nanocul_flow() else "cannot_connect_radio"
-        )
 
     def _radio_form(self) -> tuple[str, vol.Schema]:
         """Return the step id and schema to show again after a failed rescan."""
@@ -761,11 +763,11 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         }
         try:
             dev_id, capable = await probe_nanocul(device, usb_serial)
-        except RadioLinkError:
+        except RadioLinkError as err:
             return self.async_show_form(
                 step_id=step_id,
                 data_schema=schema,
-                errors={"base": "cannot_connect_nanocul"},
+                errors={"base": _probe_error(err, nanocul=True)},
             )
         await self.async_set_unique_id(f"{BRAND_RADIO}:{dev_id}")
         self._abort_if_unique_id_configured()
@@ -792,11 +794,11 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         self._radio = {**entry.data, CONF_DEVICE: device}
         try:
             dev_id, capable = await probe_nanocul(device)
-        except RadioLinkError:
+        except RadioLinkError as err:
             return self.async_show_form(
                 step_id="reconfigure_nanocul",
                 data_schema=_reconfigure_nanocul_schema(self._radio),
-                errors={"base": "cannot_connect_nanocul"},
+                errors={"base": _probe_error(err, nanocul=True)},
             )
         # Old firmware hears only the older radio type: fine unless the entry
         # already detected the newer one.
@@ -831,15 +833,10 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         try:
             dev_id = await probe_gateway(host, port)
         except (RadioLinkError, RadioSetupError) as err:
-            reason = (
-                err.reason
-                if isinstance(err, RadioSetupError)
-                else "cannot_connect_radio"
-            )
             return self.async_show_form(
                 step_id="reconfigure_radio",
                 data_schema=_reconfigure_radio_schema(self._radio),
-                errors={"base": reason},
+                errors={"base": _probe_error(err)},
             )
         await self.async_set_unique_id(f"{BRAND_RADIO}:{dev_id}")
         self._abort_if_unique_id_mismatch()

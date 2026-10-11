@@ -18,6 +18,7 @@
 - Docs: the README and the radio guides are rewritten for local-first use: why a local radio is cheaper and more private, a comparison of the nanoCUL stick and the ESP32 gateway, shopping lists, and step-by-step firmware flashing (in the browser first, then a desktop program, then the command line).
 
 ### Fixed
+- nanoCUL stick (new firmware): the stick now notices when its radio module (CC1101) is missing or not wired. It says so when it starts, refuses to send, and the setup stops with "The stick answers, but its radio module is not connected. Check the wiring." Before, it acted as if it had sent.
 - nanoCUL stick (new firmware): the stick acks only frames with a valid checksum, and letters inside a command's hex value (for example `NAFDA`) are no longer run as separate commands.
 
 ## 2.4.0b6 (pre-release, 2026-10-11)

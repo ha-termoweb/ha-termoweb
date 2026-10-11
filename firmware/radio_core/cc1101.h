@@ -86,6 +86,11 @@ extern "C" {
 #define CC1101_MARCSTATE_IDLE 0x01
 #define CC1101_MARCSTATE_TXFIFO_UNDERFLOW 0x16
 
+/* Is a CC1101 on the bus? Reads PARTNUM and VERSION (a CC1101 reports
+ * 00/14, older silicon 00/04). An empty socket reads all 0x00 or all 0xFF,
+ * whatever MISO idles at, so VERSION 0x00 or 0xFF (or PARTNUM 0xFF) means
+ * no chip. Unknown non-zero versions (clones) count as present. */
+uint8_t cc1101_present(void);
 /* SRES, the register table, FREQ (rc.freq_khz), SYNC (rc.dialect), SCAL,
  * PATABLE (RC_PA). */
 void cc1101_init(void);
