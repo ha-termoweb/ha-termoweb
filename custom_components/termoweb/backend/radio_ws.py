@@ -24,13 +24,18 @@ from custom_components.termoweb.codecs.radio_codec import (
     settings_from_power_request,
     settings_from_status,
 )
-from custom_components.termoweb.const import DOMAIN, signal_radio_unknown_heater
+from custom_components.termoweb.const import (
+    DOMAIN,
+    signal_radio_pairing_announcement,
+    signal_radio_unknown_heater,
+)
 from custom_components.termoweb.domain.ids import NodeId, NodeType
 from custom_components.termoweb.domain.state import NodeSettingsDelta
 from custom_components.termoweb.inventory import Inventory
 
 from .radio import protocol
 from .radio.link import RadioLinkError, ReceivedFrame
+from .radio.pairing import classify_announcement
 from .radio_client import RadioClient, RadioCommandError, radio_addr
 from .sanitize import mask_identifier
 from .ws_client import _WSStatusMixin, forward_ws_sample_updates
@@ -221,9 +226,21 @@ class RadioListener(_WSStatusMixin):
 
         frame = received.frame
         link = self._client.link
+        if link is None:
+            return
+        # A heater in pairing mode (any network, swept to any id): the entry's
+        # pairing window decides whether it is answered.
+        announcement = classify_announcement(link.dialect, frame)
+        if announcement is not None:
+            if not announcement.relayed:
+                async_dispatcher_send(
+                    self.hass,
+                    signal_radio_pairing_announcement(self.entry_id),
+                    announcement,
+                )
+            return
         if (
-            link is None
-            or not frame.ok
+            not frame.ok
             or frame.is_ack
             # Neighbouring installations hand out the same short ids.
             or frame.network_id != link.network_id

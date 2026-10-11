@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Radio: while a new gateway is still looking for your heaters, a heater in pairing mode is no longer mistaken for your heaters' radio network.
+
 ## 2.4.0b4 (pre-release, 2026-10-11)
 
 Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.

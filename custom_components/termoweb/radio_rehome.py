@@ -126,6 +126,15 @@ def _match(
 async def async_rehome(
     hass: HomeAssistant, runtime: Any, timeout_s: float
 ) -> dict[str, Any]:
+    """Move the heaters (see _async_rehome); automatic pairing waits meanwhile."""
+
+    async with runtime.radio_pairing_lock:
+        return await _async_rehome(hass, runtime, timeout_s)
+
+
+async def _async_rehome(
+    hass: HomeAssistant, runtime: Any, timeout_s: float
+) -> dict[str, Any]:
     """Reset, re-pair and restore every heater on the site network; reload the entry.
 
     Nothing changes when a heater does not answer the identity read. Once all

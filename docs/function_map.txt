@@ -326,6 +326,8 @@ custom_components/termoweb/backend/radio/dialect.py :: _network_id
     Return a validated two-byte network id, defaulting to the dialect's own.
 custom_components/termoweb/backend/radio/dialect.py :: detect_dialect
     Return the first dialect under which ``air`` has a valid length and CRC.
+custom_components/termoweb/backend/radio/discovery.py :: PairingAnnounced.__init__
+    Store the dialect the announcement was heard in.
 custom_components/termoweb/backend/radio/discovery.py :: listen_once
     Listen in ``dialect`` for up to ``window_s``; return the first network heard.
 custom_components/termoweb/backend/radio/discovery.py :: listen_once._on_frame
@@ -1576,6 +1578,10 @@ custom_components/termoweb/const.py :: signal_radio_frames
     Signal name for the frame count of a listen-only radio entry.
 custom_components/termoweb/const.py :: signal_radio_unknown_heater
     Signal name for a frame heard from a heater that is not in the inventory.
+custom_components/termoweb/const.py :: signal_radio_pairing_announcement
+    Signal name for a pairing announcement heard by a radio entry's listener.
+custom_components/termoweb/const.py :: signal_radio_pairing_window
+    Signal name for a change of a radio entry's pairing window.
 custom_components/termoweb/coordinator/base.py :: RaiseUpdateFailedCoordinator.async_refresh
     Refresh data and raise ``UpdateFailed`` when polling fails.
 custom_components/termoweb/coordinator/base.py :: wrap_logger
@@ -2154,12 +2160,16 @@ custom_components/termoweb/radio_discovery.py :: HeaterFinder.__init__
     Store collaborators; nothing runs until a heater is heard or scanned.
 custom_components/termoweb/radio_discovery.py :: HeaterFinder.async_heard
     Note a frame from an unknown heater; identify it after a short wait.
+custom_components/termoweb/radio_discovery.py :: HeaterFinder.async_paired
+    Add a heater this station just paired with the next batch of found heaters.
+custom_components/termoweb/radio_discovery.py :: HeaterFinder._schedule
+    Start the debounce timer unless it already runs.
 custom_components/termoweb/radio_discovery.py :: HeaterFinder._async_identify_heard
     Identify every heater heard during the debounce window.
 custom_components/termoweb/radio_discovery.py :: HeaterFinder.async_scan
     Ask every usual heater address for its identity (an entry without heaters).
 custom_components/termoweb/radio_discovery.py :: HeaterFinder.async_add
-    Store the heaters that answer an identity read and reload the entry.
+    Store ``paired`` and the heaters that answer an identity read; reload.
 custom_components/termoweb/radio_discovery.py :: HeaterFinder._async_identify
     Return the heater at ``addr`` with its serial, or None if it did not answer.
 custom_components/termoweb/radio_discovery.py :: HeaterFinder._store
@@ -2198,6 +2208,8 @@ custom_components/termoweb/radio_pairing.py :: async_reset_keeping_settings
     Save heater ``addr``'s settings, then factory-reset it; True if any were saved.
 custom_components/termoweb/radio_pairing.py :: merge_heaters
     Return ``(nodes, added nodes, moved count)`` after merging ``heaters`` in.
+custom_components/termoweb/radio_pairing.py :: async_notify_added
+    Tell the user which heaters were added to ``entry`` (nothing when none).
 custom_components/termoweb/radio_pairing.py :: add_nodes
     Add paired heaters to the entry's nodes and reload it; False if nothing changed.
 custom_components/termoweb/radio_rehome.py :: _addr
@@ -2213,6 +2225,8 @@ custom_components/termoweb/radio_rehome.py :: _moved_node
 custom_components/termoweb/radio_rehome.py :: _match
     Return ``{new id: old id}``: direct for one heater, else by 5A identity.
 custom_components/termoweb/radio_rehome.py :: async_rehome
+    Move the heaters (see _async_rehome); automatic pairing waits meanwhile.
+custom_components/termoweb/radio_rehome.py :: _async_rehome
     Reset, re-pair and restore every heater on the site network; reload the entry.
 custom_components/termoweb/radio_rehome.py :: rehome_summary
     Return a plain-English summary of a finished network move.

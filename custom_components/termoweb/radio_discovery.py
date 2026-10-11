@@ -48,7 +48,7 @@ from .const import (
     DOMAIN,
     signal_radio_unknown_heater,
 )
-from .radio_pairing import merge_heaters
+from .radio_pairing import async_notify_added, merge_heaters
 from .radio_survey import ISSUE_URL, async_analyse, async_save_report, report_payload
 from .utils import async_get_integration_version
 
@@ -173,6 +173,7 @@ class HeaterFinder:
         self._client = client
         self._clock = clock
         self._heard: set[int] = set()
+        self._paired: dict[int, PairedHeater] = {}  # paired here, awaiting the batch
         self._asked: dict[int, float] = {}  # address -> last identity read
         self._unsub_timer: CALLBACK_TYPE | None = None
         self._done = False  # heaters were stored; the entry reloads
@@ -188,6 +189,24 @@ class HeaterFinder:
             return
         _LOGGER.info("Heard heater %s, which is not set up yet", addr)
         self._heard.add(addr)
+        self._schedule()
+
+    @callback
+    def async_paired(self, heater: PairedHeater) -> None:
+        """Add a heater this station just paired with the next batch of found heaters."""
+
+        if self._done:
+            return
+        if heater.serial is None:  # its identity read failed: ask again
+            self.async_heard(heater.node_id)
+            return
+        self._paired[heater.node_id] = heater
+        self._schedule()
+
+    @callback
+    def _schedule(self) -> None:
+        """Start the debounce timer unless it already runs."""
+
         if self._unsub_timer is None:
             self._unsub_timer = async_call_later(
                 self.hass, FOUND_DEBOUNCE_S, self._async_identify_heard
@@ -198,10 +217,12 @@ class HeaterFinder:
         """Identify every heater heard during the debounce window."""
 
         self._unsub_timer = None
-        addrs, self._heard = sorted(self._heard), set()
+        paired, self._paired = list(self._paired.values()), {}
+        addrs = sorted(self._heard - {heater.node_id for heater in paired})
+        self._heard = set()
         self.entry.async_create_background_task(
             self.hass,
-            self.async_add(addrs),
+            self.async_add(addrs, paired=paired),
             f"{DOMAIN}-add-heaters-{self.entry.entry_id}",
         )
 
@@ -211,10 +232,16 @@ class HeaterFinder:
         _LOGGER.info("No heaters set up yet: scanning for heaters")
         await self.async_add(SCAN_ADDRESSES, gap_s=SCAN_GAP_S)
 
-    async def async_add(self, addrs: Iterable[int], *, gap_s: float = 0.0) -> None:
-        """Store the heaters that answer an identity read and reload the entry."""
+    async def async_add(
+        self,
+        addrs: Iterable[int],
+        *,
+        gap_s: float = 0.0,
+        paired: Iterable[PairedHeater] = (),
+    ) -> None:
+        """Store ``paired`` and the heaters that answer an identity read; reload."""
 
-        found: list[PairedHeater] = []
+        found: list[PairedHeater] = list(paired)
         for addr in addrs:
             if self._done:
                 return
@@ -256,17 +283,7 @@ class HeaterFinder:
             moved,
         )
         self.hass.config_entries.async_schedule_reload(self.entry.entry_id)
-        if added:
-            persistent_notification.async_create(
-                self.hass,
-                "\n".join(
-                    f"Found TermoWeb heater {node.get('serial')}. It was added to "
-                    f"{self.entry.title}."
-                    for node in added
-                ),
-                title="New TermoWeb heater found",
-                notification_id=f"{DOMAIN}_{self.entry.entry_id}_heaters_found",
-            )
+        async_notify_added(self.hass, self.entry, added)
 
     @callback
     def async_stop(self) -> None:

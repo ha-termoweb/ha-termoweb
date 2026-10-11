@@ -190,6 +190,22 @@ async def test_single_heater_moves_restores_and_keeps_its_name(rig: Rig) -> None
     assert "Heater 6 is now heater 2. Its settings were restored." in summary
 
 
+async def test_move_holds_the_entry_pairing_lock(rig: Rig) -> None:
+    """Automatic pairing stands by for the whole move, and only then."""
+    real_pair = rig.client.async_pair
+    locked: list[bool] = []
+
+    async def _pair(window_s: float, **kwargs: Any) -> Any:
+        locked.append(rig.runtime.radio_pairing_lock.locked())
+        return await real_pair(window_s, **kwargs)
+
+    rig.client.async_pair = _pair
+    rig.client.paired = [_paired(2)]
+    await rig.rehome()
+    assert locked == [True]
+    assert not rig.runtime.radio_pairing_lock.locked()
+
+
 async def test_moved_heater_keeps_its_device_and_entities(rig: Rig) -> None:
     """Address-keyed registry entries of a moved heater move to its serial."""
     device = dr.async_get(rig.hass).async_get_or_create(
