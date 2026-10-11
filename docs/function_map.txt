@@ -1494,6 +1494,8 @@ custom_components/termoweb/config_flow_radio.py :: radio_address
     Return the (host, port) label RadioLink uses for a flow's radio.
 custom_components/termoweb/config_flow_radio.py :: survey_sighting
     Raw-survey after silent discovery; raise UnknownDialectError for new dialects.
+custom_components/termoweb/config_flow_radio.py :: find_network
+    Return the heater network: the known one, else learned by listening.
 custom_components/termoweb/config_flow_radio.py :: discover_radio
     Learn the network (unless given), then confirm heaters by address.
 custom_components/termoweb/config_flow_radio.py :: pair_radio
@@ -1502,8 +1504,12 @@ custom_components/termoweb/config_flow_radio.py :: _radio_connection
     Return the entry data that says how to reach the gateway or stick.
 custom_components/termoweb/config_flow_radio.py :: radio_monitor_entry_data
     Return entry data for a listen-only entry: no dialect, network or heaters.
+custom_components/termoweb/config_flow_radio.py :: radio_new_entry_data
+    Return entry data for a gateway whose heaters are found after setup.
 custom_components/termoweb/config_flow_radio.py :: radio_entry_data
     Return config entry data for a discovered radio installation.
+custom_components/termoweb/config_flow_radio.py :: _entry_title
+    Return a new radio entry's title: the stick's port or the gateway's address.
 custom_components/termoweb/config_flow_radio.py :: _probe_error
     Return the form error key for a failed gateway probe.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.__init__
@@ -1517,7 +1523,7 @@ custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._update_monit
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_zeroconf_confirm
     Ask before setting up a discovered gateway, then check it answers.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_method
-    Offer to find paired heaters, to pair new ones, or to only listen.
+    Offer to add the gateway now (heaters found later), to pair, or to listen.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_monitor
     Create a listen-only entry: it records traffic and never transmits.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_pair
@@ -1525,11 +1531,11 @@ custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_ra
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_pair_run
     Pair heaters into the site network while showing progress.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_discover
-    Listen for heater traffic and scan heaters while showing progress.
+    Create the entry at once; its heaters are found in the background.
+custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_rescan
+    Scan the entry's known network for heaters while showing progress.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._radio_task_done
-    Collect the finished discovery or pairing task and move to radio_finish.
-custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._save_survey_report
-    Save an unknown-dialect survey report and point the error text at it.
+    Collect the finished scan or pairing task and move to radio_finish.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_radio_finish
     Create (or update) the radio entry, or return to the form with the error.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._nanocul_flow
@@ -1537,7 +1543,7 @@ custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._nanocul_flow
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._connect_error
     Return the flow error key for a radio that cannot be reached.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow._radio_form
-    Return the step id and schema to show again after a failed discovery.
+    Return the step id and schema to show again after a failed pairing or rescan.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_nanocul
     Choose the nanoCUL's serial port (or a manual path), then discover.
 custom_components/termoweb/config_flow_radio.py :: RadioConfigFlow.async_step_nanocul_manual
@@ -1568,6 +1574,8 @@ custom_components/termoweb/const.py :: signal_ws_status
     Signal name for WS status/health updates.
 custom_components/termoweb/const.py :: signal_radio_frames
     Signal name for the frame count of a listen-only radio entry.
+custom_components/termoweb/const.py :: signal_radio_unknown_heater
+    Signal name for a frame heard from a heater that is not in the inventory.
 custom_components/termoweb/coordinator/base.py :: RaiseUpdateFailedCoordinator.async_refresh
     Refresh data and raise ``UpdateFailed`` when polling fails.
 custom_components/termoweb/coordinator/base.py :: wrap_logger
@@ -2134,6 +2142,32 @@ custom_components/termoweb/planner/radio_planner.py :: validate_commands
     Raise ValueError if any of ``commands`` cannot be encoded for ``dialect``.
 custom_components/termoweb/planner/radio_planner.py :: plan_commands
     Return the radio payloads for ``commands``, validating every one first.
+custom_components/termoweb/radio_discovery.py :: network_pending
+    Return True for a radio entry that has not learned its heater network yet.
+custom_components/termoweb/radio_discovery.py :: async_start_network_search
+    Listen for the entry's heater network in the background (stops on unload).
+custom_components/termoweb/radio_discovery.py :: async_search_network
+    Listen until the heater network is heard; store it and reload the entry.
+custom_components/termoweb/radio_discovery.py :: _async_report_unknown_dialect
+    Save the survey report and tell the user where it is; listening stops.
+custom_components/termoweb/radio_discovery.py :: HeaterFinder.__init__
+    Store collaborators; nothing runs until a heater is heard or scanned.
+custom_components/termoweb/radio_discovery.py :: HeaterFinder.async_heard
+    Note a frame from an unknown heater; identify it after a short wait.
+custom_components/termoweb/radio_discovery.py :: HeaterFinder._async_identify_heard
+    Identify every heater heard during the debounce window.
+custom_components/termoweb/radio_discovery.py :: HeaterFinder.async_scan
+    Ask every usual heater address for its identity (an entry without heaters).
+custom_components/termoweb/radio_discovery.py :: HeaterFinder.async_add
+    Store the heaters that answer an identity read and reload the entry.
+custom_components/termoweb/radio_discovery.py :: HeaterFinder._async_identify
+    Return the heater at ``addr`` with its serial, or None if it did not answer.
+custom_components/termoweb/radio_discovery.py :: HeaterFinder._store
+    Merge found heaters into the entry's nodes; reload and notify if any changed.
+custom_components/termoweb/radio_discovery.py :: HeaterFinder.async_stop
+    Stop on unload: drop a pending identification.
+custom_components/termoweb/radio_discovery.py :: async_start_heater_finder
+    Add unknown heaters the listener hears; scan once when there are none.
 custom_components/termoweb/radio_identity.py :: async_learn_serials
     Read and store the serial of each stored heater that has none (one try each).
 custom_components/termoweb/radio_identity.py :: async_rekey_node
@@ -2162,6 +2196,8 @@ custom_components/termoweb/radio_pairing.py :: store_snapshot
     Save (or with None, drop) the settings to restore for heater ``addr``.
 custom_components/termoweb/radio_pairing.py :: async_reset_keeping_settings
     Save heater ``addr``'s settings, then factory-reset it; True if any were saved.
+custom_components/termoweb/radio_pairing.py :: merge_heaters
+    Return ``(nodes, added nodes, moved count)`` after merging ``heaters`` in.
 custom_components/termoweb/radio_pairing.py :: add_nodes
     Add paired heaters to the entry's nodes and reload it; False if nothing changed.
 custom_components/termoweb/radio_rehome.py :: _addr

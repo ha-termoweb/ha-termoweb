@@ -165,19 +165,21 @@ async def async_reset_keeping_settings(
     return snapshot is not None
 
 
-def add_nodes(
-    hass: HomeAssistant, entry: ConfigEntry, heaters: Iterable[PairedHeater]
-) -> bool:
-    """Add paired heaters to the entry's nodes and reload it; False if nothing changed.
+def merge_heaters(
+    stored_nodes: Iterable[Mapping[str, Any]], heaters: Iterable[PairedHeater]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    """Return ``(nodes, added nodes, moved count)`` after merging ``heaters`` in.
 
     A heater whose serial is already stored moves that node to its new address,
-    so its devices and entities (keyed by the serial) stay the same.
+    so its devices and entities (keyed by the serial) stay the same. A heater
+    at an address that is already stored is not added again.
     """
 
-    nodes = [dict(node) for node in entry.data.get(CONF_NODES, [])]
+    nodes = [dict(node) for node in stored_nodes]
     by_serial = {node["serial"]: node for node in nodes if node.get("serial")}
     known = {str(node.get("addr")) for node in nodes}
-    added = moved = 0
+    added: list[dict[str, Any]] = []
+    moved = 0
     for heater in sorted(heaters, key=lambda heater: heater.node_id):
         addr = str(heater.node_id)
         stored = by_serial.get(heater.serial) if heater.serial else None
@@ -192,16 +194,27 @@ def add_nodes(
                 stored["addr"] = addr
                 moved += 1
         elif addr not in known:
-            nodes.append(radio_node(heater.node_id, heater.serial))
-            added += 1
+            added.append(radio_node(heater.node_id, heater.serial))
+            nodes.append(added[-1])
         known.add(addr)
+    return nodes, added, moved
+
+
+def add_nodes(
+    hass: HomeAssistant, entry: ConfigEntry, heaters: Iterable[PairedHeater]
+) -> bool:
+    """Add paired heaters to the entry's nodes and reload it; False if nothing changed."""
+
+    nodes, added, moved = merge_heaters(entry.data.get(CONF_NODES, []), heaters)
     if not added and not moved:
         return False
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_NODES: nodes}
     )
     _LOGGER.info(
-        "Added %d and moved %d paired heater(s); reloading the entry", added, moved
+        "Added %d and moved %d paired heater(s); reloading the entry",
+        len(added),
+        moved,
     )
     # The inventory is fixed for the entry's lifetime: a reload picks the nodes up.
     hass.config_entries.async_schedule_reload(entry.entry_id)
@@ -214,6 +227,7 @@ __all__ = [
     "async_site_network_id",
     "default_node_name",
     "heater_snapshot",
+    "merge_heaters",
     "radio_node",
     "saved_snapshot",
     "settings_snapshot",

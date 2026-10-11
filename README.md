@@ -127,6 +127,8 @@ ha-termoweb/ha-termoweb
 4) Enter the account **Email** used for the TermoWeb / Ducaheat / Tevolve app.
 5) Enter the account **Password**.
 6) Complete the wizard. Heaters will appear under **Devices**; add them to dashboards or use them in automations.
+   With a local radio, setup finishes at once. The integration then finds your heaters in the background and adds each one
+   by itself, usually within a few minutes. You get a notification for each heater it finds.
 7) Copy the custom card for a dashboard element that allows you to program presets and weekly schedule across heaters. 
 ---
 

@@ -46,13 +46,15 @@ repository.
    for example `/dev/serial/by-id/usb-...`.
 4. Leave **Advanced settings** as they are, and press **Submit**.
 5. Choose one:
-   - **Find heaters that are already paired**: turn one heater's
-     temperature up, so that it starts heating, and wait. This takes up to
-     6 minutes.
+   - **Add the gateway and find my heaters**: setup finishes at once. Turn
+     one heater's temperature up, so that it starts heating. The integration
+     listens in the background and adds each heater by itself, usually
+     within a few minutes. You get a notification for each heater it finds.
    - **Pair new heaters**: press **Submit**, then put one heater at a time
      into pairing mode (see the heater's manual). Wait about 10 seconds
      between heaters. You have 5 minutes.
-6. When it finishes, your heaters appear under **Devices**.
+6. Your heaters appear under **Devices**. A heater that was quiet is added
+   later, as soon as it talks.
 
 If you see "Cannot open the nanoCUL stick": check the cable, the port and the
 firmware (step 1).
