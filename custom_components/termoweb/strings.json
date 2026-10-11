@@ -126,7 +126,7 @@
     "step": {
       "rehome": {
         "title": "Move heaters to this installation's own network",
-        "description": "Use this when your heaters still use the radio network of an old TermoWeb gateway. Heaters: {heaters}.\n\nWhat happens:\n1. Each heater is reset to factory settings. Home Assistant saves its settings first.\n2. You put the heaters into pairing mode, one at a time. The heater's manual tells you which buttons to press. Wait about 10 seconds between heaters. You have 5 minutes.\n3. The heaters get new numbers, from 2 upwards. Their entity ids change. Heater names stay the same when Home Assistant recognises the heater.\n4. Home Assistant gives each heater its settings back: mode, preset temperatures, manual temperature and weekly program.\n\nHeater control pauses while this runs. Only dialect-B heaters can be moved. Press **Submit** to start, then put the first heater into pairing mode after about 10 seconds."
+        "description": "Use this when your heaters still use the radio network of an old TermoWeb gateway. Heaters: {heaters}.\n\nWhat happens:\n1. Each heater is reset to factory settings. Home Assistant saves its settings first.\n2. You put the heaters into pairing mode, one at a time. The heater's manual tells you which buttons to press. Wait about 10 seconds between heaters. You have 5 minutes.\n3. The heaters get new numbers, from 2 upwards. Their entity ids change. Heater names stay the same when Home Assistant recognises the heater.\n4. Home Assistant gives each heater its settings back: mode, preset temperatures, manual temperature and weekly program.\n\nHeater control pauses while this runs. Some older heaters cannot be reset over the radio, so they cannot be moved this way. Press **Submit** to start, then put the first heater into pairing mode after about 10 seconds."
       },
       "rehome_run": { "title": "Moving your heaters" },
       "rehome_done": {
@@ -310,7 +310,7 @@
     },
     "radio_capture": {
       "name": "Radio capture",
-      "description": "Record every radio frame the gateway or nanoCUL hears for a while and save it as a JSON file in the Home Assistant configuration folder. Use it to help find unknown commands, for example the \"identify\" command of the TermoWeb app. It never transmits. On a normal radio entry, heater commands wait until the capture ends.",
+      "description": "Record every radio frame the gateway or nanoCUL hears for a while and save it as a JSON file in the Home Assistant configuration folder. It never transmits. On a normal radio entry, heater commands wait until the capture ends.",
       "fields": {
         "entry_id": {
           "name": "Config entry ID",
@@ -328,13 +328,13 @@
         "note": {
           "name": "Note",
           "description": "Optional text saved in the file, for example which heater you used.",
-          "example": "identify on the living room heater"
+          "example": "living room heater turned up"
         }
       }
     },
     "radio_survey": {
       "name": "Radio survey",
-      "description": "Listen to all radio traffic on the heater band for a while, also traffic in dialects this integration does not know, and save a report file in the Home Assistant configuration folder. Attach the file to a GitHub issue to ask for support of a new heater dialect.",
+      "description": "Listen to all radio traffic on the heater band for a while, also traffic this integration does not understand, and save a report file in the Home Assistant configuration folder. Attach the file to a GitHub issue to ask for support of a new kind of heater.",
       "fields": {
         "entry_id": {
           "name": "Config entry ID",
@@ -349,7 +349,7 @@
     },
     "radio_factory_reset": {
       "name": "Radio factory reset",
-      "description": "DESTRUCTIVE. Reset one radio heater to its factory settings. The heater loses all settings, its clock, its weekly program and its radio pairing, and stops talking to Home Assistant. Its last known settings are saved first. To use the heater again, press \"Pair new heaters\" on the gateway device and put the heater into pairing mode. Its saved settings come back when it is recognised. Only dialect-B heaters can be reset.",
+      "description": "DESTRUCTIVE. Reset one radio heater to its factory settings. The heater loses all settings, its clock, its weekly program and its radio pairing, and stops talking to Home Assistant. Its last known settings are saved first. To use the heater again, press \"Pair new heaters\" on the gateway device and put the heater into pairing mode. Its saved settings come back when it is recognised. Some older heaters cannot be reset over the radio: reset them by hand (see the heater's manual).",
       "fields": {
         "entry_id": {
           "name": "Config entry ID",
@@ -364,7 +364,7 @@
     },
     "radio_rehome": {
       "name": "Radio move heaters to own network",
-      "description": "Move all heaters of a radio entry onto this installation's own radio network. Each heater is reset first (its settings are saved), then you put the heaters into pairing mode one at a time. The heaters get new numbers from 2 upwards and their settings are restored. Only dialect-B heaters can be moved. Heater control pauses while this runs.",
+      "description": "Move all heaters of a radio entry onto this installation's own radio network. Each heater is reset first (its settings are saved), then you put the heaters into pairing mode one at a time. The heaters get new numbers from 2 upwards and their settings are restored. Some older heaters cannot be reset over the radio, so they cannot be moved this way. Heater control pauses while this runs.",
       "fields": {
         "entry_id": {
           "name": "Config entry ID",

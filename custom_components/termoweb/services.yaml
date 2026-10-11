@@ -137,8 +137,8 @@ import_energy_history:
 radio_survey:
   name: Radio survey
   description: >-
-    Listen to all radio traffic on the heater band, also in dialects this
-    integration does not know, and save a report file in the configuration
+    Listen to all radio traffic on the heater band, also traffic this
+    integration does not understand, and save a report file in the configuration
     folder for a GitHub issue.
   fields:
     entry_id:
@@ -193,7 +193,7 @@ radio_capture:
     note:
       name: Note
       description: Optional text saved in the file.
-      example: identify on the living room heater
+      example: living room heater turned up
       selector:
         text:
 
@@ -205,7 +205,8 @@ radio_factory_reset:
     and stops talking to Home Assistant. Its last known settings are saved
     first. To use the heater again, press "Pair new heaters" on the gateway
     device and put the heater into pairing mode. Its saved settings come back
-    when it is recognised. Only dialect-B heaters can be reset.
+    when it is recognised. Some older heaters cannot be reset over the radio:
+    reset them by hand (see the heater's manual).
   fields:
     entry_id:
       name: Config entry ID
@@ -232,8 +233,8 @@ radio_rehome:
     Move all heaters of a radio entry onto this installation's own radio
     network. Each heater is reset first (its settings are saved), then you
     put the heaters into pairing mode one at a time. The heaters get new
-    numbers from 2 upwards and their settings are restored. Only dialect-B
-    heaters can be moved. Heater control pauses while this runs.
+    numbers from 2 upwards and their settings are restored. Some older
+    heaters cannot be reset over the radio, so they cannot be moved this way. Heater control pauses while this runs.
   fields:
     entry_id:
       name: Config entry ID
