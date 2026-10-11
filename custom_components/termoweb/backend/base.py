@@ -98,6 +98,21 @@ class HttpClientProto(Protocol):
     ) -> Any:
         """Toggle display-identify cues for the specified node."""
 
+    async def set_node_boost(
+        self, dev_id: str, node: NodeDescriptor, *, boost: bool
+    ) -> Any:
+        """Start or cancel a heater boost of the heater's own duration (heater_toggles)."""
+
+    async def set_node_runback(
+        self, dev_id: str, node: NodeDescriptor, *, runback: bool
+    ) -> Any:
+        """Switch a heater's runback mode (heater_toggles)."""
+
+    async def set_node_easy(
+        self, dev_id: str, node: NodeDescriptor, *, easy: bool
+    ) -> Any:
+        """Switch a heater's EASY mode (heater_toggles)."""
+
     async def set_node_priority(
         self,
         dev_id: str,
@@ -158,6 +173,7 @@ class BackendCapabilities:
     local_radio: bool = False  # owns a gateway/stick link, closed on unload
     options_flow: bool = False  # heater power, pairing and rehoming options
     heater_discovery: bool = False  # radio heaters are found and added after setup
+    heater_toggles: bool = False  # heater boost, runback and EASY (radio dialect A)
     site_device: bool = True  # the gateway sits under a site (installation) device
     web_portal: bool = True  # devices link to the cloud web portal
     node_manufacturer: str = (
@@ -189,6 +205,12 @@ class Backend(ABC):
         """Return the HTTP client associated with this backend."""
 
         return self._client
+
+    @property
+    def features(self) -> BackendCapabilities:
+        """Return this entry's capabilities: the class's, narrowed by its hardware."""
+
+        return self.capabilities
 
     async def set_node_settings(
         self,
@@ -273,6 +295,27 @@ class Backend(ABC):
         """Toggle display-identify cues using the backend client."""
 
         await self.client.set_node_display_select(dev_id, node, select=select)
+
+    async def set_node_boost(
+        self, dev_id: str, node: NodeDescriptor, *, boost: bool
+    ) -> Any:
+        """Start or cancel a heater boost using the backend client."""
+
+        await self.client.set_node_boost(dev_id, node, boost=boost)
+
+    async def set_node_runback(
+        self, dev_id: str, node: NodeDescriptor, *, runback: bool
+    ) -> Any:
+        """Switch a heater's runback mode using the backend client."""
+
+        await self.client.set_node_runback(dev_id, node, runback=runback)
+
+    async def set_node_easy(
+        self, dev_id: str, node: NodeDescriptor, *, easy: bool
+    ) -> Any:
+        """Switch a heater's EASY mode using the backend client."""
+
+        await self.client.set_node_easy(dev_id, node, easy=easy)
 
     async def set_node_priority(
         self,

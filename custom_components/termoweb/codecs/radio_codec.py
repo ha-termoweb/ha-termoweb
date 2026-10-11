@@ -9,6 +9,7 @@ onto radio payloads. A key is only emitted when the record carries its value.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime, timedelta
 import math
 from typing import Any
 
@@ -54,8 +55,22 @@ def _temperature(value: float) -> str:
     return format_temperature(value)
 
 
-def settings_from_status(record: protocol.StatusRecord) -> dict[str, Any]:
-    """Return canonical settings carried by a decoded status record."""
+def boost_end(day: int, minute: int, now: datetime) -> datetime:
+    """Return the next ``day`` (0 = Sunday) at ``minute`` of day, from ``now`` on."""
+
+    sunday_first = now.isoweekday() % 7
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = midnight + timedelta(days=(day - sunday_first) % 7, minutes=minute)
+    return end if end >= now else end + timedelta(days=7)
+
+
+def settings_from_status(
+    record: protocol.StatusRecord, now: datetime | None = None
+) -> dict[str, Any]:
+    """Return canonical settings carried by a decoded status record.
+
+    ``now`` (local time) turns a boost tail into ``boost_end_datetime``.
+    """
 
     settings: dict[str, Any] = {
         "units": RADIO_UNITS,
@@ -78,6 +93,20 @@ def settings_from_status(record: protocol.StatusRecord) -> dict[str, Any]:
         heating = bool(record.flags & protocol.FLAG_ACTIVE)
         settings["state"] = "on" if heating else "off"
         settings["lock"] = bool(record.flags & protocol.FLAG_LOCKED)
+        boosting = bool(record.flags & protocol.FLAG_BOOST)
+        settings["boost_active"] = boosting
+        settings["runback"] = bool(record.flags & protocol.FLAG_RUNBACK)
+        settings["easy"] = bool(record.flags & protocol.FLAG_EASY)
+        end = None
+        if (
+            boosting
+            and now is not None
+            and record.boost_end_day is not None
+            and record.boost_end_min is not None
+            and record.boost_end_day < protocol.DAYS_PER_WEEK
+        ):
+            end = boost_end(record.boost_end_day, record.boost_end_min, now)
+        settings["boost_end_datetime"] = end
     return settings
 
 
@@ -234,6 +263,7 @@ __all__ = [
     "MODE_TO_RADIO",
     "PROGRAM_LEN",
     "RADIO_UNITS",
+    "boost_end",
     "encode_command",
     "encode_preset_mode_write",
     "prog_from_program",

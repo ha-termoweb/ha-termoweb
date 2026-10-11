@@ -17,6 +17,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.util import dt as dt_util
 
 from custom_components.termoweb.codecs.radio_codec import (
     prog_from_program,
@@ -285,7 +286,7 @@ class RadioListener(_WSStatusMixin):
             self._spawn(self._client.async_send(frame.src, protocol.confirm_report()))
             record = protocol.decode_status(payload)
             if record is not None:
-                self._push(node_type, addr, settings_from_status(record))
+                self._push(node_type, addr, settings_from_status(record, dt_util.now()))
         elif kind is protocol.Unsolicited.PROGRAM_REPORT:
             self._spawn(self._client.async_send(frame.src, protocol.confirm_report()))
             program = protocol.decode_program(payload)

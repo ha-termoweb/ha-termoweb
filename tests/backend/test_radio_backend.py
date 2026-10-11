@@ -40,6 +40,22 @@ def make_backend():
     return backend
 
 
+@pytest.mark.parametrize(("dialect", "toggles"), [("A", True), ("B", False)])
+def test_entry_features_follow_the_dialect(dialect: str, toggles: bool) -> None:
+    """Heater boost/runback/EASY exist only where the radio dialect has them."""
+
+    client = _mod(".radio_client").RadioClient(
+        "radio.local", 2323, dialect, NODES, network_id=NET, link_factory=FakeRadioLink
+    )
+    backend = _mod(".factory").create_backend(brand=BRAND_RADIO, client=client)
+    assert backend.capabilities.heater_toggles is True  # the backend may have them
+    assert backend.features.heater_toggles is toggles
+    assert backend.features.local_radio is True
+    cloud = _mod(".factory").create_backend(brand="termoweb", client=SimpleNamespace())
+    assert cloud.features is cloud.capabilities
+    assert cloud.features.heater_toggles is False
+
+
 def test_create_radio_client_helper() -> None:
     """The factory helper builds a lazily connecting client."""
 

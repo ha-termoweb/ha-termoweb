@@ -50,6 +50,7 @@ decoders in `backend/radio/protocol.py` return frozen dataclasses.
 | `energy_history` | False | True | `import_energy_history` service (logs an error and skips the entry) |
 | `local_radio` | True | False | one entry per gateway/stick, link closed on unload, radio reconfigure steps |
 | `options_flow` | True | False | options flow (rehoming) |
+| `heater_toggles` | True (class); per entry: the dialect's `heater_toggles` (A only) | False | heater boost preset and `start_boost`/`cancel_boost` on heaters, `switch` platform (runback, EASY) |
 | `web_portal` | False | True | `configuration_url` on devices |
 
 `priority` and `energy_history` are new in this PR. Both cloud backends
@@ -77,6 +78,8 @@ derived or guessed.
 | `stemp` | full status record; dialect B: power record byte 3, the heater's active setpoint (half degrees) | one-decimal string | 🟡 dialect A; ✅ dialect B |
 | `state` | full record flag `01`; dialect B: power record byte 7 (`BC` → `BD`, read when the status lacks it, and 90 s after each `BF 01` grant) | `"on"` / `"off"` | 🟡 dialect A; ✅ dialect B |
 | `lock` | full record flag `02`; dialect B: the last lock state written (the short record has none) | bool | 🟡 dialect A; 🟡 dialect B |
+| `boost_active`, `runback`, `easy` | full record flags `20` / `80` / `40` (dialect B's short record has none) | bool | 🟡 dialect A |
+| `boost_end_datetime` | E3/E4 boost tail (day 0 = Sunday, minute of day) while flag `20` is set: the next such local time; else None | datetime | 🟡 dialect A |
 | `max_power` | full record power, or the dialect-A `BE hi lo` power request (deciwatts); dialect B: the rating in the `5B 55` identity reply (byte 10 × 100 W) | float watts | 🟡 dialect A; 🟡 dialect B (one 1500 W heater checked) |
 
 Mode: radio `03` is a temporary override that ends at the next program slot.
@@ -148,7 +151,10 @@ re-reads it.
 | `get_node_settings` | see "Canonical mapping (reads)" | ✅ / 🟡 |
 | `set_node_settings` | see "Canonical mapping (writes)" | 🟡 |
 | `set_node_lock` | `BA 01` / `BA 00`; dialect A requires `BB 55`, dialect B only acks. The written state is remembered for records without a lock flag. | 🟡 |
-| `set_acm_boost_state` | heater: `D2 01` / `D2 00`, verdict `D3 55`; the heater uses its own boost time and temperature. Accumulator: `RadioUnsupportedError`. No current entity calls it for heaters. | 🟡 heater, ❌ accumulator |
+| `set_acm_boost_state` | `RadioUnsupportedError` (accumulator boost is unknown on radio; heaters use `set_node_boost`) | ❌ |
+| `set_node_boost` | `D2 01` / `D2 00`, verdict `D3 55`; the heater uses its own boost time and temperature. Dialect B: `RadioUnsupportedError`. | 🟡 A |
+| `set_node_easy` | `D6 01` / `D6 00`, verdict `D7 55`. EASY forces manual heat with the setpoint unchanged; off restores the mode. Dialect B: `RadioUnsupportedError`. | 🟡 A |
+| `set_node_runback` | on: `B8` (remember mode and target), then `D4 01`, verdict `D5 55`; off: `D4 00`, then the remembered mode and target are written back (manual → `B4 02 <t>`, override → `B4 03 <t>`, program/off → the last manual target if known, then `B4 01`/`B4 04`). Runback forces manual heat at the anti-frost setpoint and does not undo it itself. Remembered in memory only. Dialect B: `RadioUnsupportedError`. | 🟡 A |
 | `set_node_display_select` | `select=True`: `5E 01`; dialect A must answer `5F 55`, dialect B only acks. `select=False`: no-op. | 🟡 |
 | `set_node_priority` | `RadioUnsupportedError`; entities not created (`priority` False) | ❌ |
 | `get_power_limit` | None ("no data"); never polled (`power_limit` False) | ❌ |
@@ -223,7 +229,8 @@ reconnects; it does no harm.
 | Climate HVAC action (heating / idle) | 🟡 / ✅ | Dialect A: full status record flags. Dialect B: power record byte 7, verified against a house meter. |
 | Temporary override (`modified_auto`) | 🟡 / ✅ | `B4 03` in dialect A; `B6 .. 03 <setpoint>` in dialect B (ended by the heater at the next program change). |
 | Child lock entity | 🟡 | `BA 01`/`BA 00`. A dialect-B heater acks it without a reply and does not report the lock, so the entity shows the last state written (unknown until first used). The keypad effect on dialect B is not yet confirmed. |
-| Heater boost | 🟡 (client only) | No heater boost entity exists today. |
+| Heater boost | 🟡 A / ❌ B | Dialect A: climate preset **boost** and the `termoweb.start_boost` / `termoweb.cancel_boost` services (no `minutes`: the heater boosts for its own boost time). State from status flag `20`; the end time from the E3/E4 boost tail (`boost_end`, `boost_minutes_remaining` attributes). |
+| Runback and EASY switches | 🟡 A / ❌ B | Dialect A: `switch.<heater>_runback` and `switch.<heater>_easy_mode`, state from status flags `80` / `40`; unknown until a full status record arrives. Not created for dialect B. |
 | Accumulator boost, boost defaults | ❌ | Unknown on radio; no accumulator was available to test. |
 | Display flash button | 🟡 | `5E 01`: dialect A answers `5F 55`; a dialect-B heater acks it (no reply record). The visible flash on dialect B is not yet confirmed. |
 | Heater priority numbers | ✅ | Local power manager (see below). Higher numbers win. |
@@ -399,7 +406,8 @@ both: `addr` addresses radio frames; `serial` names and identifies it.
 ## Known gaps
 
 - Keypad lock on dialect B: acked; whether the keypad locks is not yet confirmed.
-- Boost, runback and EASY on dialect B: `D2` answers `D3 00 00`, `D6` answers `D7 19`, `D4` is ack only; no effect seen. Their meaning is unknown.
+- Boost, runback and EASY on dialect B: `D2` answers `D3 00 00`, `D6` answers `D7 19`, `D4` is ack only; no effect seen. Their meaning is unknown, so `Dialect.heater_toggles` is False for B and no boost preset or switch is created.
+- Boost, runback and EASY on dialect A come from captures of a dialect-A installation; not yet checked on a dialect-A heater through this integration.
 - Display flash on dialect-B heaters: the command is acked, the visible flash is not yet confirmed.
 - Energy counter: dialect B has none, so energy is estimated. Dialect A's
   counter is read from captures of a dialect-A installation; it is not yet

@@ -442,6 +442,7 @@ async def test_platforms_follow_the_backend() -> None:
     assert _platforms_for_brand("ducaheat") == [*PLATFORMS, "lock"]
     assert _platforms_for_brand("tevolve") == [*PLATFORMS, "lock"]
     assert _platforms_for_brand("radio_monitor") == ["binary_sensor", "sensor"]
+    assert _platforms_for_brand("radio") == [*PLATFORMS, "lock", "switch"]
 
 
 def _healthy_tracker(dev_id: str, *, stale_after: float = 300) -> WsHealthTracker:

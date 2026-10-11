@@ -66,6 +66,12 @@ custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_lock
     Toggle child lock state for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_display_select
     Toggle display-identify cues for the specified node.
+custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_boost
+    Start or cancel a heater boost of the heater's own duration (heater_toggles).
+custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_runback
+    Switch a heater's runback mode (heater_toggles).
+custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_easy
+    Switch a heater's EASY mode (heater_toggles).
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_priority
     Set the priority level for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.normalise_ws_nodes
@@ -86,6 +92,8 @@ custom_components/termoweb/backend/base.py :: Backend.brand
     Return the configured brand.
 custom_components/termoweb/backend/base.py :: Backend.client
     Return the HTTP client associated with this backend.
+custom_components/termoweb/backend/base.py :: Backend.features
+    Return this entry's capabilities: the class's, narrowed by its hardware.
 custom_components/termoweb/backend/base.py :: Backend.set_node_settings
     Update node settings using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_acm_boost_state
@@ -96,6 +104,12 @@ custom_components/termoweb/backend/base.py :: Backend.set_node_lock
     Toggle child lock state using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_node_display_select
     Toggle display-identify cues using the backend client.
+custom_components/termoweb/backend/base.py :: Backend.set_node_boost
+    Start or cancel a heater boost using the backend client.
+custom_components/termoweb/backend/base.py :: Backend.set_node_runback
+    Switch a heater's runback mode using the backend client.
+custom_components/termoweb/backend/base.py :: Backend.set_node_easy
+    Switch a heater's EASY mode using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_node_priority
     Set the priority level using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_power_limit
@@ -598,6 +612,8 @@ custom_components/termoweb/backend/radio/survey.py :: parse_run_tokens
     Parse ``+118 -92`` run tokens into ``(level, micros)``; skip bad tokens.
 custom_components/termoweb/backend/radio_backend.py :: radio_diagnostics
     Return radio link facts and recent masked frames; no MAC or network id.
+custom_components/termoweb/backend/radio_backend.py :: RadioBackend.features
+    Return the capabilities the entry's radio dialect actually has.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.diagnostics
     Return the radio link facts.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.create_ws_client
@@ -676,8 +692,6 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.async_balance_
     Switch heaters off or back on as the power manager plans.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._resolve_node
     Return ``(node_type, radio id)`` for a node descriptor.
-custom_components/termoweb/backend/radio_client.py :: RadioClient._node_type_for
-    Return the stored node type for radio id ``addr``.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._read_status
     Return the heater's decoded ``B8`` status; raise on no ack or reply.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.read_power_record
@@ -699,7 +713,19 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_setti
 custom_components/termoweb/backend/radio_client.py :: RadioClient._write_settings
     Plan, validate and send a settings write, each frame verified.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.set_acm_boost_state
-    Toggle a heater's boost (``D2``); accumulator boost is not known on radio.
+    Raise: accumulator boost is not known on radio (heaters: set_node_boost).
+custom_components/termoweb/backend/radio_client.py :: RadioClient._require_toggles
+    Raise RadioUnsupportedError unless this dialect has the heater toggles.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._toggle
+    Send a ``D2``/``D4``/``D6`` toggle, verified ``<op+1> 55``; return the id.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_boost
+    Start or cancel a heater's boost (``D2``); it uses its own time and temperature.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_easy
+    Switch a heater's EASY mode (``D6``): manual heat; off restores the mode.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_runback
+    Switch a heater's runback (``D4``), restoring its mode and target afterwards.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._restore_after_runback
+    Write back the mode and target a heater had before runback.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_lock
     Toggle the heater's keypad lock (``BA``) and remember what was written.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_display_select
@@ -1175,13 +1201,17 @@ custom_components/termoweb/climate.py :: async_setup_entry._svc_set_preset_tempe
 custom_components/termoweb/climate.py :: async_setup_entry._svc_set_acm_preset
     Handle accumulator preset updates.
 custom_components/termoweb/climate.py :: async_setup_entry._svc_start_boost
-    Handle accumulator boost start service.
+    Handle the boost start service (accumulators and boost-capable heaters).
 custom_components/termoweb/climate.py :: async_setup_entry._svc_cancel_boost
-    Handle accumulator boost cancellation service.
+    Handle the boost cancel service (accumulators and boost-capable heaters).
 custom_components/termoweb/climate.py :: _require_accumulator
     Raise ServiceValidationError when an acm-only service targets another node.
+custom_components/termoweb/climate.py :: _require_boost
+    Raise ServiceValidationError when ``entity`` has no boost.
 custom_components/termoweb/climate.py :: HeaterClimateEntity.__init__
-    Initialise the climate entity for a TermoWeb heater.
+    Initialise the climate entity; ``boost`` offers the heater's own boost.
+custom_components/termoweb/climate.py :: HeaterClimateEntity.heater_boost
+    Return True when this heater offers its own boost (preset and services).
 custom_components/termoweb/climate.py :: HeaterClimateEntity.async_will_remove_from_hass
     Clean up pending tasks when the entity is removed.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._slot_label
@@ -1199,9 +1229,15 @@ custom_components/termoweb/climate.py :: HeaterClimateEntity._async_submit_setti
 custom_components/termoweb/climate.py :: HeaterClimateEntity.hvac_mode
     Return the HA HVAC mode, or None when the device mode is unknown.
 custom_components/termoweb/climate.py :: HeaterClimateEntity.preset_mode
-    Return the preset: temporary_override while an Auto override is active.
+    Return the preset: boost, or temporary_override while an Auto override runs.
 custom_components/termoweb/climate.py :: HeaterClimateEntity.async_set_preset_mode
-    Select preset ``none``: end a temporary override by resuming Auto.
+    Start or cancel boost, or end a temporary override by resuming Auto.
+custom_components/termoweb/climate.py :: HeaterClimateEntity.async_start_boost
+    Start the heater's own boost; its duration and temperature are the heater's.
+custom_components/termoweb/climate.py :: HeaterClimateEntity.async_cancel_boost
+    Cancel the heater's own boost.
+custom_components/termoweb/climate.py :: HeaterClimateEntity._async_set_boost
+    Write the boost state and show it until the heater's next status.
 custom_components/termoweb/climate.py :: HeaterClimateEntity.async_turn_on
     Turn on, restoring the mode used before the last turn off (else Auto).
 custom_components/termoweb/climate.py :: HeaterClimateEntity.async_turn_off
@@ -1400,6 +1436,8 @@ custom_components/termoweb/codecs/ducaheat_read_models.py :: _merge_accumulator_
     Copy accumulator charge metadata from ``source`` into ``target``.
 custom_components/termoweb/codecs/radio_codec.py :: _temperature
     Return a temperature in the cloud codec's one-decimal string form.
+custom_components/termoweb/codecs/radio_codec.py :: boost_end
+    Return the next ``day`` (0 = Sunday) at ``minute`` of day, from ``now`` on.
 custom_components/termoweb/codecs/radio_codec.py :: settings_from_status
     Return canonical settings carried by a decoded status record.
 custom_components/termoweb/codecs/radio_codec.py :: prog_from_program
@@ -1748,6 +1786,8 @@ custom_components/termoweb/domain/state.py :: NodeSettingsDelta.payload
     Return the mapping of changed fields.
 custom_components/termoweb/domain/state.py :: _populate_heater_state
     Populate base heater fields on ``state`` from ``payload``.
+custom_components/termoweb/domain/state.py :: _populate_heater_modes
+    Populate the boost, runback and EASY fields on ``state`` from ``payload``.
 custom_components/termoweb/domain/state.py :: _build_heater_state
     Construct a heater state instance from ``payload``.
 custom_components/termoweb/domain/state.py :: _populate_accumulator_fields
@@ -2444,6 +2484,22 @@ custom_components/termoweb/services/radio_survey.py :: async_register_radio_surv
     Register the radio_survey service once.
 custom_components/termoweb/services/radio_survey.py :: async_register_radio_survey_service._async_radio_survey
     Survey the air, save a redacted report and return its summary.
+custom_components/termoweb/switch.py :: async_setup_entry
+    Add runback and EASY switches for heaters whose backend supports them.
+custom_components/termoweb/switch.py :: HeaterModeSwitch.__init__
+    Bind the switch to heater ``addr``.
+custom_components/termoweb/switch.py :: HeaterModeSwitch.async_added_to_hass
+    Cancel a pending fallback refresh when the entity is removed.
+custom_components/termoweb/switch.py :: HeaterModeSwitch.is_on
+    Return the mode flag the heater last reported (None before a full status).
+custom_components/termoweb/switch.py :: HeaterModeSwitch.device_info
+    Attach the switch to its heater device.
+custom_components/termoweb/switch.py :: HeaterModeSwitch.async_turn_on
+    Switch the mode on.
+custom_components/termoweb/switch.py :: HeaterModeSwitch.async_turn_off
+    Switch the mode off.
+custom_components/termoweb/switch.py :: HeaterModeSwitch._async_set
+    Write the mode, then show it until the heater's next status confirms it.
 custom_components/termoweb/throttle.py :: MonotonicRateLimiter.async_throttle
     Sleep if required to honour ``min_interval`` seconds between calls.
 custom_components/termoweb/throttle.py :: MonotonicRateLimiter.reset
