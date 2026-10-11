@@ -345,10 +345,10 @@ says so.
 
 - `RadioLink.survey` needs ESP32 firmware 3.7-esp32 or newer
   (`link.supports_survey(GatewayInfo)`); stock nanoCUL firmware has no `R`.
-- Background network search of a new entry (`radio_discovery`): when
-  `discover_network` hears nothing, `survey_sighting` runs a 120 s survey
-  (`discovery.survey_network`, auto-ack off, nothing transmitted) and
-  analyses it in the executor. `known` stores the dialect and network id it
+- Background network search of a new entry (`radio_discovery`): frames the
+  running listener hears give the network; otherwise a 120 s survey
+  (`RadioClient.async_survey`, auto-ack off, nothing transmitted) runs every
+  10 minutes and is analysed in the executor. `known` stores the dialect and network id it
   heard; `silent` (or no survey firmware) means listen again 10 minutes
   later; anything else saves a redacted report as
   `<config>/termoweb_radio_survey_setup_<UTC>.json`, shows a persistent

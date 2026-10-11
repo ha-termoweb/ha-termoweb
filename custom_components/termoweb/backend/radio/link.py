@@ -13,7 +13,7 @@ survey commands; anything else, above all a ``T`` transmit, raises
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable
 import contextlib
 from dataclasses import dataclass
 import logging
@@ -178,37 +178,6 @@ def supports_survey(info: GatewayInfo | None) -> bool:
     except ValueError:
         return False
     return number >= SURVEY_MIN_VERSION
-
-
-async def rotate_dialects[T](
-    dialects: Sequence[Dialect],
-    attempt: Callable[[Dialect, float], Awaitable[T | None]],
-    total_s: float,
-    clock: Callable[[], float],
-) -> T | None:
-    """Call ``attempt(dialect, seconds left)`` round-robin until one returns a result.
-
-    Gives up with None after ``total_s``. A dialect the gateway firmware cannot
-    speak is dropped; when none is left, its UnsupportedDialectError is raised.
-    """
-    remaining = list(dialects)
-    start = clock()
-    while clock() - start < total_s:
-        for dialect in list(remaining):
-            left = total_s - (clock() - start)
-            if left <= 0:
-                break
-            try:
-                result = await attempt(dialect, left)
-            except UnsupportedDialectError as err:
-                _LOGGER.info("Skipping dialect %s: %s", dialect.name, err)
-                remaining.remove(dialect)
-                if not remaining:
-                    raise
-                continue
-            if result is not None:
-                return result
-    return None
 
 
 class RadioLink:

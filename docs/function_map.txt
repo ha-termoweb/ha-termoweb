@@ -358,16 +358,6 @@ custom_components/termoweb/backend/radio/dialect.py :: _check_network_id
     Return ``network_id`` as bytes; raise ValueError unless it is two bytes.
 custom_components/termoweb/backend/radio/dialect.py :: detect_dialect
     Return the first dialect under which ``air`` has a valid length and CRC.
-custom_components/termoweb/backend/radio/discovery.py :: listen_once
-    Listen in ``dialect`` for up to ``window_s``; return the first network heard.
-custom_components/termoweb/backend/radio/discovery.py :: listen_once._on_frame
-    Record the network id and sender of every valid data frame.
-custom_components/termoweb/backend/radio/discovery.py :: discover_network
-    Alternate listening windows across ``dialects`` until a network is heard.
-custom_components/termoweb/backend/radio/discovery.py :: discover_network._listen
-    Listen for one window in ``dialect``.
-custom_components/termoweb/backend/radio/discovery.py :: survey_network
-    Capture raw bursts of any dialect; None when the firmware has no survey.
 custom_components/termoweb/backend/radio/discovery.py :: probe_heaters
     Return the status of every candidate address that answers a ``B8`` request.
 custom_components/termoweb/backend/radio/link.py :: _int_or_none
@@ -380,8 +370,6 @@ custom_components/termoweb/backend/radio/link.py :: parse_query_line
     Parse ``# Q termoweb_rx <ver> key=value ...`` into a GatewayInfo.
 custom_components/termoweb/backend/radio/link.py :: supports_survey
     Return True when the radio firmware has the raw survey (ESP32/nanoCUL 3.7+).
-custom_components/termoweb/backend/radio/link.py :: rotate_dialects
-    Call ``attempt(dialect, seconds left)`` round-robin until one returns a result.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.__init__
     Store connection parameters; nothing is opened until connect().
 custom_components/termoweb/backend/radio/link.py :: RadioLink.dialect
@@ -1582,10 +1570,6 @@ custom_components/termoweb/config_flow_radio.py :: likely_nanocul_port
     Return the port to pre-select for a nanoCUL, or None when unsure.
 custom_components/termoweb/config_flow_radio.py :: RadioSetupError.__init__
     Store the error key.
-custom_components/termoweb/config_flow_radio.py :: UnknownDialectError.__init__
-    Store the report for the flow to save.
-custom_components/termoweb/config_flow_radio.py :: _analyse_inline
-    Analyse survey bursts on the calling loop (tests and fallbacks).
 custom_components/termoweb/config_flow_radio.py :: _advanced
     Return ``fields`` as a collapsed "advanced" form section.
 custom_components/termoweb/config_flow_radio.py :: _flatten
@@ -1608,12 +1592,8 @@ custom_components/termoweb/config_flow_radio.py :: radio_link_factory
     Return the RadioLink factory for a flow's radio: TCP, or the nanoCUL's port.
 custom_components/termoweb/config_flow_radio.py :: radio_address
     Return the (host, port) label RadioLink uses for a flow's radio.
-custom_components/termoweb/config_flow_radio.py :: survey_sighting
-    Raw-survey after silent discovery; raise UnknownDialectError for new dialects.
-custom_components/termoweb/config_flow_radio.py :: find_network
-    Return the heater network: the known one, else learned by listening.
 custom_components/termoweb/config_flow_radio.py :: discover_radio
-    Learn the network (unless given), then confirm heaters by address.
+    Confirm heaters by address on the entry's known network.
 custom_components/termoweb/config_flow_radio.py :: _radio_connection
     Return the entry data that says how to reach the gateway or stick.
 custom_components/termoweb/config_flow_radio.py :: radio_monitor_entry_data
