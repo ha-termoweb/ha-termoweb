@@ -290,13 +290,14 @@ says so.
 
 - `RadioLink.survey` needs ESP32 firmware 3.7-esp32 or newer
   (`link.supports_survey(GatewayInfo)`); stock nanoCUL firmware has no `R`.
-- Config flow: when `discover_network` hears nothing, `survey_sighting` runs a
-  120 s survey (`discovery.survey_network`, auto-ack off, nothing
-  transmitted) and analyses it in the executor. `known` continues the setup
-  with the dialect and network id it heard; `silent` (or no survey firmware)
-  gives `no_traffic`; anything else saves a redacted report as
-  `<config>/termoweb_radio_survey_setup_<UTC>.json` and shows
-  `unknown_dialect` with the file name and the issue link.
+- Background network search of a new entry (`radio_discovery`): when
+  `discover_network` hears nothing, `survey_sighting` runs a 120 s survey
+  (`discovery.survey_network`, auto-ack off, nothing transmitted) and
+  analyses it in the executor. `known` stores the dialect and network id it
+  heard; `silent` (or no survey firmware) means listen again 10 minutes
+  later; anything else saves a redacted report as
+  `<config>/termoweb_radio_survey_setup_<UTC>.json`, shows a persistent
+  notification with the file name and the issue link, and stops the search.
 - Service `termoweb.radio_survey` (`entry_id`, `seconds` 10-600, default 120)
   runs `RadioClient.async_survey` under the exchange lock, saves
   `termoweb_radio_survey_<entry_id>_<UTC>.json` and returns a summary
@@ -398,9 +399,9 @@ derived one.
 
 ### From Home Assistant
 
-- Config flow: after the gateway (or nanoCUL) step, a menu offers "Find
-  heaters that are already paired" (discovery, section 6) or "Pair new
-  heaters". Pairing runs `config_flow.pair_radio` →
+- Config flow: after the gateway (or nanoCUL) step, a menu offers "Add the
+  gateway and find my heaters" (the entry is created at once; discovery,
+  section 6, runs in the background) or "Pair new heaters". Pairing runs `config_flow.pair_radio` →
   `pairing.pair_new_network` on the site network id, in the chosen dialect
   (`auto`: B and A in turn; a stock nanoCUL: A only), and creates the entry
   with the paired heaters. No heater paired: error `no_heaters_paired`.
@@ -458,7 +459,7 @@ removed) by the next successful `radio_pair` restore of that heater.
 
 ## 9. Moving heaters to the site network ("re-home")
 
-An entry set up with "Find heaters that are already paired" keeps the
+An entry set up with "Add the gateway and find my heaters" keeps the
 network id of the gateway the heaters came with. `radio_rehome.async_rehome`
 moves every heater onto the site network id (section 7), in this order:
 

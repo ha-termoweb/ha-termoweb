@@ -7,7 +7,6 @@ from collections.abc import Generator
 import dataclasses
 import hashlib
 from ipaddress import ip_address
-import json
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -24,7 +23,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import voluptuous as vol
 
-from custom_components.termoweb import config_flow_radio, radio_pairing, radio_survey
+from custom_components.termoweb import config_flow_radio, radio_pairing
 from custom_components.termoweb.backend.radio import (
     DIALECT_A,
     DIALECT_B,
@@ -44,7 +43,6 @@ from custom_components.termoweb.const import (
     CONF_BRAND,
     DOMAIN,
 )
-from tests.fakes.cloud import VERSION
 from tests.fakes.radio_link import ProbeLink
 
 # Synthetic identifiers only.
@@ -492,17 +490,15 @@ async def test_user_step_offers_cloud_or_radio(hass: HomeAssistant) -> None:
     assert result["menu_options"] == ["cloud", "nanocul", "radio"]
 
 
-async def test_radio_discovery_creates_entry(
+async def test_radio_gateway_entry_is_created_without_waiting_for_heaters(
     hass: HomeAssistant, radio: FakeRadio
 ) -> None:
-    """Gateway form, discovery, then an entry with the heaters found."""
-    radio.discover = (
-        NetworkSighting(DIALECT_B, NET, frozenset({6})),
-        {6: None, 3: None},
-    )
+    """Gateway form, then the entry at once: no progress step, no heaters yet."""
     menu = await _gateway_menu(hass, FORM)
 
-    result = await _choose(hass, menu, "radio_discover")
+    result = await hass.config_entries.flow.async_configure(
+        menu["flow_id"], {"next_step_id": "radio_discover"}
+    )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Radio gateway (10.0.0.5)"
@@ -512,15 +508,20 @@ async def test_radio_discovery_creates_entry(
         "radio_type": "esp32",
         "host": "10.0.0.5",
         "port": 2323,
-        "dialect": "B",
-        "network_id": "1234",
-        "nodes": [
-            {"type": "htr", "addr": "3", "name": "Heater 3"},
-            {"type": "htr", "addr": "6", "name": "Heater 6"},
-        ],
+        "nodes": [],
     }
-    assert radio.calls == [("probe", "10.0.0.5", 2323), ("discover", "10.0.0.5", 2323)]
-    assert radio.kwargs[0]["args"] == ("auto", None)
+    assert radio.calls == [("probe", "10.0.0.5", 2323)]  # nothing listened to
+
+
+async def test_dialect_a_entry_starts_on_its_fixed_network(
+    hass: HomeAssistant, radio: FakeRadio
+) -> None:
+    """Dialect A has one network id, so the entry knows it from the start."""
+    menu = await _gateway_menu(hass, {**FORM, "advanced": {"dialect": "A"}})
+    result = await _choose(hass, menu, "radio_discover")
+    assert result["data"]["dialect"] == "A"
+    assert result["data"]["network_id"] == DIALECT_A.network_id.hex().upper()
+    assert result["data"]["nodes"] == []
 
 
 async def test_radio_form_asks_only_for_the_address(
@@ -546,14 +547,15 @@ async def test_radio_form_asks_only_for_the_address(
 async def test_radio_advanced_port_and_dialect_are_used(
     hass: HomeAssistant, radio: FakeRadio
 ) -> None:
-    """A port and dialect from the advanced section reach the probe and discovery."""
+    """A port and dialect from the advanced section reach the probe and the entry."""
     menu = await _gateway_menu(
         hass, {**FORM, "advanced": {"port": 2424, "dialect": "B"}}
     )
     result = await _choose(hass, menu, "radio_discover")
     assert result["data"]["port"] == 2424
-    assert radio.calls[0] == ("probe", "10.0.0.5", 2424)
-    assert radio.kwargs[0]["args"] == ("B", None)  # the network is learned
+    assert result["data"]["dialect"] == "B"
+    assert "network_id" not in result["data"]  # the network is learned later
+    assert radio.calls == [("probe", "10.0.0.5", 2424)]
 
 
 async def test_radio_step_aborts_for_a_configured_gateway(
@@ -586,78 +588,77 @@ async def test_radio_form_gateway_errors(
 @pytest.mark.parametrize(
     ("raised", "error"),
     [
-        (config_flow_radio.RadioSetupError("no_traffic"), "no_traffic"),
-        (config_flow_radio.RadioSetupError("no_heaters"), "no_heaters"),
         (RadioLinkError("lost"), "cannot_connect_radio"),
         (RuntimeError("boom"), "unknown"),
     ],
 )
-async def test_discovery_errors_return_to_the_form(
+async def test_rescan_errors_return_to_the_reconfigure_form(
     hass: HomeAssistant, radio: FakeRadio, raised: Exception, error: str
 ) -> None:
-    """A failed discovery shows the gateway form again with the reason."""
+    """A rescan that fails shows the reconfigure form again with the reason."""
+    entry = _esp32_entry(hass)
     radio.discover = raised
-    result = await _choose(hass, await _gateway_menu(hass, FORM), "radio_discover")
+    form = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"], {"host": "10.0.0.5", "port": 2323, "rescan": True}
+    )
+    result = await _finish_progress(hass, result)
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "radio"
+    assert result["step_id"] == "reconfigure_radio"
     assert result["errors"] == {"base": error}
 
 
-async def test_discovery_shows_progress_until_the_task_finishes(
+async def test_rescan_shows_progress_until_the_scan_finishes(
     hass: HomeAssistant, radio: FakeRadio
 ) -> None:
-    """A slow discovery shows progress, then the entry is created."""
+    """A slow rescan of the stored network shows progress, then saves the heaters."""
     release = asyncio.Event()
+    seen: list[tuple[Any, ...]] = []
 
-    async def slow(*_args: Any, **_kwargs: Any) -> Any:
+    async def slow(*args: Any, **_kwargs: Any) -> Any:
+        seen.append(args)
         await release.wait()
         return NetworkSighting(DIALECT_B, NET), {6: None}
 
-    menu = await _gateway_menu(hass, FORM)
+    entry = _esp32_entry(hass)
+    form = await entry.start_reconfigure_flow(hass)
     with patch.object(config_flow_radio, "discover_radio", slow):
         result = await hass.config_entries.flow.async_configure(
-            menu["flow_id"], {"next_step_id": "radio_discover"}
+            form["flow_id"], {"host": "10.0.0.5", "port": 2323, "rescan": True}
         )
         assert result["type"] is FlowResultType.SHOW_PROGRESS
-        assert result["progress_action"] == "radio_discover"
+        assert result["progress_action"] == "radio_rescan"
         again = await hass.config_entries.flow.async_configure(result["flow_id"])
         assert again["type"] is FlowResultType.SHOW_PROGRESS
         release.set()
         result = await _finish_progress(hass, again)
-    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["reason"] == "reconfigure_successful"
+    assert seen == [("10.0.0.5", 2323, "B", NET)]  # the stored network: no listening
 
 
-async def test_unknown_dialect_saves_a_report_and_links_it(
-    hass: HomeAssistant, radio: FakeRadio, tmp_path: Path
+@pytest.mark.parametrize(
+    ("make_entry", "user_input"),
+    [
+        (_esp32_entry, {"host": "10.0.0.9", "port": 2323, "rescan": True}),
+        (_stick_entry, {"device": "/dev/ttyUSB1", "rescan": True}),
+    ],
+)
+async def test_rescan_of_an_entry_still_learning_its_network_just_saves(
+    hass: HomeAssistant, radio: FakeRadio, make_entry: Any, user_input: dict
 ) -> None:
-    """An unknown dialect saves a redacted survey report and names the file."""
-    hass.config.config_dir = str(tmp_path)
-    radio.discover = config_flow_radio.UnknownDialectError(_report("undecodable"))
+    """Without a network there is nothing to scan: the address is saved, no scan."""
+    entry = make_entry(hass)
+    data = {k: v for k, v in entry.data.items() if k not in ("dialect", "network_id")}
+    hass.config_entries.async_update_entry(entry, data={**data, "nodes": []})
+    radio.stick = (GATEWAY_ID, False)  # stock firmware: auto is still fine
+    form = await entry.start_reconfigure_flow(hass)
 
-    result = await _choose(hass, await _gateway_menu(hass, FORM), "radio_discover")
+    result = await hass.config_entries.flow.async_configure(form["flow_id"], user_input)
+    await hass.async_block_till_done()
 
-    assert result["errors"] == {"base": "unknown_dialect"}
-    placeholders = result["description_placeholders"]
-    assert placeholders["issue_url"] == radio_survey.ISSUE_URL
-    files = list(tmp_path.glob("termoweb_radio_survey_setup_*.json"))
-    assert [str(f) for f in files] == [placeholders["report"]]
-    saved = json.loads(files[0].read_text())
-    assert saved["integration_version"] == VERSION
-    assert saved["radio_type"] == "esp32" and saved["configured_dialect"] == "auto"
-    assert saved["report"]["verdict"] == "undecodable"
-    assert saved["report"]["redacted"] is True
-    analyse_survey = radio.kwargs[0]["analyse_survey"]
-    assert (await analyse_survey([])).verdict == "silent"  # runs in the executor
-
-
-async def test_unknown_dialect_report_that_cannot_be_saved(
-    hass: HomeAssistant, radio: FakeRadio, tmp_path: Path
-) -> None:
-    """When the report cannot be written the error text says so."""
-    hass.config.config_dir = str(tmp_path / "missing")
-    radio.discover = config_flow_radio.UnknownDialectError(_report("undecodable"))
-    result = await _choose(hass, await _gateway_menu(hass, FORM), "radio_discover")
-    assert "could not be saved" in result["description_placeholders"]["report"]
+    assert result["reason"] == "reconfigure_successful"
+    assert not [call for call in radio.calls if call[0] == "discover"]
+    assert "network_id" not in entry.data
 
 
 # --- pairing new heaters from the config flow -------------------------------------
@@ -794,19 +795,21 @@ def stick(radio: FakeRadio) -> FakeRadio:
 async def test_port_choice_then_discovery_creates_entry(
     hass: HomeAssistant, stick: FakeRadio
 ) -> None:
-    """A detected port is probed with its USB serial, then discovered."""
+    """A detected port is probed with its USB serial; the entry needs no scan."""
     result = await _choose(hass, await _stick_menu(hass, STICK_FORM), "radio_discover")
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"].unique_id == "radio:nanocul-a1b2c3"
     assert result["title"] == f"nanoCUL ({PORT.device})"
-    assert result["data"]["radio_type"] == "nanocul"
-    assert result["data"]["device"] == PORT.device
-    assert result["data"]["radio_device_id"] == "nanocul-a1b2c3"
-    assert result["data"]["dialect"] == "A" and "host" not in result["data"]
-    assert stick.calls == [("probe", PORT.device), ("discover", PORT.device, 0)]
+    assert result["data"] == {
+        "brand": "radio",
+        "radio_type": "nanocul",
+        "device": PORT.device,
+        "radio_device_id": "nanocul-a1b2c3",
+        "nodes": [],
+    }
+    assert stick.calls == [("probe", PORT.device)]
     assert stick.serials == ["A1B2C3"]
-    assert stick.kwargs[0]["dialect_capable"] is False
 
 
 async def test_manual_path_when_no_port_is_detected(
@@ -862,20 +865,25 @@ async def test_dialect_b_on_capable_firmware_is_accepted(
 ) -> None:
     """Firmware that can switch dialects may use dialect B."""
     stick.stick = (GATEWAY_ID, True)
-    stick.discover = (NetworkSighting(DIALECT_B, NET), {6: None})
     menu = await _stick_menu(hass, {**STICK_FORM, "advanced": {"dialect": "B"}})
     result = await _choose(hass, menu, "radio_discover")
-    assert result["data"]["dialect"] == "B" and result["data"]["network_id"] == "1234"
-    assert stick.kwargs[0]["dialect_capable"] is True
+    assert result["data"]["dialect"] == "B"
+    assert "network_id" not in result["data"]  # learned after setup
 
 
-async def test_stick_discovery_failure_returns_to_the_manual_form(
+async def test_stick_lost_during_a_rescan_shows_the_reconfigure_form(
     hass: HomeAssistant, stick: FakeRadio
 ) -> None:
-    """A stick lost during discovery shows the manual form with the error."""
+    """A stick lost while scanning again shows its reconfigure form with the error."""
+    entry = _stick_entry(hass, device_id="nanocul-a1b2c3")
     stick.discover = RadioLinkError("unplugged")
-    result = await _choose(hass, await _stick_menu(hass, STICK_FORM), "radio_discover")
-    assert result["step_id"] == "nanocul_manual"
+    stick.stick = ("nanocul-a1b2c3", True)
+    form = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"], {"device": STICK, "rescan": True}
+    )
+    result = await _finish_progress(hass, result)
+    assert result["step_id"] == "reconfigure_nanocul"
     assert result["errors"] == {"base": "cannot_connect_nanocul"}
 
 
@@ -1037,6 +1045,11 @@ async def test_discover_radio_without_heaters(air: DiscoveryRadio) -> None:
         await config_flow_radio.discover_radio("gw", 1, "auto", None)
 
 
+async def test_survey_is_analysed_inline_by_default() -> None:
+    """Without Home Assistant's executor the survey is analysed on the loop."""
+    assert (await config_flow_radio._analyse_inline([])).verdict == "silent"
+
+
 def _report(verdict: str, dialect: str | None = None, nets: tuple[str, ...] = ()):
     """Return a survey report with the given outcome and no bursts."""
     return dataclasses.replace(
@@ -1161,7 +1174,7 @@ async def test_zeroconf_shows_confirm_without_connecting(
 async def test_zeroconf_confirm_probes_then_offers_the_heater_menu(
     hass: HomeAssistant, radio: FakeRadio
 ) -> None:
-    """Confirming probes the gateway, then discovery creates the entry."""
+    """Confirming probes the gateway, then the entry is created at once."""
     form = await _discovered(hass)
 
     menu = await hass.config_entries.flow.async_configure(form["flow_id"], {})
@@ -1171,9 +1184,8 @@ async def test_zeroconf_confirm_probes_then_offers_the_heater_menu(
     assert result["result"].unique_id == f"radio:{GATEWAY_ID}"
     assert result["title"] == "Radio gateway (10.0.0.7)"
     assert (result["data"]["host"], result["data"]["port"]) == ("10.0.0.7", 2323)
-    assert result["data"]["network_id"] == "1234"  # learned from heater traffic
-    assert radio.calls == [("probe", "10.0.0.7", 2323), ("discover", "10.0.0.7", 2323)]
-    assert radio.kwargs[0]["args"] == ("auto", None)
+    assert "network_id" not in result["data"]  # learned after setup
+    assert radio.calls == [("probe", "10.0.0.7", 2323)]
 
 
 async def test_zeroconf_pairing_uses_the_site_network(

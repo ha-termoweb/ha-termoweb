@@ -61,6 +61,7 @@ class RadioBackend(Backend):
         energy=True,
         local_radio=True,
         options_flow=True,
+        heater_discovery=True,
         web_portal=False,
         node_manufacturer=RADIO_NODE_MANUFACTURER,
         site_name=RADIO_SITE_NAME,

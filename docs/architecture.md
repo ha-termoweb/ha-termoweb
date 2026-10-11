@@ -156,6 +156,9 @@ This map defines responsibilities for each module family in the final design.
 - `radio_pairing.py`, `radio_rehome.py`, `radio_survey.py` — the Home
   Assistant side of radio pairing, rehoming and surveys (settings snapshots,
   new nodes, saved reports); the radio protocol side is in `backend/radio/`.
+  `radio_discovery.py` finds radio heaters after setup: it stores them in the
+  entry data and reloads the entry, so the inventory is still built only at
+  setup.
 
 ## WebSocket client layering
 
@@ -199,6 +202,7 @@ the `capabilities` class attribute of each `Backend`; read it with
 | `frame_monitor` (False) | monitor-only platforms and the frames-heard sensor | no | no | no | yes |
 | `local_radio` (False) | one entry per link, closed on unload, radio setup/reconfigure steps; skipped by cloud unique-ID migration | no | no | yes | yes |
 | `options_flow` (False) | the options flow (`async_supports_options_flow`) | no | no | yes | no |
+| `heater_discovery` (False) | background network search and heater finder (`radio_discovery.py`); found heaters are stored and the entry reloads | no | no | yes | no |
 | `site_device` (True) | registration of the site device | yes | yes | yes | no |
 | `web_portal` (True) | cloud web-portal link in device info (`utils.py`) | yes | yes | no | no |
 | `account_scope` ("") | prefix of the cloud account unique ID | "" | `ducaheat` | "" | "" |

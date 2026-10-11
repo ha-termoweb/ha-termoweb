@@ -49,6 +49,11 @@ from .energy import energy_import_store
 from .identifiers import build_cloud_unique_id, migrate_unique_id
 from .inventory import Inventory
 from .nodes import build_node_inventory, normalize_node_addr, normalize_node_type
+from .radio_discovery import (
+    async_start_heater_finder,
+    async_start_network_search,
+    network_pending,
+)
 from .radio_identity import async_learn_serials, async_rekey_inventory
 from .runtime import EntryRuntime, TermoWebConfigEntry
 from .services.energy_history import async_register_import_energy_history_service
@@ -153,6 +158,12 @@ async def async_setup_entry(  # noqa: C901
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
 
     version = await _async_get_integration_version(hass)
+
+    if network_pending(entry):
+        # Nothing to set up until the heaters' network is heard; the search
+        # stores it and reloads the entry. It needs the gateway to itself.
+        async_start_network_search(hass, entry)
+        return True
 
     client = create_entry_client(hass, entry)
     backend = create_backend(brand=brand, client=client)
@@ -423,6 +434,9 @@ async def async_setup_entry(  # noqa: C901
         hass, _start_ws(dev_id), f"{DOMAIN}-start-ws-{entry.entry_id}"
     )
 
+    if backend.capabilities.heater_discovery:
+        async_start_heater_finder(hass, entry, client, bool(inventory.nodes))
+
     _register_hub_devices(hass, entry, runtime)
     platforms = _platforms_for_brand(brand)
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
@@ -544,6 +558,8 @@ async def _async_shutdown_entry(runtime: EntryRuntime) -> None:
 
 async def async_unload_entry(hass: HomeAssistant, entry: TermoWebConfigEntry) -> bool:
     """Unload the platforms; the runtime shuts down afterwards via async_on_unload."""
+    if not isinstance(getattr(entry, "runtime_data", None), EntryRuntime):
+        return True  # set up while the radio network was pending: no platforms
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
     return await hass.config_entries.async_unload_platforms(
         entry, _platforms_for_brand(brand)

@@ -148,7 +148,7 @@ The device page also shows:
    radio gateway at ... Set it up?". Press **Submit**. You do not type
    anything.
 3. Choose one:
-   - **Find heaters that are already paired**: your heaters already work
+   - **Add the gateway and find my heaters**: your heaters already work
      with a TermoWeb gateway or app. Go to "Find paired heaters" below.
    - **Pair new heaters**: your heaters are new, or you reset them. Go to
      "Pair new heaters" below.
@@ -169,12 +169,16 @@ networks block discovery), add it by hand:
 
 ### Find paired heaters
 
-1. Turn one heater's temperature up, so that it starts heating. Heaters talk
+1. Setup finishes at once. You do not wait on this screen.
+2. Turn one heater's temperature up, so that it starts heating. Heaters talk
    when they start heating.
-2. Wait. The integration listens to your heaters to learn their radio
-   network. This takes up to 6 minutes. Then it checks every heater it can
-   reach.
-3. When it finishes, your heaters appear under **Devices**.
+3. The integration listens to your heaters in the background to learn their
+   radio network. Then it checks every heater it can reach. This usually
+   takes a few minutes.
+4. Each heater it finds is added by itself, and you get a notification:
+   "Found TermoWeb heater ...". The heater then appears under **Devices**.
+5. A heater that was quiet is added later, as soon as it talks. You do not
+   need to do anything.
 
 ### Pair new heaters
 
@@ -193,21 +197,25 @@ move the gateway closer to the heater and try again.
 
 ### If no heater is found
 
-If you see "No heater radio traffic was heard":
+If no heater shows up after 15 minutes:
 
 - Turn one heater's temperature up so that it starts heating. A heater that
   wants heat talks every few minutes.
-- Move the gateway closer to a heater (a few metres is best) and try again.
+- Move the gateway closer to a heater (a few metres is best).
 
-If setup still hears nothing, it records the radio signals for 2 more
-minutes. This takes extra time. It finds your heaters if their signal is
-weak. If it hears signals it cannot read, you see "Radio bursts were heard,
-but none could be decoded". This has two possible causes:
+The integration keeps listening by itself: it tries again every 10 minutes.
 
-- The signal is too weak. Move the gateway closer to a heater and try again.
+When it hears nothing, it also records the radio signals for 2 minutes. It
+finds your heaters if their signal is weak. If it hears signals it cannot
+read, you get the notification "TermoWeb heaters not recognised", and it
+stops listening. This has two possible causes:
+
+- The signal is too weak. Move the gateway closer to a heater. Then open the
+  integration, click the **three dots** (⋮) and choose **Reload** to listen
+  again.
 - Your heaters use a radio "dialect" that the integration does not know yet.
   You can help to add it:
-  1. The error message shows the name of a report file, for example
+  1. The notification shows the name of a report file, for example
      `/config/termoweb_radio_survey_setup_20261001T120000Z.json`. The file is
      in your Home Assistant configuration folder.
   2. Download the file. For example, use the **File editor** or **Samba**
@@ -260,7 +268,7 @@ was paired, move the gateway closer to the heater and try again.
 
 ### Move your heaters to this installation's own network
 
-If you found your heaters with **Find heaters that are already paired**, they
+If you found your heaters with **Add the gateway and find my heaters**, they
 still use the radio network of their old TermoWeb gateway. You can move them
 to a network of their own. Only dialect-B heaters can be moved.
 
@@ -302,8 +310,9 @@ To add a new heater later, open the integration, choose **Configure**, then
 **Pair a new heater**, and follow the steps on the screen. The integration
 reloads when the heater is paired.
 
-If you added or removed a heater that is already paired, open the
-integration, choose **Reconfigure**, and tick **Scan for heaters again**.
+A heater that is already paired to your heaters' network is added by itself
+when it talks. If you removed a heater, open the integration, choose
+**Reconfigure**, and tick **Scan for heaters again**.
 
 Only one program can use the gateway at a time. If a second program
 connects, the first one is disconnected.

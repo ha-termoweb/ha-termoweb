@@ -162,6 +162,12 @@ def signal_radio_frames(entry_id: str) -> str:
     return f"{DOMAIN}_{entry_id}_radio_frames"
 
 
+def signal_radio_unknown_heater(entry_id: str) -> str:
+    """Signal name for a frame heard from a heater that is not in the inventory."""
+
+    return f"{DOMAIN}_{entry_id}_radio_unknown_heater"
+
+
 # Polling
 DEFAULT_POLL_INTERVAL: Final = 1800  # seconds (30 minutes)
 MIN_POLL_INTERVAL: Final = 30  # seconds

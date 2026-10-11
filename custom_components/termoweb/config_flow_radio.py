@@ -26,7 +26,6 @@ from .backend.radio import DIALECT_A, DIALECTS, RadioLink, RadioLinkError
 from .backend.radio.discovery import (
     DISCOVERY_DIALECTS,
     SCAN_ADDRESSES,
-    SURVEY_S,
     NetworkSighting,
     discover_network,
     probe_heaters,
@@ -56,8 +55,6 @@ from .const import (
     RADIO_TYPE_NANOCUL,
 )
 from .radio_pairing import async_site_network_id, radio_node
-from .radio_survey import ISSUE_URL, async_analyse, async_save_report, report_payload
-from .utils import async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -355,6 +352,48 @@ async def survey_sighting(
     raise UnknownDialectError(report)
 
 
+async def find_network(
+    host: str,
+    port: int,
+    dialect: str,
+    network_id: bytes | None,
+    *,
+    link_factory: Any = RadioLink,
+    dialect_capable: bool = True,
+    analyse_survey: AnalyseSurvey = _analyse_inline,
+) -> NetworkSighting:
+    """Return the heater network: the known one, else learned by listening.
+
+    When listening hears nothing in a known dialect, a raw survey tells a
+    silent installation (``no_traffic``) from one that speaks an unknown
+    dialect (UnknownDialectError).
+    """
+    if dialect != DIALECT_AUTO and (
+        network_id is not None or DIALECTS[dialect].network_id is not None
+    ):
+        known = DIALECTS[dialect]
+        return NetworkSighting(known, network_id or known.network_id)
+    if dialect != DIALECT_AUTO:
+        dialects: tuple[Any, ...] = (DIALECTS[dialect],)
+    elif dialect_capable:
+        dialects = DISCOVERY_DIALECTS
+    else:
+        dialects = (DIALECT_A,)  # stock nanoCUL firmware: dialect A only
+    sighting = await discover_network(
+        host, port, dialects=dialects, link_factory=link_factory
+    )
+    if sighting is None:
+        sighting = await survey_sighting(
+            host,
+            port,
+            link_factory=link_factory,
+            analyse_survey=analyse_survey,
+        )
+    if sighting is None:
+        raise RadioSetupError("no_traffic")
+    return sighting
+
+
 async def discover_radio(
     host: str,
     port: int,
@@ -365,35 +404,16 @@ async def discover_radio(
     dialect_capable: bool = True,
     analyse_survey: AnalyseSurvey = _analyse_inline,
 ) -> tuple[NetworkSighting, dict[int, Any]]:
-    """Learn the network (unless given), then confirm heaters by address.
-
-    When listening hears nothing in a known dialect, a raw survey tells a
-    silent installation from one that speaks an unknown dialect.
-    """
-    if dialect != DIALECT_AUTO and (
-        network_id is not None or DIALECTS[dialect].network_id is not None
-    ):
-        known = DIALECTS[dialect]
-        sighting = NetworkSighting(known, network_id or known.network_id)
-    else:
-        if dialect != DIALECT_AUTO:
-            dialects: tuple[Any, ...] = (DIALECTS[dialect],)
-        elif dialect_capable:
-            dialects = DISCOVERY_DIALECTS
-        else:
-            dialects = (DIALECT_A,)  # stock nanoCUL firmware: dialect A only
-        sighting = await discover_network(
-            host, port, dialects=dialects, link_factory=link_factory
-        )
-        if sighting is None:
-            sighting = await survey_sighting(
-                host,
-                port,
-                link_factory=link_factory,
-                analyse_survey=analyse_survey,
-            )
-        if sighting is None:
-            raise RadioSetupError("no_traffic")
+    """Learn the network (unless given), then confirm heaters by address."""
+    sighting = await find_network(
+        host,
+        port,
+        dialect,
+        network_id,
+        link_factory=link_factory,
+        dialect_capable=dialect_capable,
+        analyse_survey=analyse_survey,
+    )
     heaters = await probe_heaters(
         host,
         port,
@@ -455,6 +475,25 @@ def radio_monitor_entry_data(radio: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def radio_new_entry_data(radio: Mapping[str, Any]) -> dict[str, Any]:
+    """Return entry data for a gateway whose heaters are found after setup.
+
+    A chosen dialect is kept; its network id only when the dialect has a fixed
+    one (A). Without ``network_id`` the network is still to be learned.
+    """
+    data: dict[str, Any] = {
+        CONF_BRAND: BRAND_RADIO,
+        **_radio_connection(radio),
+        CONF_NODES: [],
+    }
+    dialect = radio.get(CONF_DIALECT, DIALECT_AUTO)
+    if dialect != DIALECT_AUTO:
+        data[CONF_DIALECT] = dialect
+        if (network_id := DIALECTS[dialect].network_id) is not None:
+            data[CONF_NETWORK_ID] = network_id.hex().upper()
+    return data
+
+
 def radio_entry_data(
     radio: Mapping[str, Any], sighting: NetworkSighting, heaters: dict[int, Any]
 ) -> dict[str, Any]:
@@ -473,6 +512,13 @@ def radio_entry_data(
     }
 
 
+def _entry_title(data: Mapping[str, Any]) -> str:
+    """Return a new radio entry's title: the stick's port or the gateway's address."""
+    if data[CONF_RADIO_TYPE] == RADIO_TYPE_NANOCUL:
+        return f"{NANOCUL_LABEL} ({data[CONF_DEVICE]})"
+    return f"{RADIO_GATEWAY_LABEL} ({data[CONF_HOST]})"
+
+
 def _probe_error(err: Exception) -> str:
     """Return the form error key for a failed gateway probe."""
     return err.reason if isinstance(err, RadioSetupError) else "cannot_connect_radio"
@@ -488,7 +534,6 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         self._radio_task: asyncio.Task[Any] | None = None
         self._radio_result: dict[str, Any] | None = None
         self._radio_error: str | None = None
-        self._radio_placeholders: dict[str, str] = {}
 
     async def async_step_radio(
         self, user_input: dict[str, Any] | None = None
@@ -602,7 +647,7 @@ class RadioConfigFlow(config_entries.ConfigFlow):
     async def async_step_radio_method(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Offer to find paired heaters, to pair new ones, or to only listen."""
+        """Offer to add the gateway now (heaters found later), to pair, or to listen."""
         return self.async_show_menu(
             step_id="radio_method",
             menu_options=["radio_discover", "radio_pair", "radio_monitor"],
@@ -641,7 +686,6 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         if self._radio_task is None:
             self._radio_result = None
             self._radio_error = None
-            self._radio_placeholders = {}
             network_id = await async_site_network_id(
                 self.hass, str(self._radio.get(_GATEWAY_ID))
             )
@@ -667,40 +711,41 @@ class RadioConfigFlow(config_entries.ConfigFlow):
     async def async_step_radio_discover(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Listen for heater traffic and scan heaters while showing progress."""
+        """Create the entry at once; its heaters are found in the background."""
+        data = radio_new_entry_data(self._radio)
+        return self.async_create_entry(title=_entry_title(data), data=data)
+
+    async def async_step_radio_rescan(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Scan the entry's known network for heaters while showing progress."""
         if self._radio_task is None:
             self._radio_result = None
             self._radio_error = None
-            self._radio_placeholders = {}
             host, port = radio_address(self._radio)
             self._radio_task = self.hass.async_create_task(
                 discover_radio(
                     host,
                     port,
-                    self._radio.get(CONF_DIALECT, DIALECT_AUTO),
-                    self._radio.get("network_bytes"),
+                    self._radio[CONF_DIALECT],
+                    bytes.fromhex(self._radio[CONF_NETWORK_ID]),
                     link_factory=radio_link_factory(self._radio),
-                    dialect_capable=self._radio.get(_CAPABLE, True),
-                    analyse_survey=functools.partial(async_analyse, self.hass),
                 )
             )
         if not self._radio_task.done():
             return self.async_show_progress(
-                step_id="radio_discover",
-                progress_action="radio_discover",
+                step_id="radio_rescan",
+                progress_action="radio_rescan",
                 progress_task=self._radio_task,
             )
         return await self._radio_task_done()
 
     async def _radio_task_done(self) -> FlowResult:
-        """Collect the finished discovery or pairing task and move to radio_finish."""
+        """Collect the finished scan or pairing task and move to radio_finish."""
         task, self._radio_task = self._radio_task, None
         assert task is not None  # only called once the task finished
         try:
             sighting, heaters = task.result()
-        except UnknownDialectError as err:
-            self._radio_error = err.reason
-            await self._save_survey_report(err.report)
         except RadioSetupError as err:
             self._radio_error = err.reason
         except RadioLinkError:
@@ -712,22 +757,6 @@ class RadioConfigFlow(config_entries.ConfigFlow):
             self._radio_result = radio_entry_data(self._radio, sighting, heaters)
         return self.async_show_progress_done(next_step_id="radio_finish")
 
-    async def _save_survey_report(self, report: SurveyReport) -> None:
-        """Save an unknown-dialect survey report and point the error text at it."""
-        payload = report_payload(
-            report,
-            seconds=SURVEY_S,
-            gateway=None,
-            radio_type=self._radio.get(CONF_RADIO_TYPE),
-            dialect=self._radio.get(CONF_DIALECT, DIALECT_AUTO),
-            version=await async_get_integration_version(self.hass),
-        )
-        path = await async_save_report(self.hass, "setup", payload)
-        self._radio_placeholders = {
-            "report": path or "(the report could not be saved, see the log)",
-            "issue_url": ISSUE_URL,
-        }
-
     async def async_step_radio_finish(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -738,17 +767,12 @@ class RadioConfigFlow(config_entries.ConfigFlow):
                 step_id=step_id,
                 data_schema=schema,
                 errors={"base": self._radio_error or "unknown"},
-                description_placeholders=self._radio_placeholders or None,
             )
         data = self._radio_result
         entry = self._reconfigure_entry()
         if entry is not None:
             return self.async_update_reload_and_abort(entry, data=data)
-        if data[CONF_RADIO_TYPE] == RADIO_TYPE_NANOCUL:
-            title = f"{NANOCUL_LABEL} ({data[CONF_DEVICE]})"
-        else:
-            title = f"{RADIO_GATEWAY_LABEL} ({data[CONF_HOST]})"
-        return self.async_create_entry(title=title, data=data)
+        return self.async_create_entry(title=_entry_title(data), data=data)
 
     def _nanocul_flow(self) -> bool:
         """Return True while the flow sets up (or reconfigures) a nanoCUL."""
@@ -761,16 +785,12 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         )
 
     def _radio_form(self) -> tuple[str, vol.Schema]:
-        """Return the step id and schema to show again after a failed discovery."""
+        """Return the step id and schema to show again after a failed pairing or rescan."""
         if self._radio.get(_PAIRING):
             return "radio_pair", vol.Schema({})
-        if self._reconfigure_entry() is not None:
-            if self._nanocul_flow():
-                return "reconfigure_nanocul", _reconfigure_nanocul_schema(self._radio)
-            return "reconfigure_radio", _reconfigure_radio_schema(self._radio)
         if self._nanocul_flow():
-            return "nanocul_manual", _nanocul_manual_schema(self._radio)
-        return "radio", _radio_schema(self._radio)
+            return "reconfigure_nanocul", _reconfigure_nanocul_schema(self._radio)
+        return "reconfigure_radio", _reconfigure_radio_schema(self._radio)
 
     async def async_step_nanocul(
         self, user_input: dict[str, Any] | None = None
@@ -882,7 +902,8 @@ class RadioConfigFlow(config_entries.ConfigFlow):
                 data_schema=_reconfigure_nanocul_schema(self._radio),
                 errors={"base": "cannot_connect_nanocul"},
             )
-        if entry.data.get(CONF_DIALECT) != "A" and not capable:
+        dialect = entry.data.get(CONF_DIALECT, DIALECT_AUTO)
+        if dialect not in (DIALECT_AUTO, "A") and not capable:
             return self.async_show_form(
                 step_id="reconfigure_nanocul",
                 data_schema=_reconfigure_nanocul_schema(self._radio),
@@ -893,10 +914,8 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         if _is_mac_id(dev_id) and _is_mac_id(entry.data.get(CONF_RADIO_DEVICE_ID)):
             await self.async_set_unique_id(f"{BRAND_RADIO}:{dev_id}")
             self._abort_if_unique_id_mismatch()
-        if user_input.get(CONF_RESCAN):
-            self._radio["network_bytes"] = bytes.fromhex(entry.data[CONF_NETWORK_ID])
-            self._radio[_CAPABLE] = capable
-            return await self.async_step_radio_discover()
+        if user_input.get(CONF_RESCAN) and CONF_NETWORK_ID in entry.data:
+            return await self.async_step_radio_rescan()
         return self.async_update_reload_and_abort(
             entry, data_updates={CONF_DEVICE: device}
         )
@@ -934,9 +953,8 @@ class RadioConfigFlow(config_entries.ConfigFlow):
             )
         await self.async_set_unique_id(f"{BRAND_RADIO}:{dev_id}")
         self._abort_if_unique_id_mismatch()
-        if user_input.get(CONF_RESCAN):
-            self._radio["network_bytes"] = bytes.fromhex(entry.data[CONF_NETWORK_ID])
-            return await self.async_step_radio_discover()
+        if user_input.get(CONF_RESCAN) and CONF_NETWORK_ID in entry.data:
+            return await self.async_step_radio_rescan()
         return self.async_update_reload_and_abort(
             entry, data_updates={CONF_HOST: host, CONF_PORT: port}
         )

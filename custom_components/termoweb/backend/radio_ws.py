@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from custom_components.termoweb.codecs.radio_codec import (
     prog_from_program,
@@ -23,7 +24,7 @@ from custom_components.termoweb.codecs.radio_codec import (
     settings_from_power_request,
     settings_from_status,
 )
-from custom_components.termoweb.const import DOMAIN
+from custom_components.termoweb.const import DOMAIN, signal_radio_unknown_heater
 from custom_components.termoweb.domain.ids import NodeId, NodeType
 from custom_components.termoweb.domain.state import NodeSettingsDelta
 from custom_components.termoweb.inventory import Inventory
@@ -233,7 +234,11 @@ class RadioListener(_WSStatusMixin):
         addr = str(frame.src)
         node_type = self._node_type_for(addr)
         if node_type is None:
-            _LOGGER.debug("Ignoring radio frame from unknown node %s", addr)
+            # A heater on our network that is not set up yet: let setup add it.
+            _LOGGER.debug("Radio frame from unknown node %s", addr)
+            async_dispatcher_send(
+                self.hass, signal_radio_unknown_heater(self.entry_id), frame.src
+            )
             return
         kind = protocol.classify_unsolicited(frame)
         payload = frame.payload

@@ -311,8 +311,9 @@ both: `addr` addresses radio frames; `serial` names and identifies it.
   The device name in Home Assistant is the user's to change.
 - **Where the serial comes from**: pairing (`PairedHeater.serial`, from the
   `5A` reply or the dialect-A announcement), the network move (the identities
-  it reads anyway), and setup. Discovery only probes `B8`, so discovered
-  heaters get their serial at the first setup.
+  it reads anyway), background discovery (it adds only heaters that answer
+  `5A`), and setup. A rescan only probes `B8`, so rescanned heaters get their
+  serial at the next setup.
 - **Setup** (`radio_identity.async_learn_serials`): before the inventory is
   built, every stored node without a serial gets one `5A` read (10 s limit).
   Learned serials are saved in the entry data. A heater that does not answer
@@ -416,40 +417,91 @@ The manual radio form asks only for the host. Port (2323) and dialect
    It has its own unique id, `radio_monitor:<dev_id>`; only one entry can
    use the gateway's port at a time (the newest connection wins). A listen-only entry cannot be
    reconfigured (`monitor_reconfigure`): delete it and add it again.
-2. `radio_discover` is a progress step running `discover_radio`:
-   - with a dialect and a known network id (dialect A's fixed `1B30`, or
-     the stored id on a re-scan), it skips listening;
-   - otherwise `discovery.discover_network` alternates 10 s listening windows
-     over dialects B then A, up to 6 minutes. A heater that wants heat sends
-     a power-request spell about every 5 minutes: 5 frames over about 27 s,
-     never more than 8 s apart. A 10 s window that overlaps a spell therefore
-     catches a frame, and with ~21 s per A+B cycle every spell overlaps a
-     window of each dialect. An associated heater that does not want heat
-     may stay silent. Every CRC-valid data frame
-     gives the network id (bytes 1-2) and its sender. Dialect-B network ids
-     belong to one installation, so there is no default to fall back on;
-   - if listening hears nothing, `survey_sighting` runs a 120 s raw survey
-     (gateway firmware 3.7-esp32+) to tell silence from an unknown dialect;
-     see [radio protocol §6](radio_protocol.md#from-home-assistant). Errors:
-     `no_traffic` or `unknown_dialect` (with a saved report file);
-   - `discovery.probe_heaters` sends `B8` to addresses 2-32 plus every
-     sender heard. Addresses that answer with a status record are the
-     heaters.
-3. The entry stores `brand: radio`, `host`, `port`, `dialect`, `network_id`
-   (hex) and `nodes` as `[{"type": "htr", "addr": "6", "name": "Heater 6"}]`.
-   Addresses are plain decimal strings: the listener matches frames by
-   `str(src)`. Once known, a node also stores its `serial` and is named
-   `Heater <serial>` (see [Heater identity and names](#heater-identity-and-names)).
+2. `radio_discover` ("Add the gateway and find my heaters") creates the
+   entry at once, with no progress step and no heaters
+   (`radio_new_entry_data`): `brand: radio`, the connection, `nodes: []`,
+   and the dialect only when the user chose one. Dialect A has a fixed
+   network id (`1B30`), so a dialect-A entry stores it too; otherwise
+   `network_id` is missing, which means "network still to be learned".
+   Heaters are found after setup, see
+   [Background heater discovery](#background-heater-discovery).
+3. Once known, the entry stores `dialect`, `network_id` (hex) and `nodes` as
+   `[{"type": "htr", "addr": "6", "name": "Heater 6"}]`. Addresses are plain
+   decimal strings: the listener matches frames by `str(src)`. Once known, a
+   node also stores its `serial` and is named `Heater <serial>` (see
+   [Heater identity and names](#heater-identity-and-names)).
 
-Errors: `cannot_connect_radio`, `no_gateway_mac`, `no_traffic`,
-`no_heaters`.
+Errors: `cannot_connect_radio`, `no_gateway_mac`.
 
 Reconfigure changes host and port. With **Scan for heaters again** it
-re-runs the scan with the stored dialect and network id, and replaces the
-node list.
+re-runs the scan (`radio_rescan`, a progress step running `discover_radio`
+with the stored dialect and network id, so it never listens) and replaces
+the node list (error `no_heaters` when no heater answers). An entry that is
+still learning its network has nothing to scan: the address is saved and
+the entry reloads.
 
 Setup builds the client with `create_radio_client(host, port, dialect, nodes,
 network_id)`. `RadioLinkError` and `RadioError` from `list_devices` raise
 `ConfigEntryNotReady`, so Home Assistant retries while the gateway is
 offline. Unload stops the listener, which closes the connection.
+
+### Background heater discovery
+
+`radio_discovery` finds heaters after setup; setup never waits for them.
+It runs only for backends with the `heater_discovery` capability (the radio
+gateway backend, not listen-only entries).
+
+1. **Network search** (`network_pending`: no `network_id` in the entry).
+   Setup starts `async_search_network` as an entry background task and
+   returns at once: no client, listener or platforms are set up, because
+   the search needs the gateway's single connection for itself. The search
+   runs `config_flow_radio.find_network`:
+   - `discovery.discover_network` alternates 10 s listening windows over
+     dialects B then A (only the chosen one, if any), up to 6 minutes. A
+     heater that wants heat sends a power-request spell about every 5
+     minutes: 5 frames over about 27 s, never more than 8 s apart. A 10 s
+     window that overlaps a spell therefore catches a frame, and with ~21 s
+     per A+B cycle every spell overlaps a window of each dialect. An
+     associated heater that does not want heat may stay silent. Every
+     CRC-valid data frame gives the network id (bytes 1-2) and its sender.
+     Dialect-B network ids belong to one installation, so there is no
+     default to fall back on. A dialect the firmware cannot speak (a stock
+     nanoCUL only knows A) is dropped from the rotation;
+   - if listening hears nothing, `survey_sighting` runs one 120 s raw survey
+     (gateway firmware 3.7-esp32+) to tell silence from an unknown dialect;
+     see [radio protocol §6](radio_protocol.md#from-home-assistant). The
+     survey only runs here, while no network is known and no heater is set
+     up, so it never holds back keepalives (#1040).
+
+   Silence, a gateway that cannot be reached, or an unexpected error: the
+   search tries again after 10 minutes (`NETWORK_RETRY_S`). An unknown
+   dialect saves the report file, shows a persistent notification ("TermoWeb
+   heaters not recognised") with the file and the issue link, and stops; a
+   reload listens again. A heard network is stored (`dialect`, `network_id`)
+   and the entry reloads into a normal setup with no heaters.
+2. **Scan** (network known, no heaters). `HeaterFinder.async_scan` asks every
+   address 2-32 for its `5A` identity through the running client, 0.2 s
+   apart (`SCAN_GAP_S`). Each read holds the exchange lock for one exchange
+   only.
+3. **Heard heaters** (network known). `RadioListener` drops frames from
+   other networks and frames not sent to its station. A valid data frame
+   from an address that is not in the inventory is sent as the dispatcher
+   signal `signal_radio_unknown_heater(entry_id)`. `HeaterFinder` collects
+   the addresses for 10 s (`FOUND_DEBOUNCE_S`), so heaters heard together
+   cause one reload, then reads each one's `5A` identity (10 s limit). An
+   address that does not answer is asked again at most every 10 minutes
+   (`IDENTIFY_RETRY_S`).
+4. **Store.** Only heaters that answer the identity read are added, so each
+   one has its serial. `radio_pairing.merge_heaters` matches by serial
+   first: a known serial at a new address moves that node (as pairing does),
+   so its devices and entities stay. An address that is already stored is
+   not added again. Changed nodes are saved with `async_update_entry` and
+   the entry reloads (`async_schedule_reload`): the inventory is only built
+   at setup. The identity read also notes the heater's rated power. Each new
+   heater gets a persistent notification: "Found TermoWeb heater
+   `<serial>`". Logs mask the serial. After a store the finder stops until
+   the reload.
+
+Unload cancels the search and the scan (entry background tasks) and the
+pending debounce timer.
 
