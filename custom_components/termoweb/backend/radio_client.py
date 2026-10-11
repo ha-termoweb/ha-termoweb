@@ -327,7 +327,7 @@ class RadioClient:
             version = getattr(link.gateway_info, "version", None)
             raise RadioError(
                 f"gateway firmware {version or 'unknown'} has no raw survey; "
-                "update the ESP32 gateway to 3.7-esp32 or later"
+                "update the radio firmware to 3.7 or later"
             )
         async with self._exchange_lock:
             return await link.survey(seconds)

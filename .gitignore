@@ -237,3 +237,8 @@ __marimo__/
 *.rej
 .claude/
 CLAUDE.md
+
+# nanoCUL firmware build outputs
+firmware/nanocul/*.o
+firmware/nanocul/*.elf
+firmware/nanocul/*.hex

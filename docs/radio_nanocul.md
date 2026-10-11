@@ -7,26 +7,49 @@ port of the computer that runs Home Assistant.
 
 ## Before you start: which heaters work
 
-Your heaters use one of two radio "dialects". The stock `termoweb_rx`
-firmware for the nanoCUL only speaks **dialect A**.
+The nanoCUL firmware from this repository (version 3.7-nanocul or newer)
+speaks both radio "dialects" that TermoWeb heaters use, A and B, like the
+ESP32 radio gateway. The setup finds out which one your heaters use.
 
-- If the setup finds a **dialect B** network, the stick cannot talk to those
-  heaters yet. Use the ESP32 radio gateway instead, or wait for a nanoCUL
-  firmware with dialect support.
-- The setup tells you which dialect it hears.
+An older stick firmware (termoweb_rx 3.5 or 3.6, from the old
+ha-termoweb-local project) only speaks dialect A. Put the new firmware on the
+stick (step 1) to use dialect-B heaters.
 
 ## Step 1: put the termoweb_rx firmware on the stick
 
-You need a computer with `avr-gcc` and `avrdude` (for example a Linux PC or
-a Raspberry Pi), and the
-[ha-termoweb-local](https://github.com/ha-termoweb/ha-termoweb-local)
-repository.
+The firmware is in the `firmware/nanocul` folder of this repository. You can
+download a ready-made file or build it yourself. Both ways need `avrdude`,
+the tool that writes the firmware to the stick (on Debian, Ubuntu or a
+Raspberry Pi: `sudo apt install avrdude`).
 
-1. Plug the nanoCUL into that computer.
-2. Open a terminal in `firmware/termoweb_rx`.
-3. Run `make flash PORT=/dev/ttyUSB0`. Use your stick's port if it is
-   different.
+**Download (easiest)**
+
+1. Open the [releases page](https://github.com/ha-termoweb/ha-termoweb/releases)
+   and download `termoweb_rx-3.7-nanocul.hex` (or the newest
+   `termoweb_rx-*.hex`) from the latest release.
+2. Plug the nanoCUL into the computer.
+3. Run, with your stick's port instead of `/dev/ttyUSB0`:
+
+   ```
+   avrdude -c arduino -p atmega328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:termoweb_rx-3.7-nanocul.hex:i
+   ```
+
+   If avrdude says "not in sync", your stick has the older bootloader: use
+   `-b 57600` instead of `-b 115200`.
 4. Wait until avrdude says the flash was verified.
+
+**Build it yourself**
+
+You also need `avr-gcc` (`sudo apt install gcc-avr avr-libc binutils-avr`).
+
+1. Download this repository and open a terminal in `firmware/nanocul`.
+2. Run `make flash PORT=/dev/ttyUSB0`. Use your stick's port if it is
+   different. Add `BAUD=57600` if avrdude says "not in sync"
+   (`make signature PORT=/dev/ttyUSB0` tells you which one your stick needs).
+3. Wait until avrdude says the flash was verified.
+
+The firmware transmits at +10 dBm, the level the heaters need to hear the
+stick. `firmware/README.md` explains the firmware for developers.
 
 ## Step 2: plug the stick into Home Assistant
 
@@ -65,7 +88,8 @@ If you see "Cannot open the nanoCUL stick": check the cable, the port and the
 firmware (step 1).
 
 If you see "This nanoCUL firmware only knows radio dialect A": your heaters
-use dialect B. See "Before you start".
+use dialect B and the stick has an old firmware. Put the new firmware on the
+stick (step 1).
 
 To change the port later, open the integration and choose **Reconfigure**.
 
@@ -86,8 +110,7 @@ recordings to learn unknown commands.
    [Help find the identify command](radio_identify_capture.md) explains every
    step.
 
-The stock firmware only hears dialect A. The stick never transmits in this
-mode, not even link-layer acks.
+The stick never transmits in this mode, not even link-layer acks.
 
 Only one entry can use the stick at a time. When you set up the stick to
 control your heaters, the listen-only entry loses the stick. Delete the

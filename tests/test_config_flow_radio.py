@@ -32,6 +32,7 @@ from custom_components.termoweb.backend.radio import (
     RadioLinkError,
 )
 from custom_components.termoweb.backend.radio.discovery import NetworkSighting
+from custom_components.termoweb.backend.radio.link import parse_query_line
 from custom_components.termoweb.backend.radio.survey import analyse
 from custom_components.termoweb.const import (
     BRAND_RADIO,
@@ -853,6 +854,21 @@ async def test_probe_nanocul(
         GatewayInfo("3.6", "869.525", "2DE5", True, 1, "0A:0B:0C:0D:0E:0F", "", "A"),
     )
     assert await config_flow_radio.probe_nanocul("socket://gw:1") == (GATEWAY_ID, True)
+
+
+async def test_probe_nanocul_with_this_repos_firmware(
+    probe_link: type[ProbeLink], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """firmware/nanocul (3.7-nanocul) has no MAC but reports dialects: capable."""
+    info = parse_query_line(
+        "# Q termoweb_rx 3.7-nanocul freq=869.525 pa=C0 sync=2DE5 mode=dynamic "
+        "autoack=off id=01 dialect=A net=1B30"
+    )
+    monkeypatch.setattr(probe_link, "info", info)
+    assert await config_flow_radio.probe_nanocul("/dev/ttyUSB0", "A1B2C3") == (
+        "nanocul-a1b2c3",
+        True,
+    )
 
 
 def test_radio_link_factory_and_address() -> None:
