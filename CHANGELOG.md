@@ -6,6 +6,9 @@
 - nanoCUL stick: new firmware **3.7-nanocul** in this repository (`firmware/nanocul`). The stick now speaks both radio dialects (A and B), like the ESP32 gateway, and has the same commands: radio survey, frequency setting and network id. Download the ready-made file from the release page, or build it yourself; see [Radio stick: use a nanoCUL USB stick](docs/radio_nanocul.md), step 1.
 - The radio survey (**TermoWeb: Radio survey**) also works with a nanoCUL stick that has the new firmware.
 
+### Changed
+- Radio setup: the radio type is always detected by itself. The **Radio dialect** choice is gone from the ESP32 gateway and nanoCUL forms (the nanoCUL forms now ask only for the port). A nanoCUL with old firmware that cannot detect it stops the setup with "The firmware on this nanoCUL stick is too old": put the new firmware on the stick, then try again. Listen only still works with old firmware.
+
 ### Fixed
 - nanoCUL stick (new firmware): the stick acks only frames with a valid checksum, and letters inside a command's hex value (for example `NAFDA`) are no longer run as separate commands.
 

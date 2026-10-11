@@ -67,11 +67,12 @@ def _is_mac_id(dev_id: str | None) -> bool:
 DIALECT_AUTO = "auto"
 CONF_RESCAN = "rescan"
 MANUAL_DEVICE = "manual"  # nanoCUL port choice: type a path or URL instead
-ADVANCED = "advanced"  # collapsed form section: port and dialect
+ADVANCED = "advanced"  # collapsed form section: the gateway port
 SERIAL_BY_ID_DIR = "/dev/serial/by-id"
 NANOCUL_LABEL = "nanoCUL"
 MONITOR_LABEL = "Radio monitor"  # title of a listen-only entry
 _GATEWAY_ID = "gateway_id"  # flow state: the gateway's dev_id
+_CAPABLE = "capable"  # flow state: the stick's firmware can detect the radio type
 
 
 @dataclass(frozen=True)
@@ -165,15 +166,6 @@ async def _analyse_inline(bursts: Sequence[RawBurst]) -> SurveyReport:
     return analyse(bursts)
 
 
-def _dialect_field(defaults: Mapping[str, Any]) -> dict[Any, Any]:
-    """Return the optional radio dialect field (auto by default)."""
-    return {
-        vol.Optional(
-            CONF_DIALECT, default=defaults.get(CONF_DIALECT, DIALECT_AUTO)
-        ): vol.In([DIALECT_AUTO, *DIALECTS]),
-    }
-
-
 def _advanced(fields: dict[Any, Any]) -> dict[Any, Any]:
     """Return ``fields`` as a collapsed "advanced" form section."""
     return {
@@ -190,7 +182,7 @@ def _flatten(user_input: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _radio_schema(defaults: Mapping[str, Any]) -> vol.Schema:
-    """Build the radio gateway form: the address, port and dialect tucked away."""
+    """Build the radio gateway form: the address, the port tucked away."""
     return vol.Schema(
         {
             vol.Required(CONF_HOST, default=defaults.get(CONF_HOST, "")): str,
@@ -199,7 +191,6 @@ def _radio_schema(defaults: Mapping[str, Any]) -> vol.Schema:
                     vol.Optional(
                         CONF_PORT, default=defaults.get(CONF_PORT, RADIO_DEFAULT_PORT)
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
-                    **_dialect_field(defaults),
                 }
             ),
         }
@@ -235,7 +226,7 @@ def _nanocul_schema(
         if default is None
         else vol.Required(CONF_DEVICE, default=default)
     )
-    return vol.Schema({device: vol.In(choices), **_advanced(_dialect_field(defaults))})
+    return vol.Schema({device: vol.In(choices)})
 
 
 def _nanocul_manual_schema(defaults: Mapping[str, Any]) -> vol.Schema:
@@ -247,7 +238,6 @@ def _nanocul_manual_schema(defaults: Mapping[str, Any]) -> vol.Schema:
                 CONF_DEVICE,
                 default="" if device in (None, MANUAL_DEVICE) else device,
             ): str,
-            **_advanced(_dialect_field(defaults)),
         }
     )
 
@@ -449,20 +439,13 @@ def radio_monitor_entry_data(radio: Mapping[str, Any]) -> dict[str, Any]:
 def radio_new_entry_data(radio: Mapping[str, Any]) -> dict[str, Any]:
     """Return entry data for a gateway whose heaters are found after setup.
 
-    A chosen dialect is kept; its network id only when the dialect has a fixed
-    one (A). Without ``network_id`` the network is still to be learned.
+    The radio type and network are detected after setup and stored then.
     """
-    data: dict[str, Any] = {
+    return {
         CONF_BRAND: BRAND_RADIO,
         **_radio_connection(radio),
         CONF_NODES: [],
     }
-    dialect = radio.get(CONF_DIALECT, DIALECT_AUTO)
-    if dialect != DIALECT_AUTO:
-        data[CONF_DIALECT] = dialect
-        if (network_id := DIALECTS[dialect].network_id) is not None:
-            data[CONF_NETWORK_ID] = network_id.hex().upper()
-    return data
 
 
 def radio_entry_data(
@@ -637,7 +620,13 @@ class RadioConfigFlow(config_entries.ConfigFlow):
     async def async_step_radio_discover(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Create the entry at once; its heaters are found in the background."""
+        """Create the entry at once; its heaters are found in the background.
+
+        A nanoCUL whose firmware cannot detect the radio type aborts: the stick
+        needs new firmware first.
+        """
+        if self._radio.get(_CAPABLE) is False:
+            return self.async_abort(reason="nanocul_firmware_too_old")
         data = radio_new_entry_data(self._radio)
         return self.async_create_entry(title=_entry_title(data), data=data)
 
@@ -728,7 +717,6 @@ class RadioConfigFlow(config_entries.ConfigFlow):
                 step_id="nanocul",
                 data_schema=_nanocul_schema(ports, self._radio, likely),
             )
-        user_input = _flatten(user_input)
         if user_input[CONF_DEVICE] == MANUAL_DEVICE:
             self._radio = {**user_input, CONF_RADIO_TYPE: RADIO_TYPE_NANOCUL}
             return await self.async_step_nanocul_manual()
@@ -749,7 +737,6 @@ class RadioConfigFlow(config_entries.ConfigFlow):
                 step_id="nanocul_manual",
                 data_schema=_nanocul_manual_schema(self._radio),
             )
-        user_input = _flatten(user_input)
         return await self._start_nanocul(
             "nanocul_manual", user_input, None, _nanocul_manual_schema(user_input)
         )
@@ -770,28 +757,20 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         usb_serial: str | None,
         schema: vol.Schema,
     ) -> FlowResult:
-        """Probe the stick, check its firmware can speak the dialect, discover."""
+        """Probe the stick, note whether its firmware detects the radio type."""
         device = str(user_input[CONF_DEVICE]).strip()
         self._radio = {
             **user_input,
             CONF_DEVICE: device,
             CONF_RADIO_TYPE: RADIO_TYPE_NANOCUL,
         }
-        errors: dict[str, str] = {}
         try:
             dev_id, capable = await probe_nanocul(device, usb_serial)
         except RadioLinkError:
-            errors["base"] = "cannot_connect_nanocul"
-        else:
-            wants_b = user_input.get(CONF_DIALECT, DIALECT_AUTO) not in (
-                DIALECT_AUTO,
-                "A",
-            )
-            if wants_b and not capable:
-                errors["base"] = "dialect_unsupported_firmware"
-        if errors:
             return self.async_show_form(
-                step_id=step_id, data_schema=schema, errors=errors
+                step_id=step_id,
+                data_schema=schema,
+                errors={"base": "cannot_connect_nanocul"},
             )
         await self.async_set_unique_id(f"{BRAND_RADIO}:{dev_id}")
         self._abort_if_unique_id_configured()
@@ -799,6 +778,7 @@ class RadioConfigFlow(config_entries.ConfigFlow):
             {
                 CONF_RADIO_DEVICE_ID: dev_id,
                 _GATEWAY_ID: dev_id,
+                _CAPABLE: capable,
             }
         )
         return await self.async_step_radio_method()
@@ -823,13 +803,13 @@ class RadioConfigFlow(config_entries.ConfigFlow):
                 data_schema=_reconfigure_nanocul_schema(self._radio),
                 errors={"base": "cannot_connect_nanocul"},
             )
-        dialect = entry.data.get(CONF_DIALECT, DIALECT_AUTO)
-        if dialect not in (DIALECT_AUTO, "A") and not capable:
-            return self.async_show_form(
-                step_id="reconfigure_nanocul",
-                data_schema=_reconfigure_nanocul_schema(self._radio),
-                errors={"base": "dialect_unsupported_firmware"},
-            )
+        # Old firmware hears only the older radio type: fine unless the entry
+        # already detected the newer one.
+        if (
+            entry.data.get(CONF_DIALECT, DIALECT_A.name) != DIALECT_A.name
+            and not capable
+        ):
+            return self.async_abort(reason="nanocul_firmware_too_old")
         # A stick without a MAC is known only by its port, so only two MAC ids
         # can prove that the user plugged in a different stick.
         if _is_mac_id(dev_id) and _is_mac_id(entry.data.get(CONF_RADIO_DEVICE_ID)):
