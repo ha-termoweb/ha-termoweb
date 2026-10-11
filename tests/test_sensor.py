@@ -383,7 +383,7 @@ async def test_radio_energy_and_power_use_the_rating_from_the_heater_identity(
         await setup_entry(hass, entry)
         await hass.async_block_till_done()
         # Setup reads the identity first: the serial names the heater.
-        assert links[0].payloads()[:4] == [b"\x5a", b"\xb8", b"\xb0", b"\xbc"]
+        assert links[0].payloads()[:5] == [b"\x5a", b"\xb8", b"\xb0", b"\xda", b"\xbc"]
         energy = "sensor.heater_x123456_energy"
         assert float(hass.states.get(energy).state) == 0.0
 

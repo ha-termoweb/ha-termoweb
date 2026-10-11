@@ -62,6 +62,7 @@ Tevolve-branded heaters use the same backend as the Ducaheat app. If you manage 
 - Monitor thermostat battery level so you know when wireless controllers need attention.
 - Track accumulator charging status and charge targets to understand storage heater behaviour.
 - With a local radio and heaters of radio type A: start a **boost** (choose the **Boost** preset on the heater), and switch **Runback** and **EASY mode** on or off. The boost uses the heater's own boost time. Turning Runback off gives the heater back its mode and temperature from before.
+- With a local radio: change a heater's **advanced settings** (open the heater device, section **Configuration**): **Temperature offset** (−3.0 to +3.0 °C), **Control mode** (PID or hysteresis), **Panel temperature unit** (°C or °F on the heater's own display), **Open window detection** and **True radiant**. The heater cannot report these settings, so each one shows **Unknown** until you set it in Home Assistant, and a change made on the heater's panel is not shown. When you set one, the others are sent as shown (unknown ones as the factory defaults).
 - Use HA **automations**, **scenes**, and **voice assistants** (including HA’s Google/Alexa integrations).
 
 ### Climate mode behavior (important)

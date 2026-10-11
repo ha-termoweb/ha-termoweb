@@ -22,6 +22,7 @@ from .entity import (
     DEFAULT_BOOST_DURATION,
     DEFAULT_BOOST_TEMPERATURE,
     HeaterNodeBase,
+    HeaterSettingEntity,
     NodeRefreshFallback,
     async_backend_write,
     boostable_accumulator_details_for_entry,
@@ -190,6 +191,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 dev_id,
                 power_limit_uid,
             )
+        )
+
+    if runtime.backend.features.advanced_setup:
+        new_entities.extend(
+            TemperatureOffsetNumber(
+                coordinator,
+                entry.entry_id,
+                dev_id,
+                metadata.addr,
+                inventory=runtime.inventory,
+                device_name=metadata.name,
+            )
+            for metadata in runtime.inventory.iter_nodes_metadata(node_types=("htr",))
         )
 
     _LOGGER.debug("Adding %d TermoWeb number entities", len(new_entities))
@@ -599,3 +613,33 @@ class PowerLimitNumber(CoordinatorEntity, NumberEntity):
         )
         # Show the value now; a WebSocket push or the next poll confirms it.
         self.coordinator.apply_power_limit(power_limit)
+
+
+class TemperatureOffsetNumber(HeaterSettingEntity, NumberEntity):
+    """Correction subtracted from the heater's measured room temperature (-3 to +3 °C)."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "temperature_offset"
+    _attr_icon = "mdi:thermometer-plus"
+    _attr_mode = NumberMode.BOX
+    _attr_native_min_value = -3.0
+    _attr_native_max_value = 3.0
+    _attr_native_step = 0.1
+    # A temperature difference: no device class, so HA does not convert it as
+    # an absolute temperature.
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _field = "temp_offset"
+    _gate = "advanced_setup"
+    _label = "Temperature offset"
+    _write = "set_node_advanced"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the offset last written (None until written)."""
+
+        return as_float(self._setting())
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Write the offset, rounded to 0.1 °C."""
+
+        await self._async_write_setting(round(value, 1))

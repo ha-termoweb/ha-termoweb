@@ -105,7 +105,7 @@ A reply's first payload byte is the request opcode + 1. A two-byte
 | `B2` + 84 bytes | station → heater | weekly program write, 48 slots/day, Sunday first, reply `B3 55` | A | rejected |
 | `B2` + 42 bytes | station → heater | weekly program write, 24 slots/day, same layout as the `B1` read, reply `B3 55` | ? | B |
 | `D2` / `D4` / `D6` / `BA` `01|00` | station → heater | boost / runback / EASY / keypad lock toggles, reply `<op+1> 55`; see [heater toggles](#heater-toggles-dialect-a) | A | `BA` acked; `D2` → `D3 00 00`, `D6` → `D7 19`, `D4` ack only, no effect seen |
-| `C4` + 8 bytes | station → heater | advanced setup record, reply `C5 55/56` | A | ? |
+| `C4` + 8 bytes | station → heater | advanced setup record, reply `C5 55/56`; see [advanced setup](#advanced-setup-dialect-a) | A | ? |
 | `5E 01` | station → heater | flash display, reply `5F 55` (dialect B: ack only; what a real gateway sends for "identify" in dialect B is not yet captured, see section 10) | A | B (acked) |
 | `57 55` | station → heater | confirm a `56 ..` report | A | ? |
 | `51|52 YY MM DD DOW HH MM SS [03]` | station → heater | clock sync (`51` while registering), DOW 0 = Sunday, reply `53 55` | A (9 bytes) | B (8 bytes; the 9-byte form gets `53 56`) |
@@ -114,7 +114,7 @@ A reply's first payload byte is the request opcode + 1. A two-byte
 | `B0` → `B1 ..` | request / reply | program: 85 bytes (48 slots/day) or 43 bytes (24 slots/day) | A | B (43 bytes) |
 | `BC` → `BD ..` | request / reply | dialect A: `BD` + u32 Wh energy counter | A | B: 9-byte power record, **not** energy (see below) |
 | `5A` → `5B ..` | request / reply | identity: `5B 77 01 01 01 <id>` + 12-byte tail + `0A 1A` | A | B (`5B 55` + 16 bytes ending in the ASCII serial; payload byte 10 = rated power / 100 W, `0F` = 1500 W) |
-| `DA` → `DB ..` | request / reply | advanced record, 17 bytes | A | ? |
+| `DA` → `DB ..` | request / reply | advanced record, 17 bytes; see [advanced setup](#advanced-setup-dialect-a) | A | ? |
 | `C2` → `C3 55` | request / reply | meaning unknown | A | B (ack only) |
 | `D0` → `EC`-class reply | request / reply | capability, meaning unknown | A | B (ack only) |
 | `C6` → `C7 ..` | request / reply | meaning unknown | A | B (`C7 55`) |
@@ -183,6 +183,30 @@ As implemented by ha-termoweb-local. Each toggle is `<op> 01` (on) or
 Runback and boost can be set together (flags `A0`). Dialect B answers these
 toggles without any visible effect (see the table above), so the integration
 does not offer them there (`Dialect.heater_toggles`).
+
+### Advanced setup (dialect A)
+
+As implemented by ha-termoweb-local. Write:
+`C4 <control_mode> <units> <offset> <away_mode> <away_offset> <modified_auto_span> <window_mode> <true_radiant>`,
+answered `C5 55` (accepted) or `C5 56` (rejected).
+
+| Field | Values |
+|---|---|
+| `control_mode` | `0`–`3` hysteresis 0.25 / 0.35 / 0.5 / 0.75 °C, `4` PID |
+| `units` | `0` °C, `1` °F (display; the radio's temperature encoding does not change) |
+| `offset` | signed tenths of a degree, −3.0 to +3.0 °C, subtracted from the measured temperature (`F6` = −1.0) |
+| `away_mode`, `away_offset`, `modified_auto_span` | always sent as 0 |
+| `window_mode` | open window detection off / on |
+| `true_radiant` | off / on (no effect on panels without that menu) |
+
+Defaults: `C4 04 00 00 00 00 00 00 00`. The fields cannot be read back, so
+every write carries all eight; the integration stores the record it last
+wrote per heater (entry options `radio_advanced`).
+
+Read: `DA` → `DB` + 16 bytes (index from `DB`): eco preset (2), comfort
+preset (5), boost temperature (15), in half degrees. An E3 status report is
+17 bytes too but starts with `56`. The integration reads `DA` once per heater
+to learn whether it has these settings.
 
 ### Energy counter (dialect A)
 

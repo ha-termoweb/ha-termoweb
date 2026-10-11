@@ -1,4 +1,4 @@
-"""Switch entities for heater operating modes: runback and EASY (radio heaters)."""
+"""Switch entities for heater settings: runback, EASY, open window, true radiant."""
 
 from __future__ import annotations
 
@@ -6,34 +6,26 @@ import logging
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity import EntityCategory
 
-from custom_components.termoweb.backend.sanitize import mask_identifier
-from custom_components.termoweb.coordinator.state import StateCoordinator
-from custom_components.termoweb.domain.state import DomainState
-from custom_components.termoweb.entity import (
-    NodeRefreshFallback,
-    SettingsResolver,
-    async_backend_write,
-    build_settings_resolver,
-)
-from custom_components.termoweb.identifiers import build_heater_unique_id, node_key
-from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.entity import HeaterSettingEntity
 from custom_components.termoweb.runtime import require_runtime
-from custom_components.termoweb.utils import build_node_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
-    """Add runback and EASY switches for heaters whose backend supports them."""
+    """Add the heater switches the entry's backend supports."""
 
     runtime = require_runtime(hass, entry.entry_id)
-    if not runtime.backend.features.heater_toggles:
-        return
+    features = runtime.backend.features
+    classes: list[type[HeaterSettingSwitch]] = []
+    if features.heater_toggles:
+        classes += [RunbackSwitch, EasyModeSwitch]
+    if features.advanced_setup:
+        classes += [OpenWindowSwitch, TrueRadiantSwitch]
     inventory = runtime.inventory
-    entities: list[SwitchEntity] = [
+    entities = [
         cls(
             runtime.coordinator,
             entry.entry_id,
@@ -43,109 +35,35 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             device_name=metadata.name,
         )
         for metadata in inventory.iter_nodes_metadata(node_types=("htr",))
-        for cls in (RunbackSwitch, EasyModeSwitch)
+        for cls in classes
     ]
     if entities:
-        _LOGGER.debug("Adding %d TermoWeb heater mode switches", len(entities))
+        _LOGGER.debug("Adding %d TermoWeb heater switches", len(entities))
     async_add_entities(entities)
 
 
-class HeaterModeSwitch(CoordinatorEntity[StateCoordinator], SwitchEntity):
-    """A heater operating mode the heater reports in its status flags."""
-
-    _attr_has_entity_name = True
-    _attr_should_poll = False
-    _field: str  # HeaterState field holding the reported flag
-    _label: str  # for logs and errors
-    _write: str  # backend method taking the field name as its keyword
-
-    def __init__(
-        self,
-        coordinator: StateCoordinator,
-        entry_id: str,
-        dev_id: str,
-        addr: str,
-        *,
-        inventory: Inventory,
-        device_name: str,
-    ) -> None:
-        """Bind the switch to heater ``addr``."""
-
-        super().__init__(coordinator)
-        self._entry_id = entry_id
-        self._dev_id = str(dev_id)
-        self._addr = addr
-        self._inventory = inventory
-        self._device_name = device_name
-        self._attr_unique_id = build_heater_unique_id(
-            dev_id, "htr", node_key(inventory, "htr", addr), suffix=f":{self._field}"
-        )
-        self._settings_resolver: SettingsResolver = build_settings_resolver(
-            coordinator, dev_id, "htr", addr
-        )
-        self._refresh_fallback = NodeRefreshFallback(self, "htr", addr)
-
-    async def async_added_to_hass(self) -> None:
-        """Cancel a pending fallback refresh when the entity is removed."""
-
-        await super().async_added_to_hass()
-        self.async_on_remove(self._refresh_fallback.cancel)
+class HeaterSettingSwitch(HeaterSettingEntity, SwitchEntity):
+    """An on/off heater setting."""
 
     @property
     def is_on(self) -> bool | None:
-        """Return the mode flag the heater last reported (None before a full status)."""
+        """Return the setting the heater last reported (None while unknown)."""
 
-        value = getattr(self._settings_resolver(), self._field, None)
+        value = self._setting()
         return None if value is None else bool(value)
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Attach the switch to its heater device."""
-
-        return build_node_device_info(
-            self.hass,
-            self._entry_id,
-            self._dev_id,
-            node_key(self._inventory, "htr", self._addr),
-            name=self._device_name,
-            node_type="htr",
-        )
-
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Switch the mode on."""
+        """Switch the setting on."""
 
-        await self._async_set(True)
+        await self._async_write_setting(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Switch the mode off."""
+        """Switch the setting off."""
 
-        await self._async_set(False)
-
-    async def _async_set(self, on: bool) -> None:
-        """Write the mode, then show it until the heater's next status confirms it."""
-
-        _LOGGER.info(
-            "Setting %s %s for %s heater %s",
-            self._label,
-            "on" if on else "off",
-            mask_identifier(self._dev_id),
-            self._addr,
-        )
-        backend = require_runtime(self.hass, self._entry_id).backend
-        write = getattr(backend, self._write)
-        await async_backend_write(
-            self._label,
-            write(self._dev_id, ("htr", self._addr), **{self._field: on}),
-        )
-
-        def _mutate(state: DomainState) -> None:
-            setattr(state, self._field, on)
-
-        self.coordinator.apply_entity_patch("htr", self._addr, _mutate)
-        self._refresh_fallback.schedule()
+        await self._async_write_setting(False)
 
 
-class RunbackSwitch(HeaterModeSwitch):
+class RunbackSwitch(HeaterSettingSwitch):
     """Runback: the heater holds its anti-frost temperature; off restores the mode."""
 
     _attr_translation_key = "runback"
@@ -155,7 +73,7 @@ class RunbackSwitch(HeaterModeSwitch):
     _write = "set_node_runback"
 
 
-class EasyModeSwitch(HeaterModeSwitch):
+class EasyModeSwitch(HeaterSettingSwitch):
     """EASY mode: forces manual heat, setpoint unchanged; off restores the mode."""
 
     _attr_translation_key = "easy_mode"
@@ -163,3 +81,27 @@ class EasyModeSwitch(HeaterModeSwitch):
     _field = "easy"
     _label = "EASY mode"
     _write = "set_node_easy"
+
+
+class OpenWindowSwitch(HeaterSettingSwitch):
+    """Open window detection: the heater stops heating when a window opens."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "open_window_detection"
+    _attr_icon = "mdi:window-open-variant"
+    _field = "window_detection"
+    _gate = "advanced_setup"
+    _label = "Open window detection"
+    _write = "set_node_advanced"
+
+
+class TrueRadiantSwitch(HeaterSettingSwitch):
+    """True radiant: the heater's radiant-heat control (no effect on some panels)."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "true_radiant"
+    _attr_icon = "mdi:radiator"
+    _field = "true_radiant"
+    _gate = "advanced_setup"
+    _label = "True radiant"
+    _write = "set_node_advanced"

@@ -508,4 +508,5 @@ async def test_radio_gets_local_priority_and_power_limit(hass: HomeAssistant) ->
     assert [type(e) for e in added[0]] == [
         number.HeaterPriorityNumber,
         number.PowerLimitNumber,
+        number.TemperatureOffsetNumber,
     ]

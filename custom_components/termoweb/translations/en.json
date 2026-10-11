@@ -181,7 +181,8 @@
       "accumulator_boost_duration": { "name": "Boost duration" },
       "accumulator_boost_temperature": { "name": "Boost temperature" },
       "heater_priority": { "name": "Priority" },
-      "installation_power_limit": { "name": "Power limit" }
+      "installation_power_limit": { "name": "Power limit" },
+      "temperature_offset": { "name": "Temperature offset" }
     },
     "sensor": {
       "heater_temperature": { "name": "Temperature" },
@@ -201,7 +202,25 @@
     },
     "switch": {
       "runback": { "name": "Runback" },
-      "easy_mode": { "name": "EASY mode" }
+      "easy_mode": { "name": "EASY mode" },
+      "open_window_detection": { "name": "Open window detection" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Control mode",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Hysteresis 0.25 °C",
+          "hysteresis_0_35": "Hysteresis 0.35 °C",
+          "hysteresis_0_5": "Hysteresis 0.5 °C",
+          "hysteresis_0_75": "Hysteresis 0.75 °C"
+        }
+      },
+      "panel_units": {
+        "name": "Panel temperature unit",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
+      }
     }
   },
   "entity_component": {

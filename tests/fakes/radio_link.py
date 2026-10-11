@@ -38,6 +38,8 @@ POWER_REQUEST = bytes.fromhex("BEDA002CA9390B0100")
 POWER_RECORD_IDLE = bytes.fromhex("BDDC002C783A000000")  # BC reply: not heating
 POWER_RECORD_HEATING = bytes.fromhex("BDDB002CE43A0C0100")  # granted, heating
 CLOCK_ACCEPTED = bytes.fromhex("5355")
+# DA reply (synthetic): eco 16.5, comfort 21.0, boost temperature 21.0 C.
+ADVANCED_RECORD = bytes.fromhex("DB00212A032A0100000300000000002A06")
 
 
 def status_a(
@@ -63,6 +65,7 @@ def dialect_a_heater(status: bytes) -> Callable[[Any], None]:
         """Script the heater's replies on ``link``."""
         link.reply(0xB8, status)
         link.reply(0x52, CLOCK_ACCEPTED)
+        link.reply(0xDA, ADVANCED_RECORD)
         link.reply(0xBC, bytes.fromhex("BD00000010"))
         for opcode in (0xB4, 0xD2, 0xD4, 0xD6):
             link.reply(opcode, bytes([opcode + 1, 0x55]))

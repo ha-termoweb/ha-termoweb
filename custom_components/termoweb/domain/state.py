@@ -8,7 +8,7 @@ import logging
 import typing
 from typing import Any
 
-from custom_components.termoweb.coerce import as_bool, as_int, as_number
+from custom_components.termoweb.coerce import as_bool, as_float, as_int, as_number
 
 from .energy import EnergySnapshot
 from .ids import NodeId, NodeType
@@ -65,6 +65,13 @@ class HeaterState:
     boost_end_datetime: Any | None = None
     runback: bool | None = None  # radio heaters: forced anti-frost manual mode
     easy: bool | None = None  # radio heaters: EASY mode (forced manual heat)
+    # Advanced setup (radio heaters that answer the advanced record request):
+    advanced_setup: bool | None = None  # the heater has these settings
+    control_mode: str | None = None  # "pid" or "hysteresis_0_25" ... "_0_75"
+    panel_units: str | None = None  # "C" / "F" on the heater's own panel only
+    temp_offset: float | None = None  # degrees C subtracted from the measurement
+    window_detection: bool | None = None
+    true_radiant: bool | None = None
 
 
 @dataclass(slots=True)
@@ -245,19 +252,29 @@ def _populate_heater_state(
             state.lock = None
     if "priority" in payload:
         state.priority = as_int(payload.get("priority"))
-    return _populate_heater_modes(state, payload)
+    return _populate_heater_extras(state, payload)
 
 
-def _populate_heater_modes(
+def _populate_heater_extras(
     state: HeaterState, payload: Mapping[str, typing.Any]
 ) -> HeaterState:
-    """Populate the boost, runback and EASY fields on ``state`` from ``payload``."""
+    """Populate the boost, runback, EASY and advanced setup fields from ``payload``."""
 
-    for flag in ("boost_active", "runback", "easy"):
+    for flag in (
+        "boost_active",
+        "runback",
+        "easy",
+        "advanced_setup",
+        "window_detection",
+        "true_radiant",
+    ):
         if flag in payload:
             setattr(state, flag, as_bool(payload.get(flag)))
-    if "boost_end_datetime" in payload:
-        state.boost_end_datetime = payload.get("boost_end_datetime")
+    for key in ("boost_end_datetime", "control_mode", "panel_units"):
+        if key in payload:
+            setattr(state, key, payload.get(key))
+    if "temp_offset" in payload:
+        state.temp_offset = as_float(payload.get("temp_offset"))
     return state
 
 

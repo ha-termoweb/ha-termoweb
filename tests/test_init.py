@@ -27,6 +27,7 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.termoweb import PLATFORMS, _platforms_for_brand
 from custom_components.termoweb.backend import factory
 from custom_components.termoweb.backend.radio import GatewayInfo, RadioLinkError
+from custom_components.termoweb.backend.radio.protocol import AdvancedSetup
 from custom_components.termoweb.backend.radio_client import (
     LISTEN_ONLY_STATION_ID,
     RadioClient,
@@ -442,7 +443,7 @@ async def test_platforms_follow_the_backend() -> None:
     assert _platforms_for_brand("ducaheat") == [*PLATFORMS, "lock"]
     assert _platforms_for_brand("tevolve") == [*PLATFORMS, "lock"]
     assert _platforms_for_brand("radio_monitor") == ["binary_sensor", "sensor"]
-    assert _platforms_for_brand("radio") == [*PLATFORMS, "lock", "switch"]
+    assert _platforms_for_brand("radio") == [*PLATFORMS, "lock", "select", "switch"]
 
 
 def _healthy_tracker(dev_id: str, *, stale_after: float = 300) -> WsHealthTracker:
@@ -629,12 +630,12 @@ class _UnreachableRadio:
         (
             RADIO_GATEWAY,
             ("10.0.0.5", 2323, "B", RADIO_GATEWAY["nodes"], bytes.fromhex("1234")),
-            {"power"},
+            {"power", "advanced"},
         ),
         (
             RADIO_STICK,
             ("/dev/ttyUSB0", 0, "A", [], bytes.fromhex("1234")),
-            {"power", "serial_url", "device_id"},
+            {"power", "advanced", "serial_url", "device_id"},
         ),
         (MONITOR_ESP32, ("10.0.0.5", 2323, "A", [], b"\x00\x00"), {"listen_only"}),
         (
@@ -676,6 +677,9 @@ async def test_radio_setup_builds_the_client_and_retries_when_unreachable(
     if "power" in kwargs:
         call_kwargs["power"].set_power_limit(1800)  # saved into the entry options
         assert entry.options["radio_power"]["power_limit"] == 1800
+        call_kwargs["advanced"].put(6, AdvancedSetup(window_mode=1))  # saved too
+        assert entry.options["radio_advanced"]["6"]["window_mode"] == 1
+        assert call_kwargs["advanced"].get(6) == AdvancedSetup(window_mode=1)
 
 
 async def test_monitor_entry_listens_only_and_unloads(hass: HomeAssistant) -> None:

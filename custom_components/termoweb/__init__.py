@@ -77,7 +77,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["button", "binary_sensor", "climate", "number", "sensor"]
 LOCK_PLATFORMS = ["lock"]
-HEATER_TOGGLE_PLATFORMS = ["switch"]  # radio heater runback / EASY
+HEATER_SETTING_PLATFORMS = ["select", "switch"]  # radio heater settings
 MONITOR_PLATFORMS = ["binary_sensor", "sensor"]  # gateway online + frames heard
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -109,8 +109,8 @@ def _platforms_for_brand(brand: str) -> list[str]:
     platforms = list(PLATFORMS)
     if capabilities.lock:
         platforms += LOCK_PLATFORMS
-    if capabilities.heater_toggles:
-        platforms += HEATER_TOGGLE_PLATFORMS
+    if capabilities.heater_toggles or capabilities.advanced_setup:
+        platforms += HEATER_SETTING_PLATFORMS
     return platforms
 
 

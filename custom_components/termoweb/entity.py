@@ -577,3 +577,97 @@ class HeaterNodeBase(CoordinatorEntity):
             node_type=self._node_type,
             serial=self._serial,
         )
+
+
+class HeaterSettingEntity(CoordinatorEntity):
+    """A heater setting held in one ``HeaterState`` field and written by the backend.
+
+    Subclasses set ``_field`` (the state field, also the keyword of the
+    backend write), ``_write`` (the backend method name), ``_label`` (logs and
+    errors) and optionally ``_gate``: a state field that must be True for the
+    setting to be available (the heater has the feature).
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _field: str
+    _write: str
+    _label: str
+    _gate: str | None = None
+
+    def __init__(
+        self,
+        coordinator: Any,
+        entry_id: str,
+        dev_id: str,
+        addr: str,
+        *,
+        inventory: Inventory,
+        device_name: str,
+    ) -> None:
+        """Bind the setting to heater ``addr``."""
+
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._dev_id = str(dev_id)
+        self._addr = addr
+        self._inventory = inventory
+        self._device_name = device_name
+        self._attr_unique_id = build_heater_unique_id(
+            dev_id, "htr", node_key(inventory, "htr", addr), suffix=f":{self._field}"
+        )
+        self._settings_resolver = build_settings_resolver(
+            coordinator, dev_id, "htr", addr
+        )
+        self._refresh_fallback = NodeRefreshFallback(self, "htr", addr)
+
+    async def async_added_to_hass(self) -> None:
+        """Cancel a pending fallback refresh when the entity is removed."""
+
+        await super().async_added_to_hass()
+        self.async_on_remove(self._refresh_fallback.cancel)
+
+    def _setting(self) -> Any:
+        """Return the setting's last known value, or None."""
+
+        return getattr(self._settings_resolver(), self._field, None)
+
+    @property
+    def available(self) -> bool:
+        """Return False while the heater does not report the feature."""
+
+        if not super().available:
+            return False
+        if self._gate is None:
+            return True
+        return getattr(self._settings_resolver(), self._gate, None) is True
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Attach the entity to its heater device."""
+
+        return build_node_device_info(
+            self.hass,
+            self._entry_id,
+            self._dev_id,
+            node_key(self._inventory, "htr", self._addr),
+            name=self._device_name,
+            node_type="htr",
+        )
+
+    async def _async_write_setting(self, value: Any) -> None:
+        """Write ``value``, then show it until the heater's next report."""
+
+        _LOGGER.info("Setting %s to %s for heater %s", self._label, value, self._addr)
+        backend = require_runtime(self.hass, self._entry_id).backend
+        write = getattr(backend, self._write)
+        await async_backend_write(
+            self._label,
+            write(self._dev_id, ("htr", self._addr), **{self._field: value}),
+        )
+
+        def _mutate(state: DomainState) -> None:
+            setattr(state, self._field, value)
+
+        self.coordinator.apply_entity_patch("htr", self._addr, _mutate)
+        self._refresh_fallback.schedule()

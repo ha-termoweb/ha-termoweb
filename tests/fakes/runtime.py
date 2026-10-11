@@ -52,6 +52,7 @@ def build_entry_runtime(
             client=client,
             brand=brand,
             capabilities=backend_capabilities(brand),
+            features=backend_capabilities(brand),
             diagnostics=lambda _entry_data: None,
             create_ws_client=MagicMock(),
             set_node_settings=AsyncMock(),

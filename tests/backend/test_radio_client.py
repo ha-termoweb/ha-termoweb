@@ -21,6 +21,7 @@ from custom_components.termoweb.backend.radio_client import (
 )
 from custom_components.termoweb.nodes import build_node_inventory
 from tests.fakes.radio_link import (
+    ADVANCED_RECORD,
     CLOCK_ACCEPTED,
     HEATER,
     IDENTITY_RATED,
@@ -252,11 +253,13 @@ async def test_get_node_settings_maps_status_and_program() -> None:
         "stemp": "22.0",  # power record byte 3: the heater's active setpoint
         "mtemp": "22.0",  # power record byte 1
         "priority": 0,  # local power manager default
+        "advanced_setup": False,  # this heater does not answer DA
     }
     assert links[0].sent == [
         (HEATER, b"\xb8"),
         (HEATER, b"\xb0"),
         (HEATER, b"\x5a"),  # identity for the rating; this heater does not answer
+        (HEATER, b"\xda"),  # advanced record: none either
         (HEATER, b"\xbc"),
     ]
 
@@ -382,7 +385,7 @@ async def test_rated_power_is_read_once_from_the_identity_record() -> None:
     assert settings["max_power"] == 1500.0
     assert client.power.rated_power(HEATER) == 1500.0
     # Read before the power record, so the first record starts the energy counter.
-    assert link.payloads() == [b"\xb8", b"\xb0", b"\x5a", b"\xbc"]
+    assert link.payloads() == [b"\xb8", b"\xb0", b"\x5a", b"\xda", b"\xbc"]
     assert client.energy.counter_wh(HEATER) == 0.0
 
     await client.get_node_settings("dev", ("htr", "6"))
@@ -963,6 +966,100 @@ async def test_dialect_b_has_no_counter_to_read() -> None:
     assert DIALECT_A.energy_counter and not DIALECT_B.energy_counter
     assert await client.read_energy_counter(HEATER) is None
     assert link.sent == []
+
+
+async def advanced_client(dialect: str = "A"):
+    """Return (client, link, clock) whose heater 6 answers DA and C4."""
+
+    client, links, clock = make_client(dialect, network_id=NET)
+    link = await client.async_connect()
+    link.reply(0xDA, ADVANCED_RECORD)
+    link.reply(0xC4, b"\xc5\x55")
+    return client, link, clock
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dialect", ["A", "B"])
+async def test_advanced_record_is_read_once_and_gates_the_settings(dialect) -> None:
+    """A heater that answers DA has advanced settings, unknown until written."""
+
+    client, link, _ = await advanced_client(dialect)
+    settings = await client.get_node_settings("dev", NODE)
+    assert settings["advanced_setup"] is True
+    assert "temp_offset" not in settings  # nothing written yet: unknown
+    await client.get_node_settings("dev", NODE)
+    assert link.payloads().count(b"\xda") == 1  # read once
+
+
+@pytest.mark.asyncio
+async def test_a_heater_without_the_advanced_record_is_retried_hourly() -> None:
+    """No DB reply: no advanced settings; DA is asked again only after an hour."""
+
+    client, links, clock = make_client()  # dialect B, DA unanswered
+    assert (await client.get_node_settings("dev", NODE))["advanced_setup"] is False
+    await client.get_node_settings("dev", NODE)
+    assert links[0].payloads().count(b"\xda") == 1
+    with pytest.raises(RadioUnsupportedError, match="no advanced record"):
+        await client.set_node_advanced("dev", NODE, temp_offset=-1.0)
+    clock.now += client.identity_retry_s
+    links[0].reply(0xDA, ADVANCED_RECORD)
+    assert (await client.get_node_settings("dev", NODE))["advanced_setup"] is True
+    assert links[0].payloads().count(b"\xda") == 2
+
+
+@pytest.mark.asyncio
+async def test_advanced_writes_send_the_whole_record_and_remember_it() -> None:
+    """Each write carries all eight C4 fields; accepted records are stored."""
+
+    client, link, _ = await advanced_client()
+    await client.read_advanced_record(HEATER)
+    link.sent.clear()
+    await client.set_node_advanced("dev", NODE, temp_offset=-1.0)
+    await client.set_node_advanced("dev", NODE, window_detection=True)
+    await client.set_node_advanced(
+        "dev", NODE, control_mode="hysteresis_0_25", panel_units="F"
+    )
+    assert link.payloads() == [
+        bytes.fromhex("C40400F60000000000"),
+        bytes.fromhex("C40400F60000000100"),
+        bytes.fromhex("C40001F60000000100"),
+    ]
+    settings = await client.get_node_settings("dev", NODE)
+    assert {key: settings[key] for key in ("control_mode", "panel_units")} == {
+        "control_mode": "hysteresis_0_25",
+        "panel_units": "F",
+    }
+    assert settings["temp_offset"] == -1.0 and settings["window_detection"] is True
+    assert settings["true_radiant"] is False
+
+
+@pytest.mark.asyncio
+async def test_rejected_or_invalid_advanced_writes_change_nothing() -> None:
+    """C5 56 raises and is not stored; a bad value raises before sending."""
+
+    client, link, _ = await advanced_client()
+    await client.read_advanced_record(HEATER)
+    link.reply(0xC4, b"\xc5\x56")
+    with pytest.raises(RadioCommandError, match="rejected"):
+        await client.set_node_advanced("dev", NODE, true_radiant=True)
+    assert client.advanced.get(HEATER) is None
+    link.sent.clear()
+    with pytest.raises(ValueError, match="outside"):
+        await client.set_node_advanced("dev", NODE, temp_offset=3.5)
+    assert link.sent == []
+
+
+@pytest.mark.asyncio
+async def test_pairing_forgets_the_advanced_setup_of_the_address() -> None:
+    """A heater paired to an address starts with unknown advanced settings."""
+
+    client, link, _ = await advanced_client()
+    await client.read_advanced_record(HEATER)
+    await client.set_node_advanced("dev", NODE, temp_offset=0.5)
+    client._forget(HEATER)
+    assert client.advanced.get(HEATER) is None
+    with pytest.raises(RadioUnsupportedError):
+        await client.set_node_advanced("dev", NODE, temp_offset=0.5)
 
 
 @pytest.mark.asyncio

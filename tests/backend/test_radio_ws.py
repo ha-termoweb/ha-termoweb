@@ -35,6 +35,7 @@ from custom_components.termoweb.inventory import Inventory
 from custom_components.termoweb.nodes import build_node_inventory
 from custom_components.termoweb.runtime import EntryRuntime
 from tests.fakes.radio_link import (
+    ADVANCED_RECORD,
     CLOCK_ACCEPTED,
     HEATER,
     IDENTITY_RATED,
@@ -138,6 +139,7 @@ def build(
         link.reply(0x5A, IDENTITY_RATED)
         link.reply(0x51, CLOCK_ACCEPTED)
         link.reply(0x52, CLOCK_ACCEPTED)
+        link.reply(0xDA, ADVANCED_RECORD)
         links.append(link)
         return link
 
@@ -239,6 +241,7 @@ async def test_start_connects_refreshes_and_reports_health(radio: Radio) -> None
             "stemp": "22.0",
             "max_power": 1500.0,  # rating from the identity record
             "priority": 0,
+            "advanced_setup": True,  # it answered DA; nothing written yet
         }
     ]
     assert radio.deltas[1].node_id.node_type is NodeType.ACCUMULATOR
