@@ -95,6 +95,23 @@ wifi:
 
 captive_portal:
 
+# Announces the gateway on your network, so Home Assistant finds it by itself
+# (Settings -> Devices & services -> Discovered). Nobody types an IP address.
+# "mac" is the gateway's id (its WiFi MAC); "version" is the radio firmware.
+mdns:
+  services:
+    - service: "_termoweb-radio"
+      protocol: "_tcp"
+      port: 2323
+      txt:
+        version: !lambda return termoweb::radio.version();
+        mac: !lambda |-
+          uint8_t mac[6] = {0};
+          esp_read_mac(mac, ESP_MAC_WIFI_STA);
+          char text[13];
+          snprintf(text, sizeof(text), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+          return std::string(text);
+
 button:
   - platform: restart
     name: "Restart"
@@ -124,7 +141,7 @@ binary_sensor:
 text_sensor:
   - platform: wifi_info
     ip_address:
-      # The address to enter in the Termoweb integration (port 2323).
+      # Only needed if Home Assistant does not find the gateway by itself.
       name: "IP address"
     mac_address:
       name: "MAC address"

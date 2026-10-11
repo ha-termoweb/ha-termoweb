@@ -122,16 +122,13 @@ You need the **ESPHome Device Builder** add-on in Home Assistant
    If you see `unexpected CC1101 id` or `MISO stayed high`, check the wiring
    (step 2) and that VCC goes to 3V3.
 
-## Step 4: find the gateway's IP address
+## Step 4: add the gateway's ESPHome device
 
 Home Assistant finds the new device by itself. Go to **Settings > Devices &
 services**, accept the new **ESPHome** device, and enter the API key from
-step 3 if asked. Then open the device page. The **IP address** sensor shows
-the address, for example `192.168.1.57`.
-
-Give the gateway a fixed address in your router (often called "DHCP
-reservation" or "static lease"). Otherwise the address can change after a
-power cut, and the integration loses the gateway.
+step 3 if asked. You do not need to note the gateway's IP address: the
+TermoWeb integration finds the gateway by itself, and follows it when the
+address changes.
 
 The device page also shows:
 
@@ -144,16 +141,31 @@ The device page also shows:
 
 ## Step 5: connect the integration
 
-1. In Home Assistant, go to **Settings → Devices & Services → Add Integration**
-   and search for **TermoWeb**.
-2. Choose **Local radio gateway (ESP32 + CC1101)**.
-3. Enter the gateway's IP address from step 4. Keep the port at **2323**.
-4. Leave **Radio dialect** on **auto** and **Network id** empty.
-5. Press **Submit**. Then choose one:
+1. In Home Assistant, go to **Settings → Devices & Services**. Under
+   **Discovered** you see **TermoWeb** with **Radio gateway (<address>)**.
+   It can take a minute after the gateway starts.
+2. Click **Add** (or **Configure**). Home Assistant asks "Found a TermoWeb
+   radio gateway at ... Set it up?". Press **Submit**. You do not type
+   anything.
+3. Choose one:
    - **Find heaters that are already paired**: your heaters already work
      with a TermoWeb gateway or app. Go to "Find paired heaters" below.
    - **Pair new heaters**: your heaters are new, or you reset them. Go to
      "Pair new heaters" below.
+
+If the gateway is not under **Discovered** after a few minutes (some
+networks block discovery), add it by hand:
+
+1. Open the gateway's device page (from step 4). The **IP address** sensor
+   shows its address, for example `192.168.1.57`.
+2. Go to **Settings → Devices & Services → Add Integration** and search for
+   **TermoWeb**.
+3. Choose **Local radio gateway (ESP32 + CC1101)**.
+4. Enter the IP address and press **Submit**. Leave **Advanced settings**
+   as they are. Then continue with step 3 above.
+5. Give the gateway a fixed address in your router (often called "DHCP
+   reservation" or "static lease"). A gateway added by hand is not followed
+   when its address changes.
 
 ### Find paired heaters
 

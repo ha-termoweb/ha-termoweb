@@ -119,8 +119,9 @@ ha-termoweb/ha-termoweb
 2) Choose how your heaters connect:
    - **Cloud account**: you use the TermoWeb, Ducaheat or Tevolve app. Go to step 3.
    - **Local radio: nanoCUL USB stick** (easiest, no soldering): you have a nanoCUL plugged into the Home Assistant computer.
-     Follow [Radio stick: use a nanoCUL USB stick](docs/radio_nanocul.md), step 3, then go to step 6.
-   - **Local radio gateway** (advanced, needs soldering): you built the ESP32 radio gateway. Follow
+     The stick is usually already selected. Follow [Radio stick: use a nanoCUL USB stick](docs/radio_nanocul.md), step 3, then go to step 6.
+   - **Local radio gateway** (advanced, needs soldering): you built the ESP32 radio gateway. You usually do not need this menu:
+     Home Assistant finds the gateway by itself and shows it under **Discovered**. Follow
      [Radio gateway: build your own with an ESP32](docs/radio_gateway.md), step 5, then go to step 6.
 3) Choose your **Brand**. This picks the correct backend automatically, so you do **not** need to enter a portal URL manually.
 4) Enter the account **Email** used for the TermoWeb / Ducaheat / Tevolve app.

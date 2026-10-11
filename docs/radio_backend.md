@@ -352,11 +352,39 @@ both: `addr` addresses radio frames; `serial` names and identifies it.
 The first step is a menu: **cloud** (the existing brand + login form),
 **radio** (the ESP32 gateway over TCP) or **nanocul** (a nanoCUL USB stick).
 
+The ESP32 gateway is normally found by zeroconf instead. Its ESPHome image
+(`esphome/termoweb-radio.yaml`) advertises `_termoweb-radio._tcp` on port
+2323 with TXT records `mac` (WiFi MAC, lowercase hex: the `dev_id`) and
+`version` (radio firmware). The manifest's `zeroconf` key starts
+`async_step_zeroconf`:
+
+- IPv6-only advertisements abort (`not_ipv4_address`).
+- The unique id `radio:<mac>` comes from the TXT `mac`, so nothing is
+  opened before the user confirms. Without `mac` the gateway is probed.
+- A configured gateway at a new address: `_abort_if_unique_id_configured`
+  updates `host`/`port` and reloads the entry; a listen-only entry of the
+  same gateway (`radio_monitor:<mac>`) is moved too.
+- Otherwise `zeroconf_confirm` asks "Set it up?", probes the gateway on
+  submit (a different MAC re-keys the flow) and continues with the
+  `radio_method` menu below.
+
+No form asks for a network id: discovery learns it from heater traffic,
+pairing derives the site network (`async_site_network_id`), and existing
+entries keep the stored `network_id`. Probing a gateway or stick that another
+entry uses is allowed: Home Assistant takes the link over (the ESP32 drops
+its old client; a serial port has one reader).
+
 nanoCUL sticks speak the same line protocol over a serial port at 115200 baud
 (`backend/radio/serial_link.py`: an `open_connection` for `RadioLink` built
 on pyserial-asyncio-fast; any pyserial URL works, including `socket://`). The
 `nanocul` step lists the host's serial ports (by-id paths) and offers a manual
-path. Stock `termoweb_rx` firmware differs from the ESP32 port in two ways
+path. The form pre-selects the most likely port without opening any: a port
+whose by-id path, description, manufacturer or product names CUL (`nanoCUL`,
+`CUL868`, `culfw`), else the only USB serial port that no TermoWeb entry
+uses, else none. There is no USB discovery matcher: the supported nanoCUL is
+an ATmega328P Arduino Nano behind a generic FTDI/CH340 USB-serial bridge,
+whose ids also match Zigbee sticks and other serial devices. Stock
+`termoweb_rx` firmware differs from the ESP32 port in two ways
 that the flow and the link detect from the `Q` line:
 
 - no `dialect=` field: the firmware only speaks dialect A. Connecting in
@@ -371,8 +399,9 @@ Entry data for a stick: `radio_type: nanocul`, `device` (path or URL),
 entries store `radio_type: esp32`; entries without the key are ESP32
 entries. Reconfigure changes the port and can re-scan.
 
-The radio form asks for host, port (2323), an optional dialect (`auto`, `A`,
-`B`) and an optional network id (4 hex digits).
+The manual radio form asks only for the host. Port (2323) and dialect
+(`auto`, `A`, `B`) sit in a collapsed **Advanced settings** section
+(`advanced`); the nanoCUL forms keep the dialect there too.
 
 1. `probe_gateway` connects with auto-ack off (nothing is transmitted) and
    reads the gateway MAC from the `# Q` line. The MAC becomes the `dev_id`
@@ -385,11 +414,11 @@ The radio form asks for host, port (2323), an optional dialect (`auto`, `A`,
    `radio_capture` service
    ([radio protocol §10](radio_protocol.md#10-listening-only-and-frame-captures)).
    It has its own unique id, `radio_monitor:<dev_id>`; only one entry can
-   use the gateway's port at a time. A listen-only entry cannot be
+   use the gateway's port at a time (the newest connection wins). A listen-only entry cannot be
    reconfigured (`monitor_reconfigure`): delete it and add it again.
 2. `radio_discover` is a progress step running `discover_radio`:
-   - with a dialect and a known network id (given, or dialect A's fixed
-     `1B30`), it skips listening;
+   - with a dialect and a known network id (dialect A's fixed `1B30`, or
+     the stored id on a re-scan), it skips listening;
    - otherwise `discovery.discover_network` alternates 10 s listening windows
      over dialects B then A, up to 6 minutes. A heater that wants heat sends
      a power-request spell about every 5 minutes: 5 frames over about 27 s,
@@ -413,7 +442,7 @@ The radio form asks for host, port (2323), an optional dialect (`auto`, `A`,
    `Heater <serial>` (see [Heater identity and names](#heater-identity-and-names)).
 
 Errors: `cannot_connect_radio`, `no_gateway_mac`, `no_traffic`,
-`no_heaters`, `invalid_network_id`.
+`no_heaters`.
 
 Reconfigure changes host and port. With **Scan for heaters again** it
 re-runs the scan with the stored dialect and network id, and replaces the

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- ESP32 radio gateway: Home Assistant finds the gateway by itself. After you flash the updated `esphome/termoweb-radio.yaml`, the gateway shows up under **Settings → Devices & Services → Discovered**. Click **Add**, confirm, and choose how to find your heaters. You type nothing. When the gateway gets a new IP address, the existing entry follows it by itself.
+- nanoCUL stick: the setup form pre-selects the most likely USB port (a port named after a CUL, or the only free USB serial port).
+
+### Changed
+- Radio setup forms no longer ask for a network id. Setup learns it from the heaters' radio traffic, and pairing creates one for your installation. Existing entries keep their stored network id.
+- The manual ESP32 gateway form asks only for the IP address. Port (2323) and radio dialect moved to a collapsed **Advanced settings** section, as did the nanoCUL dialect.
+- Radio setup no longer refuses a gateway or stick that another entry uses. Home Assistant takes the connection over; the other entry loses it.
+
 ## 2.4.0b2 (pre-release, 2026-10-11)
 
 Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
