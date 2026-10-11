@@ -26,6 +26,7 @@ from custom_components.termoweb.codecs.radio_codec import (
 )
 from custom_components.termoweb.const import (
     DOMAIN,
+    signal_radio_network_heard,
     signal_radio_pairing_announcement,
     signal_radio_unknown_heater,
 )
@@ -35,7 +36,7 @@ from custom_components.termoweb.inventory import Inventory
 
 from .radio import protocol
 from .radio.link import RadioLinkError, ReceivedFrame
-from .radio.pairing import classify_announcement
+from .radio.pairing import BROADCAST_ID, classify_announcement
 from .radio_client import RadioClient, RadioCommandError, radio_addr
 from .sanitize import mask_identifier
 from .ws_client import _WSStatusMixin, forward_ws_sample_updates
@@ -238,6 +239,18 @@ class RadioListener(_WSStatusMixin):
                     signal_radio_pairing_announcement(self.entry_id),
                     announcement,
                 )
+            return
+        if (
+            frame.ok
+            and not frame.is_ack
+            and frame.network_id not in (None, link.network_id)
+            and frame.src not in (None, BROADCAST_ID)
+        ):
+            # Another network: an entry still learning its heaters' network
+            # adopts it; neighbouring installations reuse the same short ids.
+            async_dispatcher_send(
+                self.hass, signal_radio_network_heard(self.entry_id), frame.network_id
+            )
             return
         if (
             not frame.ok

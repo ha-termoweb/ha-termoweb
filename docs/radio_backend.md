@@ -310,9 +310,9 @@ is open. The options flow has no pairing step: the button replaces it.
   timer is cancelled when the entity is removed). Both entities exist only
   when `pairing_supported(runtime)`: the `heater_discovery` capability and a
   client that may transmit. The window lives in `hass.data`, so it survives
-  the reload that adds a heater: several heaters pair in one window. A
-  network-pending entry opens a 30-minute window at every setup (it has no
-  heaters and no button yet). Removing the entry drops its window.
+  the reload that adds a heater: several heaters pair in one window. An
+  entry that is still learning its network (no heaters yet) opens a
+  30-minute window at every setup. Removing the entry drops its window.
 - **Running entry.** `RadioListener` classifies every frame first
   (`pairing.classify_announcement`, any network id, any swept destination).
   A direct announcement is sent as `signal_radio_pairing_announcement`;
@@ -335,14 +335,9 @@ is open. The options flow has no pairing step: the button replaces it.
   dropped. The heater goes to `HeaterFinder.async_paired`: it joins the
   10 s found-heater batch (identity already read), is stored, the entry
   reloads once and the "Found TermoWeb heater" notification is shown.
-- **Network-pending entry.** `listen_once` never takes a pairing
-  announcement for network traffic (dialect B sends it on net `0000`). With
-  the window open it raises `PairingAnnounced(dialect)`, and
-  `async_search_network` calls `async_pair_new_network`: `pair_radio` on the
-  site network id (`async_site_network_id` of the gateway id from the entry's
-  unique id) in that dialect, then stores `dialect`, `network_id` and the
-  nodes, notifies and reloads. No heater paired: listening starts again at
-  once.
+- **Network-learning entry.** It runs on the site network, so pairing works
+  the same way. The first pairing stores the client's dialect and network as
+  the entry's own, which ends network learning.
 
 ## Heater identity and names
 
@@ -502,38 +497,37 @@ offline. Unload stops the listener, which closes the connection.
 It runs only for backends with the `heater_discovery` capability (the radio
 gateway backend, not listen-only entries).
 
-1. **Network search** (`network_pending`: no `network_id` in the entry).
-   Setup starts `async_search_network` as an entry background task and
-   returns at once: no client, listener or platforms are set up, because
-   the search needs the gateway's single connection for itself. The search
-   runs `config_flow_radio.find_network`:
-   - `discovery.discover_network` alternates 10 s listening windows over
-     dialects B then A (only the chosen one, if any), up to 6 minutes. A
-     heater that wants heat sends a power-request spell about every 5
-     minutes: 5 frames over about 27 s, never more than 8 s apart. A 10 s
-     window that overlaps a spell therefore catches a frame, and with ~21 s
-     per A+B cycle every spell overlaps a window of each dialect. An
-     associated heater that does not want heat may stay silent. Every
-     CRC-valid data frame gives the network id (bytes 1-2) and its sender.
-     A heater's pairing announcement is not network traffic (dialect B sends
-     it on net `0000`) and is skipped.
-     Dialect-B network ids belong to one installation, so there is no
-     default to fall back on. A dialect the firmware cannot speak (a stock
-     nanoCUL only knows A) is dropped from the rotation;
-   - if listening hears nothing, `survey_sighting` runs one 120 s raw survey
-     (gateway firmware 3.7-esp32+) to tell silence from an unknown dialect;
-     see [radio protocol §6](radio_protocol.md#from-home-assistant). The
-     survey only runs here, while no network is known and no heater is set
-     up, so it never holds back keepalives (#1040).
+1. **Network learning** (`network_pending`: no `network_id` in the entry).
+   The entry still sets up fully (client, listener, gateway device, the
+   pairing button and sensor): `async_learning_network` gives the client the
+   installation's site network (`async_site_network_id` of the gateway id in
+   the entry's unique id) and the chosen dialect, else B. A nanoCUL with
+   stock firmware (no runtime dialects, checked with `probe_nanocul`) can
+   only speak dialect A, whose network is fixed: `A`/`1B30` is stored at
+   once and the entry sets up normally. Heaters can be paired into the site
+   network meanwhile (see
+   [Automatic pairing](#automatic-pairing-pairing-window)); the first pairing
+   stores the site network as the entry's network, which ends learning.
+   `NetworkLearner` learns the network of heaters that are already paired
+   elsewhere (a stock gateway, another Home Assistant):
+   - The listener sends every valid data frame from another network (not an
+     ack, not from `FF`) as `signal_radio_network_heard(entry_id)`. A network
+     heard twice (`NETWORK_FRAMES`) is adopted. Nets `0000` and `FFFF` are
+     ignored: a dialect-B pairing sweep is sent on `0000`. A heater that wants
+     heat sends a power-request spell (5 frames) about every 5 minutes; an
+     idle heater may stay silent, so pairing it is the way in.
+   - Every 10 minutes (`NETWORK_RETRY_S`) a 120 s raw survey runs through the
+     client (gateway firmware 3.7-esp32+; without it, surveys stop). It
+     decodes any dialect: a known dialect's first network id (not `0000`) is
+     adopted (dialect A: `1B30`). The survey holds the exchange lock, which
+     is safe: a learning entry has no heaters to keep alive (#1040). An
+     unknown dialect saves the report file, shows a persistent notification
+     ("TermoWeb heaters not recognised") with the file and the issue link,
+     and stops; a reload listens again.
 
-   Silence, a gateway that cannot be reached, or an unexpected error: the
-   search tries again after 10 minutes (`NETWORK_RETRY_S`). An unknown
-   dialect saves the report file, shows a persistent notification ("TermoWeb
-   heaters not recognised") with the file and the issue link, and stops; a
-   reload listens again. A heard network is stored (`dialect`, `network_id`)
-   and the entry reloads into a normal setup with no heaters. A heater
-   announcing pairing while the window is open is paired instead (see
-   [Automatic pairing](#automatic-pairing-pairing-window)).
+   An adopted network is stored (`dialect`, `network_id`) and the entry
+   reloads into a normal setup with no heaters. A learning entry does not
+   scan addresses on its site network.
 2. **Scan** (network known, no heaters). `HeaterFinder.async_scan` asks every
    address 2-32 for its `5A` identity through the running client, 0.2 s
    apart (`SCAN_GAP_S`). Each read holds the exchange lock for one exchange

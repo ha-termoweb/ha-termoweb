@@ -26,17 +26,10 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.hass_dict import HassKey
 
 from .backend.radio import protocol
-from .backend.radio.dialect import Dialect
 from .backend.radio.link import RadioLinkError
 from .backend.radio.pairing import Announcement, PairedHeater, PairingError
 from .backend.radio_client import RadioError
 from .backend.sanitize import mask_identifier
-from .config_flow_radio import (
-    RadioSetupError,
-    pair_radio,
-    radio_address,
-    radio_link_factory,
-)
 from .const import (
     CONF_DIALECT,
     CONF_NETWORK_ID,
@@ -46,10 +39,7 @@ from .const import (
     signal_radio_pairing_window,
 )
 from .radio_pairing import (
-    async_notify_added,
-    async_site_network_id,
     heater_snapshot,
-    merge_heaters,
     saved_snapshot,
     store_snapshot,
     with_manual_target,
@@ -104,51 +94,6 @@ def async_forget_pairing_window(hass: HomeAssistant, entry_id: str) -> None:
     """Drop a removed entry's pairing window."""
 
     hass.data.get(PAIRING_WINDOWS, {}).pop(entry_id, None)
-
-
-def _gateway_id(entry: ConfigEntry) -> str:
-    """Return the gateway id from a radio entry's unique id (``radio:<dev_id>``)."""
-
-    return str(entry.unique_id or "").partition(":")[2]
-
-
-async def async_pair_new_network(
-    hass: HomeAssistant, entry: ConfigEntry, dialect: Dialect
-) -> bool:
-    """Pair announcing heaters into the site network; store them and reload.
-
-    For an entry that has no heater network yet. False when no heater paired.
-    """
-
-    data = dict(entry.data)
-    host, port = radio_address(data)
-    network_id = await async_site_network_id(hass, _gateway_id(entry))
-    _LOGGER.info("A heater is in pairing mode; pairing it (dialect %s)", dialect.name)
-    try:
-        sighting, heaters = await pair_radio(
-            host,
-            port,
-            dialect.name,
-            network_id,
-            link_factory=radio_link_factory(data),
-        )
-    except (RadioSetupError, RadioLinkError, PairingError) as err:
-        _LOGGER.info("No heater was paired: %s", err)
-        return False
-    nodes, added, _moved = merge_heaters(data.get(CONF_NODES, []), heaters.values())
-    hass.config_entries.async_update_entry(
-        entry,
-        data={
-            **entry.data,
-            CONF_DIALECT: sighting.dialect.name,
-            CONF_NETWORK_ID: sighting.network_id.hex().upper(),
-            CONF_NODES: nodes,
-        },
-    )
-    _LOGGER.info("Paired %d heater(s); reloading the entry", len(added))
-    async_notify_added(hass, entry, added)
-    hass.config_entries.async_schedule_reload(entry.entry_id)
-    return True
 
 
 def _stored_addr(entry: ConfigEntry, serial: str | None) -> int | None:
@@ -220,6 +165,16 @@ class HeaterPairer:
             self._retry_at = self._clock() + RETRY_PAUSE_S
             return
         self._assigned.add(heater.node_id)
+        if CONF_NETWORK_ID not in self.entry.data:
+            # A learning entry runs on the site network: it is now the heaters'.
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                data={
+                    **self.entry.data,
+                    CONF_DIALECT: self._client.dialect.name,
+                    CONF_NETWORK_ID: self._client.link.network_id.hex().upper(),
+                },
+            )
         await self._async_restore(heater)
         self._finder.async_paired(heater)
 
@@ -307,7 +262,6 @@ __all__ = [
     "HeaterPairer",
     "async_forget_pairing_window",
     "async_open_pairing_window",
-    "async_pair_new_network",
     "async_start_auto_pairing",
     "pairing_supported",
     "pairing_window_end",

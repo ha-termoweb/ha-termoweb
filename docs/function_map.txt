@@ -326,8 +326,6 @@ custom_components/termoweb/backend/radio/dialect.py :: _network_id
     Return a validated two-byte network id, defaulting to the dialect's own.
 custom_components/termoweb/backend/radio/dialect.py :: detect_dialect
     Return the first dialect under which ``air`` has a valid length and CRC.
-custom_components/termoweb/backend/radio/discovery.py :: PairingAnnounced.__init__
-    Store the dialect the announcement was heard in.
 custom_components/termoweb/backend/radio/discovery.py :: listen_once
     Listen in ``dialect`` for up to ``window_s``; return the first network heard.
 custom_components/termoweb/backend/radio/discovery.py :: listen_once._on_frame
@@ -1600,6 +1598,8 @@ custom_components/termoweb/const.py :: signal_radio_frames
     Signal name for the frame count of a listen-only radio entry.
 custom_components/termoweb/const.py :: signal_radio_unknown_heater
     Signal name for a frame heard from a heater that is not in the inventory.
+custom_components/termoweb/const.py :: signal_radio_network_heard
+    Signal name for a frame a radio entry's listener heard on another network.
 custom_components/termoweb/const.py :: signal_radio_pairing_announcement
     Signal name for a pairing announcement heard by a radio entry's listener.
 custom_components/termoweb/const.py :: signal_radio_pairing_window
@@ -2172,10 +2172,6 @@ custom_components/termoweb/radio_autopair.py :: async_open_pairing_window
     Open (or extend) the entry's pairing window for ``duration``; return its end.
 custom_components/termoweb/radio_autopair.py :: async_forget_pairing_window
     Drop a removed entry's pairing window.
-custom_components/termoweb/radio_autopair.py :: _gateway_id
-    Return the gateway id from a radio entry's unique id (``radio:<dev_id>``).
-custom_components/termoweb/radio_autopair.py :: async_pair_new_network
-    Pair announcing heaters into the site network; store them and reload.
 custom_components/termoweb/radio_autopair.py :: _stored_addr
     Return the stored radio id of the heater with ``serial``, if it is known.
 custom_components/termoweb/radio_autopair.py :: HeaterPairer.__init__
@@ -2194,12 +2190,30 @@ custom_components/termoweb/radio_autopair.py :: async_start_auto_pairing
     Answer the listener's pairing announcements while the window is open.
 custom_components/termoweb/radio_discovery.py :: network_pending
     Return True for a radio entry that has not learned its heater network yet.
-custom_components/termoweb/radio_discovery.py :: async_start_network_search
-    Listen for the entry's heater network in the background (stops on unload).
-custom_components/termoweb/radio_discovery.py :: async_search_network
-    Listen until the heater network is heard; store it and reload the entry.
+custom_components/termoweb/radio_discovery.py :: async_learning_network
+    Return (dialect, site network) for an entry still learning its network.
+custom_components/termoweb/radio_discovery.py :: gateway_id
+    Return the gateway id from a radio entry's unique id (``radio:<dev_id>``).
+custom_components/termoweb/radio_discovery.py :: _store_network
+    Store the heaters' dialect and network id in the entry data.
+custom_components/termoweb/radio_discovery.py :: NetworkLearner.__init__
+    Store collaborators; nothing runs until frames arrive or a survey is due.
+custom_components/termoweb/radio_discovery.py :: NetworkLearner.async_heard
+    Count a frame from another network; adopt it once it repeats.
+custom_components/termoweb/radio_discovery.py :: NetworkLearner.async_schedule_survey
+    Run the next raw survey in 10 minutes.
+custom_components/termoweb/radio_discovery.py :: NetworkLearner._async_survey_due
+    Start the due survey as an entry background task.
+custom_components/termoweb/radio_discovery.py :: NetworkLearner.async_survey
+    Survey the air once; store a network in a known dialect, else go on.
+custom_components/termoweb/radio_discovery.py :: NetworkLearner._adopt
+    Store the heard network and reload the entry (once).
+custom_components/termoweb/radio_discovery.py :: NetworkLearner.async_stop
+    Stop learning: drop a pending survey.
+custom_components/termoweb/radio_discovery.py :: async_start_network_learning
+    Learn the heaters' network in the background (stops on unload).
 custom_components/termoweb/radio_discovery.py :: _async_report_unknown_dialect
-    Save the survey report and tell the user where it is; listening stops.
+    Save the survey report and tell the user where it is; learning stops.
 custom_components/termoweb/radio_discovery.py :: HeaterFinder.__init__
     Store collaborators; nothing runs until a heater is heard or scanned.
 custom_components/termoweb/radio_discovery.py :: HeaterFinder.async_heard

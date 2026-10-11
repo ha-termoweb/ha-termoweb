@@ -1110,31 +1110,9 @@ async def test_listen_once_never_takes_a_pairing_sweep_for_a_network() -> None:
         link_factory=rig.link_factory,
         sleep=rig.sleep,
         clock=rig.ft.clock,
-        pairing_open=lambda: False,
     )
     assert sighting is None
     assert rig.gateways[0].transmitted() == []
-
-
-@pytest.mark.asyncio
-async def test_discover_network_stops_for_a_pairing_heater_while_pairing_is_open() -> (
-    None
-):
-    """An announcement heard while pairing is open ends listening at once."""
-    rig = Rig({"B": [_sweep(0x18)]})
-    with pytest.raises(d.PairingAnnounced) as heard:
-        await d.discover_network(
-            "gw",
-            window_s=10,
-            total_s=60,
-            link_factory=rig.link_factory,
-            sleep=rig.sleep,
-            clock=rig.ft.clock,
-            pairing_open=lambda: True,
-        )
-    assert heard.value.dialect is DIALECT_B
-    assert rig.ft.now < 60  # did not listen out the whole round
-    assert all(gw.writer.closed for gw in rig.gateways)
 
 
 @pytest.mark.asyncio

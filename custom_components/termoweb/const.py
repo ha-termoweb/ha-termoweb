@@ -168,6 +168,12 @@ def signal_radio_unknown_heater(entry_id: str) -> str:
     return f"{DOMAIN}_{entry_id}_radio_unknown_heater"
 
 
+def signal_radio_network_heard(entry_id: str) -> str:
+    """Signal name for a frame a radio entry's listener heard on another network."""
+
+    return f"{DOMAIN}_{entry_id}_radio_network_heard"
+
+
 def signal_radio_pairing_announcement(entry_id: str) -> str:
     """Signal name for a pairing announcement heard by a radio entry's listener."""
 

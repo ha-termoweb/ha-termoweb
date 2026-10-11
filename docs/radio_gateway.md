@@ -229,11 +229,14 @@ If no heater shows up after 15 minutes:
 - Turn one heater's temperature up so that it starts heating. A heater that
   wants heat talks every few minutes.
 - Move the gateway closer to a heater (a few metres is best).
+- Or pair the heater with this gateway: press **Pair new heaters** on the
+  gateway device and put the heater into pairing mode (see "Add new
+  heaters"). This also works for a heater that is idle, or that belongs to
+  another gateway or another Home Assistant.
 
-The integration keeps listening by itself: it tries again every 10 minutes.
-
-When it hears nothing, it also records the radio signals for 2 minutes. It
-finds your heaters if their signal is weak. If it hears signals it cannot
+The integration keeps listening by itself. Every 10 minutes it also records
+the radio signals for 2 minutes. It
+then finds your heaters even if their signal is weak. If it hears signals it cannot
 read, you get the notification "TermoWeb heaters not recognised", and it
 stops listening. This has two possible causes:
 

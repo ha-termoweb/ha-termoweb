@@ -200,7 +200,6 @@ class PairingWindowBinarySensor(BinarySensorEntity):
     @callback
     def _async_window_changed(self, _now: Any = None) -> None:
         """Write the new state and follow the new window end."""
-        self._unsub_end = None
         self._schedule_end()
         self.async_write_ha_state()
 

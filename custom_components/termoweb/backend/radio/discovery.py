@@ -4,8 +4,7 @@ A dialect-B network id belongs to one installation and has no default, so the
 only way to learn it is to listen: heaters send registrations, route probes and
 power requests on their own. Listening never transmits (auto-ack is off).
 A heater's pairing announcement is not network traffic (dialect B sends it on
-net ``00 00``): it is skipped, or, when the caller's pairing window is open,
-listening stops with PairingAnnounced.
+net ``00 00``): it is skipped.
 """
 
 from __future__ import annotations
@@ -42,16 +41,6 @@ SURVEY_S = 120  # raw survey after silent discovery: heaters repeat within minut
 
 LinkFactory = Callable[..., RadioLink]
 Sleep = Callable[[float], Awaitable[None]]
-PairingOpen = Callable[[], bool]
-
-
-class PairingAnnounced(Exception):
-    """A heater announced pairing while the pairing window was open."""
-
-    def __init__(self, dialect: Dialect) -> None:
-        """Store the dialect the announcement was heard in."""
-        super().__init__(f"pairing announcement heard in dialect {dialect.name}")
-        self.dialect = dialect
 
 
 @dataclass(frozen=True)
@@ -73,13 +62,8 @@ async def listen_once(
     link_factory: LinkFactory = RadioLink,
     sleep: Sleep = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
-    pairing_open: PairingOpen | None = None,
 ) -> NetworkSighting | None:
-    """Listen in ``dialect`` for up to ``window_s``; return the first network heard.
-
-    A direct pairing announcement raises PairingAnnounced when ``pairing_open()``
-    says the pairing window is open; otherwise it is ignored.
-    """
+    """Listen in ``dialect`` for up to ``window_s``; return the first network heard."""
 
     link = link_factory(
         host,
@@ -91,19 +75,14 @@ async def listen_once(
     )
     networks: dict[bytes, set[int]] = {}
     first_seen: float | None = None
-    announced = False
 
     def _on_frame(received: ReceivedFrame) -> None:
         """Record the network id and sender of every valid data frame."""
 
-        nonlocal first_seen, announced
+        nonlocal first_seen
         frame = received.frame
-        announcement = classify_announcement(dialect, frame)
-        if announcement is not None:
-            if not announcement.relayed and pairing_open and pairing_open():
-                announced = True
-            else:
-                _LOGGER.debug("Ignoring a pairing announcement: pairing is closed")
+        if classify_announcement(dialect, frame) is not None:
+            _LOGGER.debug("Ignoring a pairing announcement: it is not network traffic")
             return
         if not frame.ok or frame.is_ack or frame.network_id is None:
             return
@@ -117,15 +96,13 @@ async def listen_once(
     remove = link.add_listener(_on_frame)
     try:
         start = clock()
-        while clock() - start < window_s and not announced:
+        while clock() - start < window_s:
             if first_seen is not None and clock() - first_seen >= LISTEN_GRACE_S:
                 break
             await sleep(POLL_STEP_S)
     finally:
         remove()
         await link.close()
-    if announced:
-        raise PairingAnnounced(dialect)
     if not networks:
         return None
     network_id = max(networks, key=lambda net: len(networks[net]))
@@ -147,7 +124,6 @@ async def discover_network(
     link_factory: LinkFactory = RadioLink,
     sleep: Sleep = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
-    pairing_open: PairingOpen | None = None,
 ) -> NetworkSighting | None:
     """Alternate listening windows across ``dialects`` until a network is heard.
 
@@ -166,7 +142,6 @@ async def discover_network(
             link_factory=link_factory,
             sleep=sleep,
             clock=clock,
-            pairing_open=pairing_open,
         )
 
     sighting = await rotate_dialects(dialects, _listen, total_s, clock)
@@ -241,7 +216,6 @@ __all__ = [
     "SCAN_ADDRESSES",
     "SURVEY_S",
     "NetworkSighting",
-    "PairingAnnounced",
     "discover_network",
     "listen_once",
     "probe_heaters",

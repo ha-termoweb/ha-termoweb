@@ -36,20 +36,16 @@ from custom_components.termoweb.backend.radio import (
     decode,
     protocol,
 )
-from custom_components.termoweb.backend.radio.discovery import (
-    NetworkSighting,
-    PairingAnnounced,
-)
 from custom_components.termoweb.backend.radio.pairing import (
     NoFreeAddressError,
     PairedHeater,
 )
 from custom_components.termoweb.backend.radio_client import RadioCommandError
-from custom_components.termoweb.config_flow_radio import RadioSetupError
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.identifiers import build_gateway_entity_unique_id
+from custom_components.termoweb.radio_pairing import async_site_network_id
 from custom_components.termoweb.runtime import require_runtime
-from tests.fakes.radio_link import NET, STATUS_SHORT, FakeRadioLink, received
+from tests.fakes.radio_link import REGISTRATION, STATUS_SHORT, FakeRadioLink, received
 from tests.fakes.radio_setup import record_reloads
 from tests.fakes.sensors import fake_radio_links, setup_entry
 
@@ -686,8 +682,8 @@ async def test_restore_failure_of_a_new_heater_saves_nothing(
 # --- an entry that has no heater network yet ------------------------------------------
 
 
-def _pending_entry() -> MockConfigEntry:
-    """Return a radio entry that has not learned its heater network yet."""
+def _learning_entry() -> MockConfigEntry:
+    """Return a new radio entry that has not learned its heater network yet."""
     return MockConfigEntry(
         domain=DOMAIN,
         minor_version=6,
@@ -697,52 +693,50 @@ def _pending_entry() -> MockConfigEntry:
     )
 
 
-async def test_new_gateway_pairs_announcing_heaters_into_its_own_network(
-    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+async def test_new_gateway_pairs_a_heater_of_another_installation(
+    hass: HomeAssistant,
 ) -> None:
-    """No network yet: an announcing heater is paired into the site network."""
-    reloads = record_reloads(monkeypatch, hass)
-    entry = _pending_entry()
-    _age(entry)  # the setup itself opens the window again
-    outcomes: list[Any] = [
-        PairingAnnounced(DIALECT_B),
-        PairingAnnounced(DIALECT_B),
-    ]
-    opened: list[bool] = []
+    """Owner's case: no network yet, the only heater is idle on another network.
 
-    async def _find(*_args: Any, **kwargs: Any) -> Any:
-        opened.append(kwargs["pairing_open"]())
-        raise outcomes.pop(0)
+    The entry still runs (button and window present) on the site network; the
+    heater put into pairing mode joins it, the network is stored, and the
+    heater is added with its serial.
+    """
+    entry = _learning_entry()
+    _age(entry)  # an entry added long ago: the learning setup reopens the window
+    heaters = Heaters({}, ["S000002"])
+    with fake_radio_links(heaters) as links:
+        await setup_entry(hass, entry)
+        assert entry.state is ConfigEntryState.LOADED
+        site = await async_site_network_id(hass, "test")
+        assert links[0].network_id == site and links[0].dialect is DIALECT_B
+        assert "network_id" not in entry.data
+        sensor = _gateway_entity(hass, entry, "binary_sensor", "pairing_open")
+        assert hass.states.get(sensor).state == STATE_ON
+        button = _gateway_entity(hass, entry, "button", "pair_heaters")
+        await hass.services.async_call(
+            "button", "press", {"entity_id": button}, blocking=True
+        )
+        # The idle heater talks once on its old network: not enough to adopt it.
+        foreign = bytes.fromhex("5678")
+        links[0].deliver(received(9, REGISTRATION, network_id=foreign))
+        await hass.async_block_till_done()
+        assert "network_id" not in entry.data
+        assert not [dst for dst, _payload in links[0].sent if dst != 0xFF]  # no scan
 
-    pair_calls: list[Any] = []
-    pair_outcomes: list[Any] = [
-        RadioSetupError("no_heaters_paired"),
-        (
-            NetworkSighting(DIALECT_B, NET, frozenset({2})),
-            {2: PairedHeater(2, None, serial="S000002")},
-        ),
-    ]
+        await _pair(hass, links[0], announce_b)
+        assert heaters.assigned == [2]
+        assert entry.data["dialect"] == "B"
+        assert entry.data["network_id"] == site.hex().upper()
 
-    async def _pair_radio(host: str, port: int, dialect: str, net: bytes, **_kw):
-        pair_calls.append((host, port, dialect, net))
-        outcome = pair_outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-    monkeypatch.setattr(radio_discovery, "find_network", _find)
-    monkeypatch.setattr(radio_autopair, "pair_radio", _pair_radio)
-    await setup_entry(hass, entry)
-    await _settle(hass)
-
-    assert opened == [True, True]
-    site = await radio_autopair.async_site_network_id(hass, "test")
-    assert pair_calls == [("10.0.0.5", 2323, "B", site)] * 2
-    assert entry.data["dialect"] == "B" and entry.data["network_id"] == "1234"
-    assert entry.data["nodes"] == [
-        {"type": "htr", "addr": "2", "name": "Heater S000002", "serial": "S000002"}
-    ]
-    assert reloads == [entry.entry_id]
-    note = _notifications(hass)[f"{DOMAIN}_{entry.entry_id}_heaters_found"]
-    assert "Found TermoWeb heater S000002" in note["message"]
-    await _unload(hass, entry)
+        await _after_debounce(hass)  # stores the heater and reloads
+        await _settle(hass)
+        assert entry.state is ConfigEntryState.LOADED and len(links) == 2
+        assert links[1].network_id == site
+        assert entry.data["nodes"] == [
+            {"type": "htr", "addr": "2", "name": "Heater S000002", "serial": "S000002"}
+        ]
+        assert hass.states.get("climate.heater_s000002") is not None
+        note = _notifications(hass)[f"{DOMAIN}_{entry.entry_id}_heaters_found"]
+        assert "Found TermoWeb heater S000002" in note["message"]
+        await _unload(hass, entry)

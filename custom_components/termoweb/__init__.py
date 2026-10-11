@@ -56,9 +56,9 @@ from .radio_autopair import (
     async_start_auto_pairing,
 )
 from .radio_discovery import (
+    async_learning_network,
     async_start_heater_finder,
-    async_start_network_search,
-    network_pending,
+    async_start_network_learning,
 )
 from .radio_identity import async_learn_serials, async_rekey_inventory
 from .runtime import EntryRuntime, TermoWebConfigEntry
@@ -165,15 +165,13 @@ async def async_setup_entry(  # noqa: C901
 
     version = await _async_get_integration_version(hass)
 
-    if network_pending(entry):
-        # Nothing to set up until the heaters' network is heard; the search
-        # stores it and reloads the entry. It needs the gateway to itself.
-        # With no heaters yet, every setup opens the pairing window again.
-        async_open_pairing_window(hass, entry, FIRST_WINDOW)
-        async_start_network_search(hass, entry)
-        return True
-
-    client = create_entry_client(hass, entry)
+    try:
+        # An entry that has not learned its heaters' network yet runs on the
+        # installation's own network: heaters can be paired into it meanwhile.
+        radio_network = await async_learning_network(hass, entry)
+    except RadioLinkError as err:
+        raise ConfigEntryNotReady from err
+    client = create_entry_client(hass, entry, radio_network)
     backend = create_backend(brand=brand, client=client)
     if backend.capabilities.local_radio:
         # Release the gateway or serial port if setup fails after connecting;
@@ -443,8 +441,16 @@ async def async_setup_entry(  # noqa: C901
     )
 
     if backend.capabilities.heater_discovery:
-        finder = async_start_heater_finder(hass, entry, client, bool(inventory.nodes))
+        learning = radio_network is not None
+        # A learning entry has no heaters on its own network to scan for.
+        finder = async_start_heater_finder(
+            hass, entry, client, bool(inventory.nodes) or learning
+        )
         async_start_auto_pairing(hass, runtime, finder)
+        if learning:
+            # With no heaters yet, every setup opens the pairing window again.
+            async_open_pairing_window(hass, entry, FIRST_WINDOW)
+            async_start_network_learning(hass, entry, client)
 
     _register_hub_devices(hass, entry, runtime)
     platforms = _platforms_for_brand(brand)
@@ -567,8 +573,6 @@ async def _async_shutdown_entry(runtime: EntryRuntime) -> None:
 
 async def async_unload_entry(hass: HomeAssistant, entry: TermoWebConfigEntry) -> bool:
     """Unload the platforms; the runtime shuts down afterwards via async_on_unload."""
-    if not isinstance(getattr(entry, "runtime_data", None), EntryRuntime):
-        return True  # set up while the radio network was pending: no platforms
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
     return await hass.config_entries.async_unload_platforms(
         entry, _platforms_for_brand(brand)

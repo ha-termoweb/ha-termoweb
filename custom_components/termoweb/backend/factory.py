@@ -147,12 +147,22 @@ def _create_monitor_client(data: Mapping[str, Any]) -> RadioClient:
     )
 
 
-def _create_gateway_client(hass: HomeAssistant, entry: ConfigEntry) -> RadioClient:
-    """Return the radio client of a gateway entry; power settings live in its options."""
+def _create_gateway_client(
+    hass: HomeAssistant, entry: ConfigEntry, network: tuple[str, bytes] | None
+) -> RadioClient:
+    """Return the radio client of a gateway entry; power settings live in its options.
+
+    ``network`` (dialect, network id) is used by an entry that has not learned
+    its heaters' network yet: it runs on the installation's own network.
+    """
 
     from .radio_power import PowerManager  # noqa: PLC0415
 
     data = entry.data
+    if network is None:
+        dialect, network_id = data[CONF_DIALECT], bytes.fromhex(data[CONF_NETWORK_ID])
+    else:
+        dialect, network_id = network
 
     def _save_power(settings: dict[str, Any]) -> None:
         """Store the power manager's settings in the entry options."""
@@ -166,9 +176,9 @@ def _create_gateway_client(hass: HomeAssistant, entry: ConfigEntry) -> RadioClie
         return create_radio_client(
             data[CONF_DEVICE],
             0,
-            data[CONF_DIALECT],
+            dialect,
             data.get(CONF_NODES, []),
-            bytes.fromhex(data[CONF_NETWORK_ID]),
+            network_id,
             power=power,
             serial_url=data[CONF_DEVICE],
             device_id=data.get(CONF_RADIO_DEVICE_ID),
@@ -176,22 +186,30 @@ def _create_gateway_client(hass: HomeAssistant, entry: ConfigEntry) -> RadioClie
     return create_radio_client(
         data[CONF_HOST],
         int(data[CONF_PORT]),
-        data[CONF_DIALECT],
+        dialect,
         data.get(CONF_NODES, []),
-        bytes.fromhex(data[CONF_NETWORK_ID]),
+        network_id,
         power=power,
     )
 
 
-def create_entry_client(hass: HomeAssistant, entry: ConfigEntry) -> Any:
-    """Return the client a config entry talks through: cloud REST or local radio."""
+def create_entry_client(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    radio_network: tuple[str, bytes] | None = None,
+) -> Any:
+    """Return the client a config entry talks through: cloud REST or local radio.
+
+    ``radio_network`` (dialect, network id) overrides a radio gateway entry's
+    stored network (one that is still learning it).
+    """
 
     data = entry.data
     brand = data.get(CONF_BRAND, DEFAULT_BRAND)
     if brand == BRAND_RADIO_MONITOR:
         return _create_monitor_client(data)
     if brand == BRAND_RADIO:
-        return _create_gateway_client(hass, entry)
+        return _create_gateway_client(hass, entry, radio_network)
     return create_rest_client(hass, data["username"], data["password"], brand)
 
 
