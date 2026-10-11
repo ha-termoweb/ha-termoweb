@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
@@ -17,12 +18,22 @@ from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.termoweb.backend import radio_client as rc
 from custom_components.termoweb.const import DOMAIN, signal_radio_frames
 from custom_components.termoweb.domain import NodeId, NodeSettingsDelta, NodeType
 from custom_components.termoweb.domain.state import GeoData
+from custom_components.termoweb.runtime import require_runtime
 from tests.fakes.cloud import DEV_ID, FakeCloud
 
-from .fakes.radio_link import MAC
+from .fakes.radio_link import (
+    CLOCK_ACCEPTED,
+    IDENTITY_RATED,
+    MAC,
+    POWER_RECORD_HEATING,
+    PROGRAM_HOURLY,
+    STATUS_SHORT,
+    FakeRadioLink,
+)
 from .fakes.sensors import (
     entity_ids,
     fake_radio_links,
@@ -346,6 +357,44 @@ async def test_radio_gateway_has_estimated_energy_but_no_location(
             "sensor.radio_gateway_total_energy",
         } <= sensors
         assert not any(s.endswith(("_location", "_frames_heard")) for s in sensors)
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+def _rated_heater(link: FakeRadioLink) -> None:
+    """Script a heating dialect-B heater whose identity record says 1500 W."""
+    link.reply(0xB8, STATUS_SHORT)
+    link.reply(0xB0, PROGRAM_HOURLY)
+    link.reply(0xBC, POWER_RECORD_HEATING)
+    link.reply(0x5A, IDENTITY_RATED)
+    link.reply(0x51, CLOCK_ACCEPTED)
+    link.reply(0x52, CLOCK_ACCEPTED)
+
+
+async def test_radio_energy_and_power_use_the_rating_from_the_heater_identity(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without any options, the heater's identity rating drives energy and power."""
+    now = [1_000_000.0]
+    monkeypatch.setattr(rc, "time", SimpleNamespace(time=lambda: now[0]))
+    entry = radio_entry("radio", [{"type": "htr", "addr": "6", "name": "Heater 6"}])
+    assert "radio_power" not in entry.options
+    with fake_radio_links(_rated_heater, clock=lambda: now[0]) as links:
+        await setup_entry(hass, entry)
+        await hass.async_block_till_done()
+        assert links[0].payloads()[:4] == [b"\xb8", b"\xb0", b"\x5a", b"\xbc"]
+        energy = "sensor.heater_6_energy"
+        assert float(hass.states.get(energy).state) == 0.0
+
+        # 15 minutes heating at a 12 % duty on a 1500 W rating: 45 Wh, 180 W.
+        now[0] += 900
+        runtime = require_runtime(hass, entry.entry_id)
+        assert await runtime.client.read_power_record(6) is not None
+        await runtime.energy_coordinator.async_refresh()
+        await hass.async_block_till_done()
+        assert float(hass.states.get(energy).state) == pytest.approx(0.045)
+        power = hass.states.get("sensor.heater_6_power")
+        assert float(power.state) == pytest.approx(180.0)
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
 

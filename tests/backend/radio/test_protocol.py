@@ -350,6 +350,35 @@ def test_identity_e0_form() -> None:
     assert record.ascii_serial is None
 
 
+def _rated_identity(rating: int) -> bytes:
+    """Return a synthetic 5B 55 identity whose rating byte (payload[10]) is ``rating``."""
+    return (
+        bytes.fromhex("5B55010501 0D00410040".replace(" ", ""))
+        + bytes([rating])
+        + b"X123456"
+    )
+
+
+def test_identity_short_form_carries_the_rated_power() -> None:
+    """Byte 10 of the 5B 55 reply is the rated power in 100 W units."""
+    record = p.decode_identity(_rated_identity(0x0F))
+    assert record.rated_power_w == 1500
+    assert record.ascii_serial == "X123456"
+    assert p.decode_identity(_rated_identity(0x01)).rated_power_w == 100
+    assert p.decode_identity(_rated_identity(0x28)).rated_power_w == 4000
+
+
+@pytest.mark.parametrize("rating", [0x00, 0x29, 0xFF])
+def test_identity_rating_out_of_range_is_none(rating: int) -> None:
+    """A rating byte outside 100-4000 W is not taken as a rating."""
+    assert p.decode_identity(_rated_identity(rating)).rated_power_w is None
+
+
+def test_identity_e0_form_has_no_rated_power() -> None:
+    """The dialect-A E0 form carries no rating."""
+    assert p.decode_identity(A_IDENTITY).rated_power_w is None
+
+
 @pytest.mark.parametrize(
     "payload",
     [

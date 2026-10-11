@@ -48,20 +48,21 @@ decoders in `backend/radio/protocol.py` return frozen dataclasses.
 | `priority` | True (local power manager) | True | heater priority number entities |
 | `energy_history` | False | True | `import_energy_history` service (logs an error and skips the entry) |
 | `local_radio` | True | False | one entry per gateway/stick, link closed on unload, radio reconfigure steps |
-| `options_flow` | True | False | options flow (heater power, pairing, rehoming) |
+| `options_flow` | True | False | options flow (pairing, rehoming) |
 | `web_portal` | False | True | `configuration_url` on devices |
 
 `priority` and `energy_history` are new in this PR. Both cloud backends
 declare them True, so cloud behaviour does not change.
 
-`lock` is False even though the client can send the `BA` toggle: the
-dialect-B status record does not report the lock state, so a lock entity
-could not show the real state.
+`lock` is True: the client sends the `BA` toggle. The dialect-B status
+record does not report the lock state, so the lock entity shows the last
+state written (unknown until first used).
 
 ## Canonical mapping (reads)
 
 `get_node_settings` sends `B8` (status) and, at most once an hour, `B0`
-(program). It returns the same canonical dict the TermoWeb cloud codec
+(program). While a heater's power is unknown it also sends `5A` (identity)
+once, for the rating (see Local power manager). It returns the same canonical dict the TermoWeb cloud codec
 produces. A key is present only when the radio record carries it. Nothing is
 derived or guessed.
 
@@ -75,7 +76,7 @@ derived or guessed.
 | `stemp` | full status record; dialect B: power record byte 3, the heater's active setpoint (half degrees) | one-decimal string | 🟡 dialect A; ✅ dialect B |
 | `state` | full record flag `01`; dialect B: power record byte 7 (`BC` → `BD`, read when the status lacks it, and 90 s after each `BF 01` grant) | `"on"` / `"off"` | 🟡 dialect A; ✅ dialect B |
 | `lock` | full record flag `02`; dialect B: the last lock state written (the short record has none) | bool | 🟡 dialect A; 🟡 dialect B |
-| `max_power` | full record power, or the dialect-A `BE hi lo` power request (deciwatts) | float watts | 🟡 dialect A; ❌ dialect B (its power record carries no power) |
+| `max_power` | full record power, or the dialect-A `BE hi lo` power request (deciwatts); dialect B: the rating in the `5B 55` identity reply (byte 10 × 100 W) | float watts | 🟡 dialect A; 🟡 dialect B (one 1500 W heater checked) |
 
 Mode: radio `03` is a temporary override that ends at the next program slot.
 That is exactly the cloud's `modified_auto`, which `climate.py` shows as HVAC
@@ -225,8 +226,8 @@ reconnects; it does no harm.
 | Accumulator boost, boost defaults | ❌ | Unknown on radio; no accumulator was available to test. |
 | Display flash button | 🟡 | `5E 01`: dialect A answers `5F 55`; a dialect-B heater acks it (no reply record). The visible flash on dialect B is not yet confirmed. |
 | Heater priority numbers | ✅ | Local power manager (see below). Higher numbers win. |
-| Installation power limit | ✅ | Local power manager (see below), verified with a house meter. Needs each heater's power: reported by dialect-A heaters, entered in the options for dialect B. |
-| Energy and power sensors | ✅ (estimated) | Within ~4 % of a house meter over a heating episode. Estimated: rated power × duty while the heating flag is set, integrated between power records. Needs each heater's power (options). Starts at 0 when Home Assistant starts. |
+| Installation power limit | ✅ | Local power manager (see below), verified with a house meter. Needs each heater's power: reported by dialect-A heaters, read from the identity record for dialect B. |
+| Energy and power sensors | ✅ (estimated) | Within ~4 % of a house meter over a heating episode. Estimated: rated power × duty while the heating flag is set, integrated between power records. Needs each heater's power (read from the heater). Starts at 0 when Home Assistant starts. |
 | Energy history import service | ➖ | Not applicable: radio heaters keep no energy history to import. Logs "not supported by this backend". |
 | Hourly samples poller | ➖ | Not needed: the listener pushes the energy estimate live; the poller gets `{}`. |
 | Gateway connectivity binary sensor | ✅ | From the listener's health tracker. |
@@ -267,9 +268,18 @@ restarts at 0 when Home Assistant restarts, which the
 energy sensors treat as a meter reset.
 
 Settings live in the entry options (`radio_power`): the limit and priorities
-are set through the usual number entities; each heater's power in watts is set
-in the integration's options (**Configure**). Dialect-A heaters report their
-own power in `BE`, which is used when no power is entered.
+are set through the usual number entities. Each heater's power is read from
+the heater, so there is nothing to enter:
+
+- dialect A reports its measured full-load power in `BE hi lo` power requests
+  (deciwatts); this wins when known;
+- otherwise the client reads the heater's identity (`5A`) once and uses its
+  rating: byte 10 of the `5B 55` reply × 100 W (`0F` = 1500 W). Ratings
+  outside 100-4000 W are ignored. An unanswered `5A` is retried at most
+  hourly; a decoded reply is never read again until Home Assistant restarts.
+
+Older versions had a manual power field in the options; the 1.6 entry
+migration removes stored values.
 
 ## Pairing and factory reset
 

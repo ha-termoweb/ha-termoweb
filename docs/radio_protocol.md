@@ -109,7 +109,7 @@ A reply's first payload byte is the request opcode + 1. A two-byte
 | `B8` → `B9 ..` | request / reply | status: E6 (14 bytes), E4 (16, with boost tail) | A | B (short 5 bytes: `B9 af eco comfort mode`) |
 | `B0` → `B1 ..` | request / reply | program: 85 bytes (48 slots/day) or 43 bytes (24 slots/day) | A | B (43 bytes) |
 | `BC` → `BD ..` | request / reply | dialect A: `BD` + u32 Wh energy counter | A | B: 9-byte power record, **not** energy (see below) |
-| `5A` → `5B ..` | request / reply | identity: `5B 77 01 01 01 <id>` + 12-byte tail + `0A 1A` | A | B (`5B 55` + 16 bytes ending in the ASCII serial) |
+| `5A` → `5B ..` | request / reply | identity: `5B 77 01 01 01 <id>` + 12-byte tail + `0A 1A` | A | B (`5B 55` + 16 bytes ending in the ASCII serial; payload byte 10 = rated power / 100 W, `0F` = 1500 W) |
 | `DA` → `DB ..` | request / reply | advanced record, 17 bytes | A | ? |
 | `C2` → `C3 55` | request / reply | meaning unknown | A | B (ack only) |
 | `D0` → `EC`-class reply | request / reply | capability, meaning unknown | A | B (ack only) |

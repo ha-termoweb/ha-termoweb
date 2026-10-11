@@ -41,7 +41,7 @@ CONF_RADIO_DEVICE_ID: Final = "radio_device_id"  # dev_id when firmware has no M
 RADIO_TYPE_ESP32: Final = "esp32"
 RADIO_TYPE_NANOCUL: Final = "nanocul"
 CONF_RADIO_POWER: Final = (
-    "radio_power"  # options: power manager limit/priority/rated power
+    "radio_power"  # options: power manager limit, priorities, shed heaters
 )
 CONF_RADIO_RESTORE: Final = (
     "radio_restore"  # options: heater settings saved before a factory reset

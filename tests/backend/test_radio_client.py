@@ -23,6 +23,7 @@ from custom_components.termoweb.nodes import build_node_inventory
 from tests.fakes.radio_link import (
     CLOCK_ACCEPTED,
     HEATER,
+    IDENTITY_RATED,
     IDENTITY_SHORT,
     NET,
     POWER_RECORD_IDLE,
@@ -251,7 +252,12 @@ async def test_get_node_settings_maps_status_and_program() -> None:
         "mtemp": "22.0",  # power record byte 1
         "priority": 0,  # local power manager default
     }
-    assert links[0].sent == [(HEATER, b"\xb8"), (HEATER, b"\xb0"), (HEATER, b"\xbc")]
+    assert links[0].sent == [
+        (HEATER, b"\xb8"),
+        (HEATER, b"\xb0"),
+        (HEATER, b"\x5a"),  # identity for the rating; this heater does not answer
+        (HEATER, b"\xbc"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -361,6 +367,73 @@ async def test_noted_max_power_fills_in_when_status_lacks_it() -> None:
 
     settings = await client.get_node_settings("dev", ("htr", "6"))
     assert settings["max_power"] == 1143.3
+
+
+@pytest.mark.asyncio
+async def test_rated_power_is_read_once_from_the_identity_record() -> None:
+    """A heater of unknown power is asked for its identity once; its rating is used."""
+
+    client, links, _ = make_client()
+    link = await client.async_connect()
+    link.reply(0x5A, IDENTITY_RATED)
+
+    settings = await client.get_node_settings("dev", ("htr", "6"))
+    assert settings["max_power"] == 1500.0
+    assert client.power.rated_power(HEATER) == 1500.0
+    # Read before the power record, so the first record starts the energy counter.
+    assert link.payloads() == [b"\xb8", b"\xb0", b"\x5a", b"\xbc"]
+    assert client.energy.counter_wh(HEATER) == 0.0
+
+    await client.get_node_settings("dev", ("htr", "6"))
+    assert link.payloads().count(b"\x5a") == 1  # identity is static
+
+
+@pytest.mark.asyncio
+async def test_measured_power_wins_over_the_identity_rating() -> None:
+    """A heater that reported its full-load power is not asked for its identity."""
+
+    client, links, _ = make_client()
+    link = await client.async_connect()
+    link.reply(0x5A, IDENTITY_RATED)
+    client.note_max_power(HEATER, 1143.3)
+
+    settings = await client.get_node_settings("dev", ("htr", "6"))
+    assert settings["max_power"] == 1143.3
+    assert b"\x5a" not in link.payloads()
+
+
+@pytest.mark.asyncio
+async def test_unanswered_identity_read_is_retried_hourly() -> None:
+    """A heater that does not answer 5A is asked again only after an hour."""
+
+    client, links, clock = make_client()
+    link = await client.async_connect()
+
+    settings = await client.get_node_settings("dev", ("htr", "6"))
+    assert "max_power" not in settings
+    await client.get_node_settings("dev", ("htr", "6"))
+    assert link.payloads().count(b"\x5a") == 1
+
+    clock.now += rc.IDENTITY_RETRY_S
+    link.reply(0x5A, IDENTITY_RATED)
+    settings = await client.get_node_settings("dev", ("htr", "6"))
+    assert settings["max_power"] == 1500.0
+    assert link.payloads().count(b"\x5a") == 2
+
+
+@pytest.mark.asyncio
+async def test_identity_without_a_plausible_rating_is_not_read_again() -> None:
+    """An identity whose rating byte is out of range leaves the power unknown."""
+
+    client, links, _ = make_client()
+    link = await client.async_connect()
+    link.reply(0x5A, IDENTITY_RATED[:10] + b"\x00" + IDENTITY_RATED[11:])
+
+    for _ in range(2):
+        settings = await client.get_node_settings("dev", ("htr", "6"))
+        assert "max_power" not in settings
+    assert link.payloads().count(b"\x5a") == 1
+    assert client.power.rated_power(HEATER) is None
 
 
 @pytest.mark.asyncio

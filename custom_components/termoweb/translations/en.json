@@ -129,14 +129,9 @@
       "init": {
         "title": "TermoWeb Options",
         "menu_options": {
-          "settings": "Settings",
           "pair_heaters": "Pair a new heater",
           "rehome": "Move heaters to this installation's own network"
         }
-      },
-      "settings": {
-        "title": "TermoWeb Options",
-        "description": "Version: {version}\n\n{heaters}"
       },
       "pair_heaters": {
         "title": "Pair a new heater",

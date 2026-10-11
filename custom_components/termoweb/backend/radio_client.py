@@ -55,6 +55,7 @@ _LOGGER = logging.getLogger(__name__)
 
 REPLY_TIMEOUT_S = 1.0  # wait for a processed reply after the heater's ack
 PROGRAM_REFRESH_S = 3600.0  # re-read a heater's weekly program at most hourly
+IDENTITY_RETRY_S = 3600.0  # retry an unanswered identity read at most hourly
 STATUS_REPLY_LENS = (
     protocol.STATUS_SHORT_LEN,
     protocol.STATUS_E6_LEN,
@@ -135,6 +136,7 @@ class RadioClient:
 
     reply_timeout: float = REPLY_TIMEOUT_S
     program_refresh_s: float = PROGRAM_REFRESH_S
+    identity_retry_s: float = IDENTITY_RETRY_S
 
     def __init__(
         self,
@@ -187,6 +189,8 @@ class RadioClient:
         self._programs: dict[int, tuple[float, list[int] | None]] = {}
         self._locks: dict[int, bool] = {}  # last lock written, for records without it
         self._manual_setpoints: dict[int, float] = {}  # last manual target seen
+        self._identities_read: set[int] = set()  # heaters whose 5A reply decoded
+        self._identity_failures: dict[int, float] = {}  # last unanswered 5A read
         self.power = power or PowerManager()
         self.energy = EnergyEstimator(self.power.rated_power)
 
@@ -374,7 +378,7 @@ class RadioClient:
         self._network_id = bytes(network_id)
 
     async def async_read_identity(self, addr: int) -> bytes:
-        """Return the identity tail of the heater's ``5A`` reply; raise if silent."""
+        """Return the identity tail of the heater's ``5A`` reply; note its rating."""
 
         reply = await self._exchange(
             addr,
@@ -384,7 +388,27 @@ class RadioClient:
         record = protocol.decode_identity(reply.payload)
         if record is None:
             raise RadioCommandError(f"heater {addr} sent an unknown identity reply")
+        self._identities_read.add(addr)
+        watts = record.rated_power_w
+        if watts is not None:
+            _LOGGER.info("Heater %s is rated %d W (identity record)", addr, watts)
+            self.power.note_identity_power(addr, float(watts))
         return record.tail
+
+    async def _learn_rated_power(self, addr: int) -> None:
+        """Read a heater's identity once for its rating while its power is unknown."""
+
+        if self.power.rated_power(addr) is not None or addr in self._identities_read:
+            return
+        now = self._clock()
+        failed_at = self._identity_failures.get(addr)
+        if failed_at is not None and now - failed_at < self.identity_retry_s:
+            return
+        try:
+            await self.async_read_identity(addr)
+        except (RadioLinkError, RadioCommandError) as err:
+            _LOGGER.debug("Identity read from heater %s failed: %s", addr, err)
+            self._identity_failures[addr] = now
 
     async def async_factory_reset(self, addr: int) -> None:
         """Factory-reset a heater (dialect B ``C8 01 D0``): settings and pairing are wiped."""
@@ -664,6 +688,7 @@ class RadioClient:
         prog = await self._program(addr)
         if prog is not None:
             settings["prog"] = prog
+        await self._learn_rated_power(addr)
         if "state" not in settings:
             power = await self.read_power_record(addr)
             if power is not None:

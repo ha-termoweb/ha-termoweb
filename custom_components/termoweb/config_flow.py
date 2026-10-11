@@ -86,7 +86,7 @@ class TermoWebConfigFlow(RadioConfigFlow, domain=DOMAIN):
     """Initial setup and (optional) reconfigure without use_push."""
 
     VERSION = 1
-    MINOR_VERSION = 5
+    MINOR_VERSION = 6
 
     @staticmethod
     @callback

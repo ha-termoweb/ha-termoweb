@@ -31,6 +31,7 @@ from custom_components.termoweb.runtime import EntryRuntime
 from tests.fakes.radio_link import (
     CLOCK_ACCEPTED,
     HEATER,
+    IDENTITY_RATED,
     NET,
     POWER_RECORD_HEATING,
     POWER_RECORD_IDLE,
@@ -126,6 +127,7 @@ def build(hass: HomeAssistant, nodes: list[dict[str, str]] = NODES) -> Radio:
         link.reply(0xB8, STATUS_SHORT)
         link.reply(0xB0, PROGRAM_HOURLY)
         link.reply(0xBC, POWER_RECORD_IDLE)
+        link.reply(0x5A, IDENTITY_RATED)
         link.reply(0x51, CLOCK_ACCEPTED)
         link.reply(0x52, CLOCK_ACCEPTED)
         links.append(link)
@@ -227,6 +229,7 @@ async def test_start_connects_refreshes_and_reports_health(radio: Radio) -> None
             "state": "off",
             "mtemp": "22.0",
             "stemp": "22.0",
+            "max_power": 1500.0,  # rating from the identity record
             "priority": 0,
         }
     ]

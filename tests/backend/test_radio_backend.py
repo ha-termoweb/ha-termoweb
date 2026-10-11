@@ -116,21 +116,29 @@ async def test_base_backend_delegates_writes_to_radio_client() -> None:
 MANUAL, AUTO, OFF = 2, 1, 4
 
 
-def manager(**settings) -> tuple[PowerManager, dict]:
-    """Return a manager backed by a plain dict, like the entry options."""
+def manager(
+    rated: dict[int, float] | None = None, **settings
+) -> tuple[PowerManager, dict]:
+    """Return a manager backed by a plain dict, like the entry options.
+
+    ``rated`` heaters have the rating their identity record carries.
+    """
 
     store: dict = {"radio_power": dict(settings)}
 
     def save(new: dict) -> None:
         store["radio_power"] = new
 
-    return PowerManager(lambda: store["radio_power"], save), store
+    power = PowerManager(lambda: store["radio_power"], save)
+    for addr, watts in (rated or {}).items():
+        power.note_identity_power(addr, watts)
+    return power, store
 
 
 def test_without_a_limit_nothing_is_switched_off() -> None:
     """No limit: no shedding, and every shed heater is restored."""
 
-    power, _ = manager(rated_power={"6": 1500}, shed={"7": AUTO})
+    power, _ = manager(rated={6: 1500}, shed={"7": AUTO})
     power.note_heating(6, True)
     assert power.power_limit is None
     assert power.plan() == ([], [(7, AUTO)])
@@ -141,7 +149,7 @@ def test_over_the_limit_the_lowest_priority_heater_goes_off(caplog) -> None:
 
     power, _ = manager(
         power_limit=2000,
-        rated_power={"5": 1000, "6": 1500, "7": 800},
+        rated={5: 1000, 6: 1500, 7: 800},
         priority={"5": 9, "6": 1, "7": 5},
     )
     for addr in (5, 6, 7, 8):  # 8: power unknown
@@ -154,7 +162,7 @@ def test_over_the_limit_the_lowest_priority_heater_goes_off(caplog) -> None:
 def test_a_single_heater_above_the_limit_stays_off() -> None:
     """A limit below a heater's own power keeps it switched off."""
 
-    power, store = manager(power_limit=1000, rated_power={"6": 1500})
+    power, store = manager(power_limit=1000, rated={6: 1500})
     power.note_heating(6, True)
     assert power.plan() == ([6], [])
     power.mark_shed(6, MANUAL)
@@ -167,7 +175,7 @@ def test_shed_heaters_return_by_priority_when_they_fit() -> None:
 
     power, _ = manager(
         power_limit=2000,
-        rated_power={"5": 1200, "6": 1500, "7": 1000},
+        rated={5: 1200, 6: 1500, 7: 1000},
         priority={"6": 8, "7": 2},
         shed={"6": MANUAL, "7": AUTO},
     )
@@ -181,23 +189,27 @@ def test_shed_heaters_return_by_priority_when_they_fit() -> None:
 
 
 def test_shed_heater_with_unknown_power_comes_back() -> None:
-    """If a shed heater's power is removed from the options, it is restored."""
+    """A shed heater whose power is unknown is restored."""
 
     power, _ = manager(power_limit=500, shed={"6": MANUAL})
     assert power.plan() == ([], [(6, MANUAL)])
 
 
 def test_settings_round_trip_through_the_store() -> None:
-    """Limit and priority writes go through save; rated power can be learned."""
+    """Limit and priority writes go through save; bad and old manual keys are ignored."""
 
-    power, store = manager(rated_power={"6": "bad", "x": 5})
+    power, store = manager(rated_power={"6": 1500}, priority={"x": 5})
     power.set_power_limit(1800)
     power.set_priority(6, 3)
     assert store["radio_power"]["power_limit"] == 1800
     assert store["radio_power"]["priority"] == {"6": 3}
     assert power.priority(6) == 3 and power.priority(7) == 0
     assert power.rated_power(6) is None
-    power.note_reported_power(6, 752.6)
+    power.note_identity_power(6, 1500.0)
+    assert power.rated_power(6) == 1500.0
+    power.note_reported_power(6, 752.6)  # measured full-load power wins
+    assert power.rated_power(6) == 752.6
+    power.note_identity_power(6, 1000.0)
     assert power.rated_power(6) == 752.6
     power.set_power_limit(0)
     assert power.power_limit is None

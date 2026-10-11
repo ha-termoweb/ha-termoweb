@@ -142,7 +142,7 @@ This map defines responsibilities for each module family in the final design.
   `config_flow_radio.py` holds the radio setup helpers (serial ports, probes,
   discovery, pairing, entry data) and `RadioConfigFlow`, the unregistered base
   class with the ESP32 gateway and nanoCUL steps. `options_flow.py` holds
-  `TermoWebOptionsFlow` (radio heater power, pairing, rehoming).
+  `TermoWebOptionsFlow` (radio pairing, rehoming).
 - `services/` — one module per registered service, each with an
   `async_register_*` function called once from `async_setup`:
   `energy_history` (`import_energy_history`), `radio_pairing`, `radio_survey`,
@@ -271,7 +271,7 @@ coordinator polling. Cloud-only features are switched off with
 `geo_data` for the installation location sensor). Other radio differences are
 capabilities too: `local_radio` (the entry owns a gateway or serial link: one
 entry per link, closed on unload, radio reconfigure steps), `options_flow`
-(heater power, pairing, rehoming), `site_device` and `web_portal` (device
+(pairing, rehoming), `site_device` and `web_portal` (device
 registry layout and links). `account_scope` prefixes cloud entry unique IDs,
 so Ducaheat and Tevolve, which share one backend, share one account namespace
 (`ducaheat:<account>`). The backend factory builds each entry's client

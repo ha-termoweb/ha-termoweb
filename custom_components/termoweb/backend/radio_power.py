@@ -11,9 +11,10 @@ sheds load the way a person would:
 - room again: switched-off heaters get their previous mode back, highest
   priority first, while each one's power fits.
 
-Higher priority numbers win. A heater's power is entered in the options (or
-reported by dialect-A heaters); a heater whose power is unknown is never
-switched off. Nothing here touches the radio or Home Assistant.
+Higher priority numbers win. A heater's power is the full-load power it
+reports itself (dialect A), else the rating in its identity record (dialect
+B); a heater whose power is unknown is never switched off. Nothing here
+touches the radio or Home Assistant.
 """
 
 from __future__ import annotations
@@ -28,7 +29,6 @@ DEFAULT_PRIORITY = 0
 
 KEY_POWER_LIMIT = "power_limit"
 KEY_PRIORITY = "priority"
-KEY_RATED_POWER = "rated_power"
 KEY_SHED = "shed"  # heaters switched off by the manager -> mode to restore
 
 
@@ -50,6 +50,7 @@ class PowerManager:
         self._load = load or (lambda: self._memory)
         self._save = save or self._memory.update
         self._learned: dict[int, float] = {}
+        self._identity_rated: dict[int, float] = {}
         self._heating: dict[int, bool] = {}
 
     # --- settings ------------------------------------------------------------
@@ -88,15 +89,20 @@ class PowerManager:
         self._store(KEY_PRIORITY, {str(a): p for a, p in priorities.items()})
 
     def rated_power(self, addr: int) -> float | None:
-        """Return a heater's power: configured, else reported by the heater."""
+        """Return a heater's power: reported by the heater, else its identity rating."""
 
-        configured = _int_map(self._settings().get(KEY_RATED_POWER)).get(addr)
-        return float(configured) if configured else self._learned.get(addr)
+        learned = self._learned.get(addr)
+        return learned if learned is not None else self._identity_rated.get(addr)
 
     def note_reported_power(self, addr: int, watts: float) -> None:
         """Remember the full-load power a heater reported itself (dialect A)."""
 
         self._learned[addr] = watts
+
+    def note_identity_power(self, addr: int, watts: float) -> None:
+        """Remember the rated power from a heater's identity record (dialect B)."""
+
+        self._identity_rated[addr] = watts
 
     def _store(self, key: str, value: Any) -> None:
         """Save the settings with ``key`` replaced."""

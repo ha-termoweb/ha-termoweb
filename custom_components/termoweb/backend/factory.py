@@ -142,7 +142,7 @@ def _create_monitor_client(data: Mapping[str, Any]) -> RadioClient:
 
 
 def _create_gateway_client(hass: HomeAssistant, entry: ConfigEntry) -> RadioClient:
-    """Return the radio client of a gateway entry; heater power lives in its options."""
+    """Return the radio client of a gateway entry; power settings live in its options."""
 
     from .radio_power import PowerManager  # noqa: PLC0415
 

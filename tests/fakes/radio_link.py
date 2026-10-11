@@ -30,6 +30,8 @@ NET = bytes.fromhex("1234")  # synthetic dialect-B network id
 # identity tail is synthetic.
 STATUS_SHORT = bytes.fromhex("B921252A02")
 IDENTITY_SHORT = bytes.fromhex("5B55010203040506070809" + b"X123456".hex())
+# Dialect-B identity layout of a 1500 W heater: byte 10 = 0x0F (x 100 W).
+IDENTITY_RATED = bytes.fromhex("5B550105010D004100400F" + b"X123456".hex())
 PROGRAM_HOURLY = bytes.fromhex("B155" + "6AAAAAAA9555" * 6 + "6AAAAAAA95")
 REGISTRATION = bytes.fromhex("50")
 POWER_REQUEST = bytes.fromhex("BEDA002CA9390B0100")

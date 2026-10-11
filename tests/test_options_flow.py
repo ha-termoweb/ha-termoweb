@@ -6,7 +6,7 @@ import asyncio
 from typing import Any
 
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType, InvalidData
+from homeassistant.data_entry_flow import FlowResultType
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -51,55 +51,20 @@ def _options_entry(
 async def _options_step(hass: HomeAssistant, entry: MockConfigEntry, step: str) -> Any:
     """Open the options menu and pick ``step``."""
     menu = await hass.config_entries.options.async_init(entry.entry_id)
-    assert menu["menu_options"] == ["settings", "pair_heaters", "rehome"]
+    assert menu["menu_options"] == ["pair_heaters", "rehome"]
     return await hass.config_entries.options.async_configure(
         menu["flow_id"], {"next_step_id": step}
     )
 
 
-async def test_options_store_heater_rated_power(hass: HomeAssistant) -> None:
-    """Rated power is stored per heater; other options are kept."""
-    entry = _options_entry(
-        hass,
-        radio_power={"power_limit": 2000, "rated_power": {"6": 1200}},
-        energy_history_progress={"htr:6": 1_700_000_000},
-        energy_history_imported=True,
-    )
-    form = await _options_step(hass, entry, "settings")
-    assert form["step_id"] == "settings"
-    assert form["data_schema"]({}) == {"rated_power_6": 1200}
-    assert "rated_power_6 = heater 6" in form["description_placeholders"]["heaters"]
-
-    result = await hass.config_entries.options.async_configure(
-        form["flow_id"], {"rated_power_6": 1500}
-    )
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert dict(entry.options) == {
-        "radio_power": {"power_limit": 2000, "rated_power": {"6": 1500}},
-        "energy_history_progress": {"htr:6": 1_700_000_000},
-        "energy_history_imported": True,
-    }
-
-
-async def test_options_reject_out_of_range_power(hass: HomeAssistant) -> None:
-    """Rated power is validated by the form schema."""
-    entry = _options_entry(hass)
-    form = await _options_step(hass, entry, "settings")
-    with pytest.raises(InvalidData):
-        await hass.config_entries.options.async_configure(
-            form["flow_id"], {"rated_power_6": -1}
-        )
-
-
-async def test_options_without_heaters_keep_existing_options(
+async def test_options_menu_has_no_heater_power_settings(
     hass: HomeAssistant,
 ) -> None:
-    """An entry without heaters has nothing to set and keeps its options."""
-    entry = _options_entry(hass, nodes=[], energy_history_imported=True)
-    form = await _options_step(hass, entry, "settings")
-    result = await hass.config_entries.options.async_configure(form["flow_id"], {})
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert dict(entry.options) == {"energy_history_imported": True}
+    """Heater power is read from the heaters, so the menu has no settings step."""
+    entry = _options_entry(hass, radio_power={"power_limit": 2000})
+    menu = await hass.config_entries.options.async_init(entry.entry_id)
+    assert menu["type"] is FlowResultType.MENU
+    assert menu["menu_options"] == ["pair_heaters", "rehome"]
 
 
 class PairingClient:

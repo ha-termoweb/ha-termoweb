@@ -35,6 +35,7 @@ from .const import (
     BRAND_DUCAHEAT as BRAND_DUCAHEAT,
     BRAND_TEVOLVE as BRAND_TEVOLVE,
     CONF_BRAND,
+    CONF_RADIO_POWER,
     DEFAULT_BRAND,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
@@ -620,6 +621,18 @@ async def _migrate_to_1_5(hass: HomeAssistant, entry: ConfigEntry) -> None:
     hass.config_entries.async_update_entry(entry, minor_version=5)
 
 
+def _migrate_to_1_6(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop the manual radio heater power; it is now read from each heater."""
+
+    options = dict(entry.options)
+    power = options.get(CONF_RADIO_POWER)
+    if isinstance(power, dict) and "rated_power" in power:
+        options[CONF_RADIO_POWER] = {
+            k: v for k, v in power.items() if k != "rated_power"
+        }
+    hass.config_entries.async_update_entry(entry, options=options, minor_version=6)
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate a config entry to the current version."""
     if entry.version > 1:
@@ -632,4 +645,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _migrate_to_1_4(hass, entry)
     if entry.minor_version < 5:
         await _migrate_to_1_5(hass, entry)
+    if entry.minor_version < 6:
+        _migrate_to_1_6(hass, entry)
     return True
