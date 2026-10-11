@@ -105,6 +105,14 @@ def get_brand_basic_auth(brand: str) -> str:
 
 
 RADIO_BRAND_LABEL: Final = "Radio"  # not in BRAND_LABELS: that feeds the login form
+# Over radio the retail brand is unknowable: heaters and the site are TermoWeb
+# family devices, and the gateway is made by whoever built the stick.
+RADIO_NODE_MANUFACTURER: Final = "TermoWeb"
+RADIO_SITE_NAME: Final = "Home"
+RADIO_GATEWAY_MANUFACTURERS: Final[Mapping[str, str]] = {
+    RADIO_TYPE_ESP32: "ESPHome",
+    RADIO_TYPE_NANOCUL: "nanoCUL",
+}
 CLOUD_CONFIGURATION_URL: Final = "https://control.termoweb.net"
 # Every brand's display label, the radio ones included.
 DEVICE_BRAND_LABELS: Final[Mapping[str, str]] = {

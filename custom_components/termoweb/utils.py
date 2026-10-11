@@ -7,7 +7,14 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration
 
-from .const import CLOUD_CONFIGURATION_URL, DOMAIN, get_brand_label
+from .const import (
+    CLOUD_CONFIGURATION_URL,
+    CONF_RADIO_TYPE,
+    DOMAIN,
+    RADIO_GATEWAY_MANUFACTURERS,
+    RADIO_TYPE_ESP32,
+    get_brand_label,
+)
 from .identifiers import build_node_device_identifier
 from .nodes import normalize_node_addr
 from .runtime import EntryRuntime, require_runtime
@@ -65,7 +72,10 @@ def apply_entry_device_overrides(
     if entry_data is None:
         return info
 
-    info["manufacturer"] = get_brand_label(entry_data.brand)
+    info["manufacturer"] = (
+        entry_data.backend.capabilities.node_manufacturer
+        or get_brand_label(entry_data.brand)
+    )
 
     if include_version:
         info["sw_version"] = entry_data.version
@@ -101,7 +111,12 @@ def build_installation_device_info(
     if entry_data is None:
         return info
 
-    info["name"] = entry_data.coordinator.gateway_name
+    site_name = entry_data.backend.capabilities.site_name
+    if site_name:
+        info["name"] = site_name
+        info["translation_key"] = "site"
+    else:
+        info["name"] = entry_data.coordinator.gateway_name
     return info
 
 
@@ -137,6 +152,11 @@ def build_gateway_device_info(
 
     if entry_data is None:
         return info
+
+    if entry_data.backend.capabilities.local_radio:
+        radio_type = entry_data.config_entry.data.get(CONF_RADIO_TYPE, RADIO_TYPE_ESP32)
+        info["manufacturer"] = RADIO_GATEWAY_MANUFACTURERS[radio_type]
+        info["name"] = entry_data.coordinator.gateway_name
 
     coordinator = entry_data.coordinator
     model = coordinator.gateway_model

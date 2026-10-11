@@ -85,7 +85,12 @@ def create_radio_client(
 ) -> RadioClient:
     """Return a radio client for the gateway at ``host:port`` (or a USB stick)."""
 
-    from .radio_client import LISTEN_ONLY_STATION_ID, NANOCUL_MODEL, RadioClient  # noqa: PLC0415
+    from .radio_client import (  # noqa: PLC0415
+        LISTEN_ONLY_STATION_ID,
+        NANOCUL_MODEL,
+        NANOCUL_NAME,
+        RadioClient,
+    )
 
     listen: dict[str, Any] = (
         {"listen_only": True, "station_id": LISTEN_ONLY_STATION_ID}
@@ -111,6 +116,7 @@ def create_radio_client(
         ),
         device_id=device_id,
         model=NANOCUL_MODEL,
+        name=NANOCUL_NAME,
         **listen,
     )
 

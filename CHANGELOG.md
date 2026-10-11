@@ -10,6 +10,8 @@
 - Radio setup forms no longer ask for a network id. Setup learns it from the heaters' radio traffic, and pairing creates one for your installation. Existing entries keep their stored network id.
 - The manual ESP32 gateway form asks only for the IP address. Port (2323) and radio dialect moved to a collapsed **Advanced settings** section, as did the nanoCUL dialect.
 - Radio setup no longer refuses a gateway or stick that another entry uses. Home Assistant takes the connection over; the other entry loses it.
+- Radio: the site device is now called "Home" (a name you set yourself is kept).
+- Radio: devices show the real maker. Heaters and the site say "TermoWeb", the ESP32 gateway says "ESPHome", and the nanoCUL stick says "nanoCUL". The gateway is named "Radio gateway" (ESP32) or "nanoCUL stick". Cloud accounts are unchanged.
 
 ## 2.4.0b2 (pre-release, 2026-10-11)
 

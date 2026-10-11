@@ -107,16 +107,21 @@ async def test_gateway_without_metadata_reports_the_integration_version(
 
 
 @pytest.mark.parametrize(
-    ("brand", "label", "has_site", "portal"),
+    ("brand", "label", "gateway_name", "has_site", "portal"),
     [
-        ("termoweb", "TermoWeb", True, True),
-        ("ducaheat", "Ducaheat", True, True),
-        ("radio", "Radio", True, False),
-        ("radio_monitor", "Radio", False, False),
+        ("termoweb", "TermoWeb", "TermoWeb Gateway", True, True),
+        ("ducaheat", "Ducaheat", "Ducaheat Gateway", True, True),
+        ("radio", "ESPHome", "Device dev", True, False),
+        ("radio_monitor", "ESPHome", "Device dev", False, False),
     ],
 )
 async def test_brand_sets_labels_portal_link_and_site_parent(
-    hass: HomeAssistant, brand: str, label: str, has_site: bool, portal: bool
+    hass: HomeAssistant,
+    brand: str,
+    label: str,
+    gateway_name: str,
+    has_site: bool,
+    portal: bool,
 ) -> None:
     """Brand keys become labels; radio has no portal; a monitor has no site parent."""
     build_entry_runtime(
@@ -130,7 +135,7 @@ async def test_brand_sets_labels_portal_link_and_site_parent(
     site_info = build_installation_device_info(hass, "entry", "dev")
 
     assert gateway["manufacturer"] == label
-    assert gateway["name"] == f"{label} Gateway"
+    assert gateway["name"] == gateway_name
     assert (gateway.get("via_device_id") == site.id) is has_site
     assert "via_device" not in gateway
     assert ("configuration_url" in gateway) is portal
@@ -286,6 +291,6 @@ async def test_radio_heater_device_reports_the_radio_brand(hass: HomeAssistant) 
             (DOMAIN, dev_id, "6"), entry.entry_id
         )
         assert heater is not None
-        assert heater.manufacturer == "Radio"
+        assert heater.manufacturer == "TermoWeb"
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()

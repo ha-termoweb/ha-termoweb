@@ -320,9 +320,9 @@ async def test_monitor_entry_counts_frames_heard(hass: HomeAssistant) -> None:
     with fake_radio_links():
         await setup_entry(hass, entry)
         assert entity_ids(hass, entry, "sensor") == {
-            "sensor.radio_gateway_frames_heard"
+            "sensor.radio_monitor_frames_heard"
         }
-        frames = "sensor.radio_gateway_frames_heard"
+        frames = "sensor.radio_monitor_frames_heard"
         assert hass.states.get(frames).state == "0"
         assert hass.states.get(frames).attributes["last_frame"] is None
         assert er.async_get(hass).async_get(frames).unique_id == (
@@ -354,7 +354,7 @@ async def test_radio_gateway_has_estimated_energy_but_no_location(
         sensors = entity_ids(hass, entry, "sensor")
         assert {
             "sensor.heater_6_energy",
-            "sensor.radio_gateway_total_energy",
+            "sensor.home_total_energy",
         } <= sensors
         assert not any(s.endswith(("_location", "_frames_heard")) for s in sensors)
         assert await hass.config_entries.async_unload(entry.entry_id)
@@ -411,7 +411,9 @@ async def test_radio_devices_link_only_to_devices_that_exist(
         devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
         ids = {device.id for device in devices}
         assert all(d.via_device_id in ids | {None} for d in devices)
-        assert {d.manufacturer for d in devices} == {"Radio"}
+        assert {d.manufacturer for d in devices} == (
+            {"ESPHome"} if brand == "radio_monitor" else {"ESPHome", "TermoWeb"}
+        )
         registry = dr.async_get(hass)
         gateway = registry.async_get_device_by_identifier(
             (DOMAIN, RADIO_DEV_ID), entry.entry_id

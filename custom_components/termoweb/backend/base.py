@@ -159,6 +159,10 @@ class BackendCapabilities:
     options_flow: bool = False  # heater power, pairing and rehoming options
     site_device: bool = True  # the gateway sits under a site (installation) device
     web_portal: bool = True  # devices link to the cloud web portal
+    node_manufacturer: str = (
+        ""  # manufacturer label of nodes and site; "" = brand label
+    )
+    site_name: str = ""  # default site device name; "" = the gateway's own name
     account_scope: str = ""  # prefix of cloud entry unique IDs: one per backend
 
 
