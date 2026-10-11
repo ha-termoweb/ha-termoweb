@@ -13,8 +13,7 @@ their own 869 MHz radio link, both with a CC1101 radio chip:
 
 Both speak the same line protocol (`termoweb_rx`) with the same commands
 and the same replies, so the integration's `RadioLink` drives either one.
-The protocol reference is the table in
-[docs/radio_gateway.md](../docs/radio_gateway.md#for-developers-the-line-protocol).
+The protocol reference is [Line protocol](#line-protocol) below.
 
 ## Versions
 
@@ -102,3 +101,49 @@ against the ESP32's formats. The tests skip when `gcc` is missing.
 - `F` retune and back; `D` counters.
 - Raw survey (`R60`): bursts reported, the integration recognises the
   dialect, and the main loop keeps up with the edge interrupts on noise.
+
+## Line protocol
+
+Every line the gateway sends ends with `\r\n`. Send one command per line,
+ending with `\n`.
+
+| Command | Reply | Meaning |
+|---|---|---|
+| (connect) or `V` | `# termoweb_rx 3.7-esp32 freq=869.525 rate=9.6k sync=2DE5 mode=dynamic tx=paC0 mac=AA:BB:CC:DD:EE:FF` | Banner. Sent first on every new connection. |
+| `Q` | `# Q termoweb_rx 3.7-esp32 freq=869.525 pa=C0 sync=2DE5 mode=dynamic autoack=off id=01 dialect=A net=1234 mac=AA:BB:CC:DD:EE:FF` | Status. `mac` is the WiFi MAC: a stable device id. |
+| `Y0` / `Y1` | `# dialect=A sync=2DE5` / `# dialect=B sync=2DD4` | Select the on-air dialect (below). Error: `# Y? expected 0 or 1`. |
+| `N<hex4>`, e.g. `N1234` | `# net=1234` | Network id used in auto-acks. Error: `# N? expected 4 hex digits`. |
+| `I<hex2>`, e.g. `I01` | `# id=01` | Our station id, used by auto-ack. |
+| `A0` / `A1` | `# autoack=off` / `# autoack=on` | Auto-ack off/on. |
+| `T<hex>` | `TX <micros> <n> <hex>` | Transmit up to 255 bytes exactly as given. Errors: `TXERR empty or bad hex`, `TXERR underflow`, `TXERR marcstate=<hex>`. |
+| `F<kHz>`, e.g. `F869525` | `# freq=869.525 word=21717A` | Retune (779000 to 928000). Error: `# F? expected kHz`. |
+| `X` | `# raw=on` / `# raw=off` | Append the 2 raw radio status bytes to RX lines. |
+| `D` | `# marcstate=.. pktstatus=.. rxbytes=.. syncs=<n> rxreset=<n>` | Radio chip state dump. |
+| `R<secs>`, e.g. `R120` | `# survey on secs=120 floor=-104.0 thr=-96.0`, then per burst `RAWB <n> <rssi>`, `RAW <n> +<us> -<us> ...`, `RAWE <n> <runs>`; finally `# survey off bursts=<n>` | Raw survey for unknown dialects (1–600 s, `R0` ends it early). The radio switches to raw bit mode, so it hears any 2-FSK signal at this frequency and bit rate range, whatever its sync word and framing. Each burst louder than the noise floor + 8 dB is sent as run lengths of the demodulated bits (sign = level, value = µs). Packet reception, auto-ack and transmit (`TXERR survey active`) are off until the survey ends. |
+
+Unprompted lines:
+
+- `RX <micros> <rssi_dbm> <lqi> <crc_ok> <hex>`: a received frame, bytes as on
+  air. `crc_ok` is 1 when the frame's CRC is valid in the current dialect.
+- `ACK <micros> <hex>`: an auto-ack the gateway sent, bytes as on air.
+- `# rxreset n=<count>`, `# uart overrun`: receiver recovery, and command
+  input lost because it arrived too fast.
+
+Dialects (`Y`):
+
+| | Dialect A (`Y0`, default) | Dialect B (`Y1`) |
+|---|---|---|
+| Sync word | 2DE5 | 2DD4 |
+| Byte 0 | total length minus 3 | total length |
+| Scrambling | PN9 keystream (FF 87 B8 59 ...) | none |
+| CRC | CRC-16/CCITT, init 0x1D0F, final XOR 0xFFFF, over the descrambled bytes | CRC-16/MODBUS (0xA001 reflected, init 0xFFFF) |
+| Auto-ack on air | `05 <net> <id> <src> 80 <crc>`, scrambled | `08 <net> <id> <src> 80 <crc>` |
+
+In both, the CRC covers bytes 0 to total-3 and is sent high byte first.
+Auto-ack fires only for a frame with a valid CRC, addressed to our station id,
+with flags 00.
+
+Every new connection resets the gateway to its defaults: dialect A, network
+0000 (none until `N` sets it), station id 01, auto-ack off,
+869.525 MHz. Send `Y`, `N`, `I` and `A1`
+again after each connect.

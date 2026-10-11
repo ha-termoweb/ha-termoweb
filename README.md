@@ -16,6 +16,8 @@
 
 Control your **TermoWeb**, **Ducaheat**, or **Tevolve** electric heaters and thermostats in **Home Assistant** — from the HA app, automations, scenes, and voice assistants.
 
+**New: no cloud needed.** With a small 868 MHz radio (a USB stick or a home-built gateway), Home Assistant talks to your heaters directly. See [Local-first](#local-first-no-cloud-no-vendor-gateway).
+
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ha-termoweb&repository=ha-termoweb&category=integration)
 [![Open your Home Assistant instance and start setting up the integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=termoweb)
 
@@ -26,7 +28,65 @@ Control your **TermoWeb**, **Ducaheat**, or **Tevolve** electric heaters and the
 
 ## Who is this for?
 
-For someone who runs Home Assistant and already uses the **TermoWeb**, **Tevolve** or **Ducaheat** mobile app to manage their electric heaters. They want to see and control those heaters in Home Assistant, use automations, and enable voice control. The manufacturer’s app doesn’t integrate with HA — this add-on provides the missing link.
+For someone who runs Home Assistant and has **TermoWeb**, **Tevolve** or **Ducaheat** family electric heaters. They want to see and control those heaters in Home Assistant, use automations, and enable voice control. The manufacturer’s app doesn’t integrate with HA — this integration provides the missing link.
+
+You can connect in two ways:
+
+- **Local radio (recommended):** no cloud, no account, no vendor gateway. See the next section.
+- **Cloud account:** you already use the TermoWeb, Tevolve or Ducaheat app with the vendor's Wi-Fi gateway.
+
+---
+
+## Local-first: no cloud, no vendor gateway
+
+Your heaters talk to each other over a small **868 MHz radio**. Normally the vendor's Wi-Fi gateway listens to this radio and sends everything to the vendor's cloud. The app then talks to the cloud.
+
+With a **local radio**, Home Assistant talks to your heaters **directly**. Nothing goes through the internet.
+
+**Why local?**
+
+- **Private.** No cloud account. Your heating data, temperatures and times when you are at home stay in your home.
+- **Cheaper.** The vendor's Wi-Fi gateway costs **at least about €130**. A nanoCUL USB stick costs about **€25 to €60**. A home-built ESP32 gateway costs about **€20 to €40** in parts.
+- **Works without internet.** Your heaters keep working in Home Assistant when your internet or the vendor's cloud is down.
+- **Direct.** Changes go straight to the heater, not through a server on the internet.
+
+**Choose your radio:**
+
+| | Vendor Wi-Fi gateway + cloud | nanoCUL USB stick | ESP32 + CC1101 gateway |
+|---|---|---|---|
+| Cost | at least about €130 | about €25 to €60 | about €20 to €40 (parts) |
+| Soldering | no | no | yes, a little (antenna, sometimes pins) |
+| Internet needed | yes, always | no | no (only your home Wi-Fi) |
+| Account needed | yes | no | no |
+| Privacy | data goes to the vendor's cloud | stays at home | stays at home |
+| Setup effort | easy (app + sign in) | easy: put our firmware on the stick once, in your browser (about 10 min), plug in | advanced: wiring, soldering, put our firmware on the board in your browser (1 to 2 hours) |
+| Where it sits | next to your router | in a USB port of the Home Assistant computer | anywhere with Wi-Fi and power |
+| Guide | below: [Set up the integration](#set-up-the-integration) | [Radio stick: use a nanoCUL USB stick](docs/radio_nanocul.md) | [Radio gateway: build your own with an ESP32](docs/radio_gateway.md) |
+
+Prices checked on 2026-10-11 at European shops. They change. The guides list shops and current prices.
+
+**Which one should I pick?**
+
+- You want it simple, and you do not want to solder: take the **nanoCUL USB stick**.
+- Your Home Assistant computer is far from the heaters: take the **ESP32 gateway**. It only needs Wi-Fi and a USB power supply, so you can put it in a central place.
+
+Both radios work with the same heaters. You do not need to know how your heaters talk: the setup finds out by itself.
+
+**How to start with a local radio:**
+
+1. **Buy** the hardware. The guides list what to buy and where.
+2. **Put our firmware on it.** Everyone does this once: no shop sells the stick or the board with our firmware on it. The easiest way is in your web browser (Chrome or Edge), with a few clicks. The guides show every step.
+3. **Plug it in.** The nanoCUL goes into a USB port of the Home Assistant computer. The ESP32 gateway needs a USB power supply and your Wi-Fi.
+4. **Add it in Home Assistant** (see [Set up the integration](#set-up-the-integration)). Your heaters are then found by themselves.
+
+**Good to know:**
+
+- The local radio is tested with **ATC Sun Ray** heaters. Other heaters on the TermoWeb 868 MHz radio may work. Ducaheat and Tevolve heaters are not tested over the radio yet.
+- Setup is automatic. Home Assistant finds the ESP32 gateway by itself and pre-selects the nanoCUL port. Heaters pair by themselves within 30 minutes of adding the radio, or after you press **Pair new heaters**. Each heater's power is read from the heater. You do not type a network id.
+- You can keep the vendor's gateway, or remove it. Without it, the vendor's app no longer works.
+- Some cloud features do not exist on the radio, for example the **energy history import** (the heaters store no history). Energy is **estimated** from each heater's power and heating time. See [what works over the radio](docs/radio_backend.md#cloud-features-and-what-radio-users-see).
+- The radio **transmits** on 869.525 MHz (European short-range-device band, about 10 mW). You are the operator of the transmitter. See the [radio notice](docs/radio_gateway.md#radio-notice).
+- Want the technical details of the heaters' radio? See [docs/radio_protocol.md](docs/radio_protocol.md).
 
 ---
 
@@ -80,16 +140,17 @@ If your dashboard shows a preset label, **temporary override** means: “Use thi
 
 ## What you’ll need
 
-- **Cloud account:** a working TermoWeb setup (gateway connected to the router, heaters paired) and the **account email & password** (the same used in the mobile app / web). Home Assistant needs internet access.
-- **Local radio (no cloud):** a nanoCUL USB stick (easiest) or a home-built ESP32 radio gateway. No account and no internet access needed.
 - Home Assistant **2026.10.0 or newer** (Core, OS, or Container). HACS will not install the integration on an older version. Update Home Assistant first.
+- One of these:
+  - **Local radio (no cloud, recommended):** a nanoCUL USB stick (easiest, no soldering) or a home-built ESP32 radio gateway (advanced). No account, no vendor gateway, and no internet access needed. See [Local-first](#local-first-no-cloud-no-vendor-gateway).
+  - **Cloud account:** a working TermoWeb setup (vendor gateway connected to the router, heaters paired) and the **account email & password** (the same used in the mobile app / web). Home Assistant needs internet access.
 
 ---
 
-## The bad news
+## Cloud or local: what to expect
 
-- With a **cloud account**, the integration is **Internet dependent**: all interaction with the heaters goes through the vendor's cloud backend. The vendor's Wi-Fi gateway is a proprietary "black box", so Home Assistant cannot talk to it directly.
-- **Local control without the cloud is possible** with your own radio: a **nanoCUL USB stick** (easiest, no soldering) or a home-built **ESP32 radio gateway** (advanced, needs soldering). See the setup steps below.
+- With a **cloud account**, the integration **depends on the internet**: all interaction with the heaters goes through the vendor's cloud. The vendor's Wi-Fi gateway is a closed "black box", so Home Assistant cannot talk to it directly. If the cloud is down, your heaters show **unavailable** in Home Assistant.
+- With a **local radio**, Home Assistant talks to the heaters directly. No internet, no cloud. A few cloud-only features are missing: see [Local-first](#local-first-no-cloud-no-vendor-gateway).
 
 ---
 
@@ -114,17 +175,17 @@ If your dashboard shows a preset label, **temporary override** means: “Use thi
 ---
 
 ## Set up the integration
-ha-termoweb/ha-termoweb
+
 1) In Home Assistant go to **Settings → Devices & Services → Add Integration** and search **TermoWeb**,
    or click:
    [![Open your Home Assistant instance and start setting up the integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=termoweb)
 2) Choose how your heaters connect:
-   - **Cloud account**: you use the TermoWeb, Ducaheat or Tevolve app. Go to step 3.
-   - **Local radio: nanoCUL USB stick** (easiest, no soldering): you have a nanoCUL plugged into the Home Assistant computer.
-     The stick is usually already selected. Follow [Radio stick: use a nanoCUL USB stick](docs/radio_nanocul.md), step 3, then go to step 6.
-   - **Local radio gateway** (advanced, needs soldering): you built the ESP32 radio gateway. You usually do not need this menu:
+   - **Local radio: nanoCUL USB stick** (easiest, no soldering): you have a nanoCUL with our `termoweb_rx` firmware on it (see [step 2 of the nanoCUL guide](docs/radio_nanocul.md#step-2-put-the-termoweb_rx-firmware-on-the-stick)), plugged into the Home Assistant computer.
+     The stick is usually already selected. Follow [Radio stick: use a nanoCUL USB stick](docs/radio_nanocul.md), step 4, then go to step 6.
+   - **Local radio gateway** (advanced, needs soldering): you built the ESP32 radio gateway and put our firmware on it (see [step 4 of the ESP32 guide](docs/radio_gateway.md#step-4-put-the-firmware-on-the-esp32)). You usually do not need this menu:
      Home Assistant finds the gateway by itself and shows it under **Discovered**. Follow
-     [Radio gateway: build your own with an ESP32](docs/radio_gateway.md), step 5, then go to step 6.
+     [Radio gateway: build your own with an ESP32](docs/radio_gateway.md), step 6, then go to step 6.
+   - **Cloud account**: you use the TermoWeb, Ducaheat or Tevolve app with the vendor's gateway. Go to step 3.
 3) Choose your **Brand**. This picks the correct backend automatically, so you do **not** need to enter a portal URL manually.
 4) Enter the account **Email** used for the TermoWeb / Ducaheat / Tevolve app.
 5) Enter the account **Password**.
@@ -214,10 +275,19 @@ See instructions in custom_components/termoweb/assets, to install the card and c
   5. To import the whole period again, turn on **Reset progress**. The old statistics are overwritten in place. Nothing is deleted.
 - What you will see: in **Settings → Dashboards → Energy**, the past days fill in with hourly values. The totals continue without a jump at the point where the import ends. The numbers can take a few minutes to show after the import ends.
 - No extra configuration is required beyond selecting the sensors in the Energy Dashboard.
+- **With a local radio:** energy is **estimated** from each heater's power and the time it heats (within a few percent of a house meter in our tests). It starts at 0 when Home Assistant starts. There is no history to import: the heaters do not store it, so the import action does nothing on the radio.
 
 ---
 
 ## Troubleshooting
+
+**Local radio (nanoCUL or ESP32):**
+
+- **No heater is found:** Turn one heater's temperature up so that it starts heating. Move the radio closer to a heater. Check that your radio is the **868 MHz** version. Or pair the heater: press **Pair new heaters** and put the heater into pairing mode.
+- **"The firmware on this nanoCUL stick is too old":** put the new firmware on the stick. See [step 2 of the nanoCUL guide](docs/radio_nanocul.md#step-2-put-the-termoweb_rx-firmware-on-the-stick).
+- **More help:** see troubleshooting in the [nanoCUL guide](docs/radio_nanocul.md#troubleshooting) and the [ESP32 guide](docs/radio_gateway.md#troubleshooting).
+
+**Cloud account:**
 
 - **Login fails:** First confirm credentials at the TermoWeb website (control.termoweb.net / control2.termoweb.net).
 - **No devices found:** Check the **gateway** is powered and online (LEDs), and that the manufacturer app shows heaters online.
@@ -232,8 +302,9 @@ See instructions in custom_components/termoweb/assets, to install the card and c
 
 ## Privacy & Security
 
-- Credentials stay in Home Assistant.  
-- Access tokens are **redacted** from logs.
+- **Local radio:** no account, no cloud. Nothing about your heaters leaves your home network.
+- **Cloud account:** credentials stay in Home Assistant. Access tokens are **redacted** from logs. The vendor's cloud still sees your heater data, because the vendor's gateway sends it there.
+- Diagnostics downloads remove your account, gateway id and location.
 - This project is **not affiliated** with S&P, ATC, Ecotermi/Linea Plus, EHC, or TermoWeb.
 
 ---
@@ -271,6 +342,20 @@ implementation details for contributors.
 See DEBUG.md for information on how to turn on debugging, and download logs and diagnostics.
 
 
+## Contributors
+
+Thank you to everyone who made this integration possible.
+
+| Who | Contribution |
+|---|---|
+| [Andrew Morgan (@morganand)](https://github.com/morganand) | Maintainer. Cloud integration, radio backend, testing on real heaters. |
+| [Andre Faria (@andremmfaria)](https://github.com/andremmfaria) | Author of [ha-termoweb-local](https://github.com/ha-termoweb/ha-termoweb-local): the original work on the heaters' 868 MHz radio protocol, the `termoweb_rx` nanoCUL firmware and the first local-radio integration. The radio backend and nanoCUL firmware in this repository build on that work. |
+| [@harsh04081997](https://github.com/harsh04081997) | Code contributions to the cloud integration. |
+| [Anthropic Claude](https://www.anthropic.com/claude) | AI assistant: code writing, code review, testing and research. |
+| [OpenAI Codex](https://openai.com/codex/) | AI assistant: code writing and research. |
+
+Want to help? Bug reports, heater captures from other brands and pull requests are welcome. See [Development](#development).
+
 ## Search keywords
 
-*Home Assistant TermoWeb, TermoWeb heaters Home Assistant, ATC radiators, S&P TermoWeb Home Assistant, Soler & Palau TermoWeb, Ecotermi TermoWeb, Linea Plus TermoWeb, Electric Heating Company eco SAVE Home Assistant, eco SAVE Smart Gateway Home Assistant*
+*Home Assistant TermoWeb, TermoWeb heaters Home Assistant, ATC radiators, S&P TermoWeb Home Assistant, Soler & Palau TermoWeb, Ecotermi TermoWeb, Linea Plus TermoWeb, Electric Heating Company eco SAVE Home Assistant, eco SAVE Smart Gateway Home Assistant, TermoWeb without cloud, TermoWeb local control, nanoCUL 868 TermoWeb, ESP32 CC1101 868 MHz heaters, Sun Ray heaters local*

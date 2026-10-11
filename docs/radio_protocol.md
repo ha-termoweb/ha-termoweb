@@ -653,5 +653,3 @@ the form byte, dialect-A `77` announcements after the marker) with `XX`,
 drops `air`, and removes network ids and hex runs from `raw` lines and the
 `gateway` line. Every other payload byte stays. Without `redact` the file
 contains the network id, so testers share it privately.
-
-The tester guide is [Help find the identify command](radio_identify_capture.md).
