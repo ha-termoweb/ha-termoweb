@@ -86,6 +86,10 @@ def test_toggles_and_simple_payloads() -> None:
     """Toggles, confirmations, verdicts and requests are fixed byte strings."""
     assert p.set_toggle(p.TOGGLE_BOOST, True) == b"\xd2\x01"
     assert p.set_toggle(p.TOGGLE_LOCK, False) == b"\xba\x00"
+    assert p.set_toggle(p.TOGGLE_RUNBACK, True) == b"\xd4\x01"
+    assert p.set_toggle(p.TOGGLE_EASY, False) == b"\xd6\x00"
+    for opcode in (p.TOGGLE_BOOST, p.TOGGLE_RUNBACK, p.TOGGLE_EASY):
+        assert p.reply_verdict(bytes([opcode + 1, 0x55]), opcode) is True
     with pytest.raises(ValueError, match="toggle"):
         p.set_toggle(0xB4, True)
     assert p.confirm_report() == b"\x57\x55"

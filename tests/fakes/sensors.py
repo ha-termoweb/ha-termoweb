@@ -90,12 +90,12 @@ def fake_radio_links(
 
 
 def radio_entry(
-    brand: str, nodes: list[dict[str, Any]] | None = None
+    brand: str, nodes: list[dict[str, Any]] | None = None, dialect: str = "B"
 ) -> MockConfigEntry:
     """Return a radio gateway (``radio``) or listen-only (``radio_monitor``) entry."""
     data: dict[str, Any] = {"brand": brand, "host": "10.0.0.5", "port": 2323}
     if nodes is not None:
-        data.update(dialect="B", network_id="1234", nodes=nodes)
+        data.update(dialect=dialect, network_id="1234", nodes=nodes)
     return MockConfigEntry(
         domain=DOMAIN, minor_version=2, unique_id=f"{brand}:test", data=data
     )

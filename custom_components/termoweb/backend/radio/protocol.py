@@ -35,10 +35,11 @@ OP_REPORT = 0x56  # leading marker of every unsolicited report
 OP_FLASH_DISPLAY = 0x5E
 OP_WRITE_PARAMETER = 0xC8  # C8 <two argument bytes>; reply C9 55
 
-TOGGLE_BOOST = 0xD2
+TOGGLE_BOOST = 0xD2  # boost for the heater's own boost time; payload masked to 1 bit
+TOGGLE_RUNBACK = 0xD4  # forces manual at the anti-frost setpoint; off restores nothing
+TOGGLE_EASY = 0xD6  # forces manual, setpoint unchanged; off restores the mode
 TOGGLE_LOCK = 0xBA
-# D4 (runback) and D6 (EASY) toggle the same way; the integration never sends them.
-TOGGLE_OPCODES = frozenset({TOGGLE_BOOST, TOGGLE_LOCK})
+TOGGLE_OPCODES = frozenset({TOGGLE_BOOST, TOGGLE_RUNBACK, TOGGLE_EASY, TOGGLE_LOCK})
 
 SUB_SETPOINT = 0x02
 SUB_OVERRIDE = 0x03
@@ -126,8 +127,10 @@ SETPOINT_MODES = frozenset({MODE_MANUAL, MODE_OVERRIDE})
 
 FLAG_ACTIVE = 0x01
 FLAG_LOCKED = 0x02
-# Unused here: 04 presence, 08 window open, 10 true radiant, 20 boost, 40 EASY,
-# 80 runback.
+FLAG_BOOST = 0x20
+FLAG_EASY = 0x40
+FLAG_RUNBACK = 0x80
+# Unused here: 04 presence, 08 window open, 10 true radiant.
 
 MIN_SETPOINT_C = 7.0
 MAX_SETPOINT_C = 35.0

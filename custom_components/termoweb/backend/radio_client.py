@@ -19,6 +19,7 @@ from typing import Any, cast
 from homeassistant.util import dt as dt_util
 
 from custom_components.termoweb.codecs.radio_codec import (
+    MODE_FROM_RADIO,
     prog_from_program,
     settings_from_power_record,
     settings_from_status,
@@ -195,6 +196,8 @@ class RadioClient:
         self._programs: dict[int, tuple[float, list[int] | None]] = {}
         self._locks: dict[int, bool] = {}  # last lock written, for records without it
         self._manual_setpoints: dict[int, float] = {}  # last manual target seen
+        # Mode code and target before runback, written back when it is switched off.
+        self._runback_restore: dict[int, tuple[int, float | None]] = {}
         self._identities_read: set[int] = set()  # heaters whose 5A reply decoded
         self._identity_failures: dict[int, float] = {}  # last unanswered 5A read
         self._energy_counters: dict[int, int] = {}  # last dialect-A Wh counter read
@@ -488,6 +491,7 @@ class RadioClient:
         self._locks.pop(addr, None)
         self._energy_counters.pop(addr, None)
         self._energy_reads.pop(addr, None)
+        self._runback_restore.pop(addr, None)
 
     # --- radio exchanges -----------------------------------------------------
 
@@ -618,17 +622,6 @@ class RadioClient:
             raise ValueError(f"Invalid node descriptor: {node!r}")
         return normalized_type, radio_addr(normalized_addr)
 
-    def _node_type_for(self, addr: int) -> str | None:
-        """Return the stored node type for radio id ``addr``."""
-
-        for node in self._nodes:
-            try:
-                if radio_addr(node.get("addr")) == addr:
-                    return normalize_node_type(node.get("type")) or None
-            except ValueError:
-                continue
-        return None
-
     async def _read_status(self, addr: int) -> protocol.StatusRecord:
         """Return the heater's decoded ``B8`` status; raise on no ack or reply."""
 
@@ -744,7 +737,7 @@ class RadioClient:
         except (RadioLinkError, RadioCommandError) as err:
             _LOGGER.debug("Status read from heater %s failed: %s", addr, err)
             return None
-        settings = settings_from_status(record)
+        settings = settings_from_status(record, _local_now())
         prog = await self._program(addr)
         if prog is not None:
             settings["prog"] = prog
@@ -827,16 +820,84 @@ class RadioClient:
         stemp: float | None = None,
         units: str | None = None,
     ) -> None:
-        """Toggle a heater's boost (``D2``); accumulator boost is not known on radio."""
+        """Raise: accumulator boost is not known on radio (heaters: set_node_boost)."""
 
-        radio_id = radio_addr(addr)
-        if self._node_type_for(radio_id) != "htr":
-            raise RadioUnsupportedError("Accumulator boost")
-        if boost_time is not None or stemp is not None:
-            _LOGGER.debug(
-                "Heater %s boost uses its own duration and temperature", radio_id
+        raise RadioUnsupportedError("Accumulator boost")
+
+    def _require_toggles(self) -> None:
+        """Raise RadioUnsupportedError unless this dialect has the heater toggles."""
+
+        if not self._dialect.heater_toggles:
+            raise RadioUnsupportedError(
+                f"Boost, runback and EASY in dialect {self._dialect.name}"
             )
-        await self._write(radio_id, protocol.set_toggle(protocol.TOGGLE_BOOST, boost))
+
+    async def _toggle(self, node: NodeDescriptor, opcode: int, on: bool) -> int:
+        """Send a ``D2``/``D4``/``D6`` toggle, verified ``<op+1> 55``; return the id."""
+
+        self._require_toggles()
+        _node_type, addr = self._resolve_node(node)
+        await self._write(addr, protocol.set_toggle(opcode, on))
+        return addr
+
+    async def set_node_boost(
+        self, dev_id: str, node: NodeDescriptor, *, boost: bool
+    ) -> None:
+        """Start or cancel a heater's boost (``D2``); it uses its own time and temperature."""
+
+        addr = await self._toggle(node, protocol.TOGGLE_BOOST, boost)
+        _LOGGER.info("Heater %s boost %s", addr, "started" if boost else "cancelled")
+
+    async def set_node_easy(
+        self, dev_id: str, node: NodeDescriptor, *, easy: bool
+    ) -> None:
+        """Switch a heater's EASY mode (``D6``): manual heat; off restores the mode."""
+
+        addr = await self._toggle(node, protocol.TOGGLE_EASY, easy)
+        _LOGGER.info("Heater %s EASY mode %s", addr, "on" if easy else "off")
+
+    async def set_node_runback(
+        self, dev_id: str, node: NodeDescriptor, *, runback: bool
+    ) -> None:
+        """Switch a heater's runback (``D4``), restoring its mode and target afterwards.
+
+        Runback forces manual heat at the anti-frost setpoint and does not undo
+        that when switched off, so the mode and target seen before it are
+        written back (a program-mode or off heater also gets its last manual
+        target back first, when one is known).
+        """
+
+        self._require_toggles()
+        _node_type, addr = self._resolve_node(node)
+        if not runback:
+            await self._toggle(node, protocol.TOGGLE_RUNBACK, False)
+            before = self._runback_restore.pop(addr, None)
+            if before is not None:
+                await self._restore_after_runback(addr, *before)
+            _LOGGER.info("Heater %s runback off", addr)
+            return
+        status = await self._read_status(addr)
+        await self._toggle(node, protocol.TOGGLE_RUNBACK, True)
+        already = bool((status.flags or 0) & protocol.FLAG_RUNBACK)
+        if status.mode_code in MODE_FROM_RADIO and not already:
+            self._runback_restore[addr] = (status.mode_code, status.setpoint_c)
+        _LOGGER.info("Heater %s runback on", addr)
+
+    async def _restore_after_runback(
+        self, addr: int, mode_code: int, setpoint_c: float | None
+    ) -> None:
+        """Write back the mode and target a heater had before runback."""
+
+        mode = MODE_FROM_RADIO[mode_code]
+        if mode in ("manual", "modified_auto") and setpoint_c is not None:
+            await self._write_settings(addr, mode=mode, stemp=setpoint_c)
+            return
+        manual = self._manual_setpoints.get(addr)
+        if manual is not None and mode != "manual":
+            await self._write_settings(addr, mode="manual", stemp=manual)
+        await self._write_settings(
+            addr, mode="auto" if mode == "modified_auto" else mode
+        )
 
     async def set_node_lock(
         self, dev_id: str, node: NodeDescriptor, *, lock: bool

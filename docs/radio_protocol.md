@@ -104,7 +104,7 @@ A reply's first payload byte is the request opcode + 1. A two-byte
 | `B6 <af> <eco> <comfort> <mode> [<setpoint>]` | station → heater | presets plus mode (01 program / 02 manual / 03 temporary override / 04 off), and for 02/03 the target setpoint in half degrees; dialect B's only mode and setpoint write, reply `B7 55`. Mode 03 ends at the next program change. | ? | B |
 | `B2` + 84 bytes | station → heater | weekly program write, 48 slots/day, Sunday first, reply `B3 55` | A | rejected |
 | `B2` + 42 bytes | station → heater | weekly program write, 24 slots/day, same layout as the `B1` read, reply `B3 55` | ? | B |
-| `D2` / `D4` / `D6` / `BA` `01|00` | station → heater | boost / runback / EASY / keypad lock toggles, reply `<op+1> 55` | A | ? |
+| `D2` / `D4` / `D6` / `BA` `01|00` | station → heater | boost / runback / EASY / keypad lock toggles, reply `<op+1> 55`; see [heater toggles](#heater-toggles-dialect-a) | A | `BA` acked; `D2` → `D3 00 00`, `D6` → `D7 19`, `D4` ack only, no effect seen |
 | `C4` + 8 bytes | station → heater | advanced setup record, reply `C5 55/56` | A | ? |
 | `5E 01` | station → heater | flash display, reply `5F 55` (dialect B: ack only; what a real gateway sends for "identify" in dialect B is not yet captured, see section 10) | A | B (acked) |
 | `57 55` | station → heater | confirm a `56 ..` report | A | ? |
@@ -168,6 +168,21 @@ The fields were checked against a whole-house energy meter during a heat test:
   target in override (`2C` = 22.0 °C manual, `25` = 18.5 °C night slot).
 - The record carries no power value. An earlier reading of bytes 3–4 as
   deciwatts (`2C F0` ≈ 1150 W) was a coincidence of the 22.0 °C setpoint.
+
+### Heater toggles (dialect A)
+
+As implemented by ha-termoweb-local. Each toggle is `<op> 01` (on) or
+`<op> 00` (off), answered `<op+1> 55`; the status flags report the result.
+
+| Toggle | Reply | Flag | Effect |
+|---|---|---|---|
+| `D2` boost | `D3 55` | `20` | Boost for the heater's own boost time and temperature (not in the payload; only bit 0 of the payload counts). The E3/E4 status tail carries the boost end. |
+| `D4` runback | `D5 55` | `80` | Forces manual heat at the anti-frost setpoint. Off does not restore the previous mode or setpoint, so the integration writes back what it read before. |
+| `D6` EASY | `D7 55` | `40` | Forces manual heat, setpoint unchanged; off restores the previous mode. |
+
+Runback and boost can be set together (flags `A0`). Dialect B answers these
+toggles without any visible effect (see the table above), so the integration
+does not offer them there (`Dialect.heater_toggles`).
 
 ### Energy counter (dialect A)
 

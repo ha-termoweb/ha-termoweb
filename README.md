@@ -61,6 +61,7 @@ Tevolve-branded heaters use the same backend as the Ducaheat app. If you manage 
 - Add energy sensors to the HA energy dashboard so you can see current and historical use/cost.
 - Monitor thermostat battery level so you know when wireless controllers need attention.
 - Track accumulator charging status and charge targets to understand storage heater behaviour.
+- With a local radio and heaters of radio type A: start a **boost** (choose the **Boost** preset on the heater), and switch **Runback** and **EASY mode** on or off. The boost uses the heater's own boost time. Turning Runback off gives the heater back its mode and temperature from before.
 - Use HA **automations**, **scenes**, and **voice assistants** (including HA’s Google/Alexa integrations).
 
 ### Climate mode behavior (important)

@@ -40,6 +40,36 @@ POWER_RECORD_HEATING = bytes.fromhex("BDDB002CE43A0C0100")  # granted, heating
 CLOCK_ACCEPTED = bytes.fromhex("5355")
 
 
+def status_a(
+    flags: int, mode: int = 0x02, setpoint_c: float = 21.0, tail: bytes = b""
+) -> bytes:
+    """Return a synthetic dialect-A E6 (or E4, with a boost ``tail``) status reply.
+
+    Presets 16.5/18.5/21.0, room 20.4 C, measured power 1150.4 W, duty 0.
+    """
+
+    return (
+        bytes.fromhex("B921252A")
+        + bytes([mode, 0x00, 0xCC, round(setpoint_c * 2), 0x2C, 0xF0, 0x00, flags])
+        + b"\x00\xff"
+        + tail
+    )
+
+
+def dialect_a_heater(status: bytes) -> Callable[[Any], None]:
+    """Return a link script: a heater answering ``status``, clock syncs and toggles."""
+
+    def _script(link: Any) -> None:
+        """Script the heater's replies on ``link``."""
+        link.reply(0xB8, status)
+        link.reply(0x52, CLOCK_ACCEPTED)
+        link.reply(0xBC, bytes.fromhex("BD00000010"))
+        for opcode in (0xB4, 0xD2, 0xD4, 0xD6):
+            link.reply(opcode, bytes([opcode + 1, 0x55]))
+
+    return _script
+
+
 def build_ack(
     dialect: Dialect, acker: int, sender: int, network_id: bytes | None = None
 ) -> bytes:

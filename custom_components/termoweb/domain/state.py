@@ -61,6 +61,10 @@ class HeaterState:
     batt_level: int | None = None
     lock: bool | None = None
     priority: int | None = None
+    boost_active: bool | None = None
+    boost_end_datetime: Any | None = None
+    runback: bool | None = None  # radio heaters: forced anti-frost manual mode
+    easy: bool | None = None  # radio heaters: EASY mode (forced manual heat)
 
 
 @dataclass(slots=True)
@@ -71,13 +75,11 @@ class AccumulatorState(HeaterState):
     charging: bool | None = None
     current_charge_per: int | float | None = None
     target_charge_per: int | float | None = None
-    boost_active: bool | None = None
     boost_remaining: float | int | None = None
     boost_time: int | float | None = None
     boost_temp: Any | None = None
     boost_end_day: int | None = None
     boost_end_min: int | None = None
-    boost_end_datetime: Any | None = None
     boost_minutes_delta: int | None = None
 
 
@@ -243,6 +245,19 @@ def _populate_heater_state(
             state.lock = None
     if "priority" in payload:
         state.priority = as_int(payload.get("priority"))
+    return _populate_heater_modes(state, payload)
+
+
+def _populate_heater_modes(
+    state: HeaterState, payload: Mapping[str, typing.Any]
+) -> HeaterState:
+    """Populate the boost, runback and EASY fields on ``state`` from ``payload``."""
+
+    for flag in ("boost_active", "runback", "easy"):
+        if flag in payload:
+            setattr(state, flag, as_bool(payload.get(flag)))
+    if "boost_end_datetime" in payload:
+        state.boost_end_datetime = payload.get("boost_end_datetime")
     return state
 
 
@@ -266,8 +281,6 @@ def _populate_accumulator_fields(
         state.current_charge_per = as_number(payload.get("current_charge_per"))
     if "target_charge_per" in payload:
         state.target_charge_per = as_number(payload.get("target_charge_per"))
-    if "boost_active" in payload:
-        state.boost_active = payload.get("boost_active")
     if "boost_remaining" in payload:
         state.boost_remaining = as_number(payload.get("boost_remaining"))
     if "boost_time" in payload:
@@ -278,8 +291,6 @@ def _populate_accumulator_fields(
         state.boost_end_day = payload.get("boost_end_day")
     if "boost_end_min" in payload:
         state.boost_end_min = payload.get("boost_end_min")
-    if "boost_end_datetime" in payload:
-        state.boost_end_datetime = payload.get("boost_end_datetime")
     if "boost_minutes_delta" in payload:
         state.boost_minutes_delta = payload.get("boost_minutes_delta")
     return state

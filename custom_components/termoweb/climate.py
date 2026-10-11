@@ -67,6 +67,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     dev_id = runtime.dev_id
 
     inventory = runtime.inventory
+    heater_boost = runtime.backend.features.heater_toggles
 
     def default_name_simple(addr: str) -> str:
         """Return fallback name for heater nodes."""
@@ -105,13 +106,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
             node_key(inventory, canonical_type, addr),
             suffix=":climate",
         )
-        entity_cls: type[HeaterClimateEntity]
         if canonical_type == "acm" or supports_boost(node):
-            entity_cls = AccumulatorClimateEntity
-        else:
-            entity_cls = HeaterClimateEntity
-        new_entities.append(
-            entity_cls(
+            entity: HeaterClimateEntity = AccumulatorClimateEntity(
                 coordinator,
                 entry.entry_id,
                 dev_id,
@@ -121,7 +117,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 node_type=canonical_type,
                 inventory=heater_details.inventory,
             )
-        )
+        else:
+            entity = HeaterClimateEntity(
+                coordinator,
+                entry.entry_id,
+                dev_id,
+                addr,
+                base_name,
+                unique_id,
+                node_type=canonical_type,
+                inventory=heater_details.inventory,
+                boost=heater_boost and canonical_type == "htr",
+            )
+        new_entities.append(entity)
 
     log_skipped_nodes("climate", heater_details, logger=_LOGGER)
     if new_entities:
@@ -204,9 +212,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
 
     async def _svc_start_boost(entity: HeaterClimateEntity, call: ServiceCall) -> None:
-        """Handle accumulator boost start service."""
+        """Handle the boost start service (accumulators and boost-capable heaters)."""
 
-        _require_accumulator(entity, "start_boost")
+        _require_boost(entity, "start_boost")
 
         _LOGGER.info(
             "entity-service termoweb.start_boost -> %s minutes=%s",
@@ -216,9 +224,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         await entity.async_start_boost(minutes=call.data.get("minutes"))
 
     async def _svc_cancel_boost(entity: HeaterClimateEntity, call: ServiceCall) -> None:
-        """Handle accumulator boost cancellation service."""
+        """Handle the boost cancel service (accumulators and boost-capable heaters)."""
 
-        _require_accumulator(entity, "cancel_boost")
+        _require_boost(entity, "cancel_boost")
 
         _LOGGER.info(
             "entity-service termoweb.cancel_boost -> %s",
@@ -259,6 +267,15 @@ def _require_accumulator(entity: HeaterClimateEntity, service: str) -> None:
         )
 
 
+def _require_boost(entity: HeaterClimateEntity, service: str) -> None:
+    """Raise ServiceValidationError when ``entity`` has no boost."""
+
+    if not isinstance(entity, AccumulatorClimateEntity) and not entity.heater_boost:
+        raise ServiceValidationError(
+            f"termoweb.{service} only applies to accumulators and heaters with boost"
+        )
+
+
 class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     """HA climate entity representing a single TermoWeb heater."""
 
@@ -287,9 +304,13 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         *,
         node_type: str | None = None,
         inventory: Inventory | None = None,
+        boost: bool = False,
     ) -> None:
-        """Initialise the climate entity for a TermoWeb heater."""
+        """Initialise the climate entity; ``boost`` offers the heater's own boost."""
         HeaterNode.__init__(self, name=name, addr=addr)
+        self._heater_boost = boost
+        if boost:
+            self._attr_preset_modes = ["none", "boost"]
 
         default_type = (
             normalize_node_type(
@@ -328,6 +349,12 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         self._pending_stemp: float | None = None
         self._write_task: asyncio.Task | None = None
         self._resume_mode: HVACMode | None = None
+
+    @property
+    def heater_boost(self) -> bool:
+        """Return True when this heater offers its own boost (preset and services)."""
+
+        return self._heater_boost
 
     async def async_will_remove_from_hass(self) -> None:
         """Clean up pending tasks when the entity is removed."""
@@ -432,9 +459,11 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     @property
     def preset_mode(self) -> str | None:
-        """Return the preset: temporary_override while an Auto override is active."""
+        """Return the preset: boost, or temporary_override while an Auto override runs."""
 
         state = self.heater_state()
+        if self._heater_boost and getattr(state, "boost_active", None):
+            return "boost"
         mode = (getattr(state, "mode", None) or "").lower()
         if not mode:
             return None
@@ -443,10 +472,51 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         return "none"
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Select preset ``none``: end a temporary override by resuming Auto."""
+        """Start or cancel boost, or end a temporary override by resuming Auto."""
 
-        if self.preset_mode == "temporary_override":
+        value = (preset_mode or "").lower()
+        current = self.preset_mode
+        if value == "boost":
+            if current != "boost":
+                await self.async_start_boost()
+        elif current == "boost":
+            await self.async_cancel_boost()
+        elif current == "temporary_override":
             await self.async_set_hvac_mode(HVACMode.AUTO)
+
+    async def async_start_boost(self, *, minutes: int | None = None) -> None:
+        """Start the heater's own boost; its duration and temperature are the heater's."""
+
+        if minutes is not None:
+            raise ServiceValidationError(
+                "This heater boosts for its own boost time; leave minutes out"
+            )
+        await self._async_set_boost(True)
+
+    async def async_cancel_boost(self) -> None:
+        """Cancel the heater's own boost."""
+
+        await self._async_set_boost(False)
+
+    async def _async_set_boost(self, boost: bool) -> None:
+        """Write the boost state and show it until the heater's next status."""
+
+        async def _call(client: Any) -> None:
+            await client.set_node_boost(
+                self._dev_id, (self._node_type, self._addr), boost=boost
+            )
+
+        await self._async_client_call(
+            log_context="Boost start" if boost else "Boost cancel", call=_call
+        )
+
+        def _apply(cur: DomainState) -> None:
+            cur.boost_active = boost
+            if not boost:
+                cur.boost_end_datetime = None
+
+        self._optimistic_update(_apply)
+        self._refresh_fallback.schedule()
 
     async def async_turn_on(self) -> None:
         """Turn on, restoring the mode used before the last turn off (else Auto)."""
@@ -532,6 +602,12 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             ptemp = getattr(state, "ptemp", None)
             if isinstance(ptemp, (list, tuple)) and 0 <= slot < len(ptemp):
                 attrs["program_setpoint"] = as_float(ptemp[slot])
+
+        if self._heater_boost:
+            boost_state = derive_boost_state_from_domain(state, self.coordinator)
+            attrs["boost_active"] = boost_state.active
+            attrs["boost_minutes_remaining"] = boost_state.minutes_remaining
+            attrs["boost_end"] = boost_state.end_iso
 
         return attrs
 

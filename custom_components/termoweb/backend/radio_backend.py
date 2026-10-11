@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 from datetime import datetime
 import logging
 from typing import Any
@@ -63,10 +64,21 @@ class RadioBackend(Backend):
         local_radio=True,
         options_flow=True,
         heater_discovery=True,
+        heater_toggles=True,
         web_portal=False,
         node_manufacturer=RADIO_NODE_MANUFACTURER,
         site_name=RADIO_SITE_NAME,
     )
+
+    @property
+    def features(self) -> BackendCapabilities:
+        """Return the capabilities the entry's radio dialect actually has."""
+
+        dialect = getattr(self.client, "dialect", None)
+        return replace(
+            self.capabilities,
+            heater_toggles=bool(getattr(dialect, "heater_toggles", False)),
+        )
 
     def diagnostics(self, entry_data: Mapping[str, Any]) -> dict[str, Any] | None:
         """Return the radio link facts."""

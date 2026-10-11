@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from custom_components.termoweb.backend.radio import protocol as p
@@ -51,9 +53,76 @@ def test_full_status_maps_room_setpoint_power_state_and_lock() -> None:
         "max_power": 1150.4,
         "state": "on",
         "lock": True,
+        "boost_active": False,
+        "runback": False,
+        "easy": False,
+        "boost_end_datetime": None,
     }
     idle = STATUS_E6[:-3] + bytes([0x00, 0x00, 0xFF])
     assert codec.settings_from_status(p.decode_status(idle))["state"] == "off"
+
+
+def _e4(flags: int, tail: bytes) -> bytes:
+    """Return a 16-byte E4 status reply with ``flags`` and a 2-byte boost tail."""
+
+    return STATUS_E6[:-3] + bytes([flags, 0x00, 0xFF]) + tail
+
+
+@pytest.mark.parametrize(
+    ("flags", "boost", "runback", "easy", "lock", "state"),
+    [
+        (0x20, True, False, False, False, "off"),  # boost alone (D2)
+        (0x02, False, False, False, True, "off"),  # lock alone: not heating
+        (0xA0, True, True, False, False, "off"),  # runback and boost together
+        (0x41, False, False, True, False, "on"),  # EASY while heating
+    ],
+)
+def test_status_flags_map_boost_runback_and_easy(
+    flags, boost, runback, easy, lock, state
+) -> None:
+    """Flag bits 20 / 80 / 40 are boost / runback / EASY, each on its own."""
+
+    record = p.decode_status(STATUS_E6[:-3] + bytes([flags, 0x00, 0xFF]))
+    settings = codec.settings_from_status(record)
+    assert (
+        settings["boost_active"],
+        settings["runback"],
+        settings["easy"],
+        settings["lock"],
+        settings["state"],
+    ) == (boost, runback, easy, lock, state)
+
+
+def test_boost_tail_becomes_the_boost_end_in_local_time() -> None:
+    """Tail ``04 75`` is Sunday 19:01; it is placed in the coming week."""
+
+    friday = datetime(2026, 10, 9, 16, 52, 9)
+    record = p.decode_status(_e4(0x20, bytes.fromhex("0475")))
+    assert (record.boost_end_day, record.boost_end_min) == (0, 19 * 60 + 1)
+    settings = codec.settings_from_status(record, friday)
+    assert settings["boost_end_datetime"] == datetime(2026, 10, 11, 19, 1)
+    # Without a clock, or without an active boost, there is no end.
+    assert codec.settings_from_status(record)["boost_end_datetime"] is None
+    idle = p.decode_status(_e4(0x00, bytes.fromhex("0475")))
+    assert codec.settings_from_status(idle, friday)["boost_end_datetime"] is None
+    # A day beyond Saturday is not a weekday: ignored.
+    bad = p.decode_status(_e4(0x20, bytes.fromhex("8475")))
+    assert codec.settings_from_status(bad, friday)["boost_end_datetime"] is None
+
+
+@pytest.mark.parametrize(
+    ("day", "minute", "expected"),
+    [
+        (5, 17 * 60, datetime(2026, 10, 9, 17, 0)),  # later today (Friday)
+        (5, 16 * 60, datetime(2026, 10, 16, 16, 0)),  # earlier today: next week
+        (6, 0, datetime(2026, 10, 10, 0, 0)),  # tomorrow midnight
+        (4, 600, datetime(2026, 10, 15, 10, 0)),  # Thursday: wraps the week
+    ],
+)
+def test_boost_end_is_the_next_matching_weekday(day, minute, expected) -> None:
+    """Day 0 is Sunday; the end is never in the past."""
+
+    assert codec.boost_end(day, minute, datetime(2026, 10, 9, 16, 52, 9)) == expected
 
 
 @pytest.mark.parametrize(

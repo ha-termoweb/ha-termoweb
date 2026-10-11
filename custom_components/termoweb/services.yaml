@@ -77,11 +77,12 @@ set_acm_preset:
       example: 22.5
 
 start_boost:
-  name: Start accumulator boost
+  name: Start boost
   description: >-
-    Trigger an immediate boost on a TermoWeb accumulator. Provide a duration to
-    override the default (60–600 minutes in 60-minute increments), or omit it to
-    use the stored preset.
+    Start a boost now on a TermoWeb accumulator, or on a radio heater that has
+    boost. Accumulator: give a duration (60–600 minutes, in steps of 60), or
+    leave it out to use the stored preset. Radio heater: leave the duration
+    out; the heater boosts for its own boost time.
   target:
     entity:
       domain: climate
@@ -99,8 +100,8 @@ start_boost:
           unit_of_measurement: minutes
 
 cancel_boost:
-  name: Cancel accumulator boost
-  description: Cancel the active boost session on a TermoWeb accumulator.
+  name: Cancel boost
+  description: Stop the boost on a TermoWeb accumulator or radio heater.
   target:
     entity:
       domain: climate

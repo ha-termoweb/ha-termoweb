@@ -642,23 +642,135 @@ async def test_dialect_a_lock_needs_its_reply() -> None:
     assert "lock" not in await client.get_node_settings("dev", ("htr", "6"))
 
 
+NODE = ("htr", "6")
+# Dialect-A E6 status of heater 6 (synthetic): presets 16.5/18.5/21.0, room
+# 20.4, power 1150.4 W, idle; mode and setpoint vary per test.
+E6_HEAD = bytes.fromhex("B921252A")
+
+
+def e6(mode: int, setpoint_c: float, flags: int = 0x00) -> bytes:
+    """Return a dialect-A E6 status reply with ``mode``, setpoint and flags."""
+
+    return (
+        E6_HEAD
+        + bytes([mode, 0x00, 0xCC, round(setpoint_c * 2), 0x2C, 0xF0, 0x00, flags])
+        + b"\x00\xff"
+    )
+
+
+async def toggling_client(status: bytes):
+    """Return (client, link, clock): dialect A, the heater answers every toggle."""
+
+    client, links, clock = make_client("A", network_id=NET)
+    link = await client.async_connect()
+    link.reply(0xB8, status)
+    for opcode in (0xD2, 0xD4, 0xD6):
+        link.reply(opcode, bytes([opcode + 1, 0x55]))
+    return client, link, clock
+
+
 @pytest.mark.asyncio
-async def test_heater_boost_toggle_and_accumulator_boost_unsupported(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """D2 toggles a heater's boost; accumulators are not supported yet."""
+async def test_accumulator_boost_is_not_supported() -> None:
+    """Accumulator boost is unknown on radio; heater boost has its own method."""
 
-    client, links, _ = make_client()
-    await client.set_acm_boost_state("dev", "6", boost=True)
-    with caplog.at_level(logging.DEBUG, logger=rc.__name__):
-        await client.set_acm_boost_state("dev", 6, boost=False, boost_time=30)
-    assert links[0].payloads() == [b"\xd2\x01", b"\xd2\x00"]
-    assert "own duration" in caplog.text
-
+    client, links, _ = make_client("A", network_id=NET)
     with pytest.raises(RadioUnsupportedError, match="Accumulator boost"):
         await client.set_acm_boost_state("dev", "7", boost=True)
-    with pytest.raises(RadioUnsupportedError):
-        await client.set_acm_boost_state("dev", "9", boost=True)
+    with pytest.raises(RadioUnsupportedError, match="Accumulator boost"):
+        await client.set_acm_boost_state("dev", "6", boost=True)
+    assert links == []  # nothing connected, nothing sent
+
+
+@pytest.mark.asyncio
+async def test_heater_boost_and_easy_send_verified_toggles() -> None:
+    """D2 / D6 01|00 each need the heater's ``<op+1> 55``."""
+
+    client, link, _ = await toggling_client(e6(0x01, 21.0))
+    await client.set_node_boost("dev", NODE, boost=True)
+    await client.set_node_boost("dev", NODE, boost=False)
+    await client.set_node_easy("dev", NODE, easy=True)
+    await client.set_node_easy("dev", NODE, easy=False)
+    assert link.payloads() == [b"\xd2\x01", b"\xd2\x00", b"\xd6\x01", b"\xd6\x00"]
+
+    link.reply(0xD2, b"\xd3\x56")
+    with pytest.raises(RadioCommandError, match="rejected"):
+        await client.set_node_boost("dev", NODE, boost=True)
+
+
+@pytest.mark.asyncio
+async def test_dialect_b_has_no_heater_toggles() -> None:
+    """Dialect B answers D2/D6 without effect: refused before anything is sent."""
+
+    client, links, _ = make_client()
+    for call in (
+        client.set_node_boost("dev", NODE, boost=True),
+        client.set_node_easy("dev", NODE, easy=True),
+        client.set_node_runback("dev", NODE, runback=True),
+        client.set_node_runback("dev", NODE, runback=False),
+    ):
+        with pytest.raises(RadioUnsupportedError, match="dialect B"):
+            await call
+    assert links == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "setpoint", "manual", "restore"),
+    [
+        # manual: its own target comes back (B4 02 <target>)
+        (0x02, 22.5, None, [bytes.fromhex("B4022D")]),
+        # temporary override: the override target comes back (B4 03 <target>)
+        (0x03, 23.0, None, [bytes.fromhex("B4032E")]),
+        # program mode: the last manual target, then the mode
+        (0x01, 21.0, 19.5, [bytes.fromhex("B40227"), bytes.fromhex("B401")]),
+        # off with no known manual target: only the mode
+        (0x04, 7.0, None, [bytes.fromhex("B404")]),
+    ],
+)
+async def test_runback_restores_the_mode_and_target_it_displaced(
+    mode, setpoint, manual, restore
+) -> None:
+    """Runback forces anti-frost manual and keeps it after off: the client undoes it."""
+
+    client, link, _ = await toggling_client(e6(mode, setpoint))
+    if manual is not None:
+        client._manual_setpoints[HEATER] = manual
+    await client.set_node_runback("dev", NODE, runback=True)
+    assert link.payloads() == [b"\xb8", b"\xd4\x01"]
+    link.sent.clear()
+    await client.set_node_runback("dev", NODE, runback=False)
+    assert link.payloads() == [b"\xd4\x00", *restore]
+
+    link.sent.clear()  # a second off has nothing left to restore
+    await client.set_node_runback("dev", NODE, runback=False)
+    assert link.payloads() == [b"\xd4\x00"]
+
+
+@pytest.mark.asyncio
+async def test_runback_already_on_is_not_taken_as_the_state_to_restore() -> None:
+    """A heater already in runback (set at its panel) leaves nothing to restore."""
+
+    client, link, _ = await toggling_client(e6(0x02, 7.0, flags=0x80))
+    await client.set_node_runback("dev", NODE, runback=True)
+    link.sent.clear()
+    await client.set_node_runback("dev", NODE, runback=False)
+    assert link.payloads() == [b"\xd4\x00"]
+
+
+@pytest.mark.asyncio
+async def test_runback_failures_restore_nothing() -> None:
+    """A refused D4 01 stores nothing; pairing forgets a stored restore."""
+
+    client, link, _ = await toggling_client(e6(0x02, 22.5))
+    link.reply(0xD4, b"\xd5\x56")
+    with pytest.raises(RadioCommandError):
+        await client.set_node_runback("dev", NODE, runback=True)
+    link.reply(0xD4, b"\xd5\x55")
+    await client.set_node_runback("dev", NODE, runback=True)
+    client._forget(HEATER)
+    link.sent.clear()
+    await client.set_node_runback("dev", NODE, runback=False)
+    assert link.payloads() == [b"\xd4\x00"]
 
 
 @pytest.mark.asyncio

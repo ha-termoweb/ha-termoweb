@@ -66,15 +66,22 @@ def test_translated_device_names_format_with_addr(path: Path) -> None:
 
 
 PACKAGE_DIR = Path(termoweb.__file__).parent
-PLATFORM_MODULES = ("binary_sensor", "button", "climate", "lock", "number", "sensor")
+PLATFORM_MODULES = (
+    "binary_sensor",
+    "button",
+    "climate",
+    "lock",
+    "number",
+    "sensor",
+    "switch",
+)
 
 
 def test_entities_package_and_legacy_shims_are_gone() -> None:
-    """The entities/ package and the heater/switch shims must not come back."""
+    """The entities/ package and the heater shim must not come back."""
 
     assert not (PACKAGE_DIR / "entities").exists()
     assert not (PACKAGE_DIR / "heater.py").exists()
-    assert not (PACKAGE_DIR / "switch.py").exists()
 
 
 @pytest.mark.parametrize("name", PLATFORM_MODULES)

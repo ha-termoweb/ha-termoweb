@@ -552,6 +552,7 @@ class Candidate:
             "    mode_in_preset_write=True,  # unknown\n"
             "    ack_only_opcodes=frozenset(),  # unknown\n"
             "    energy_counter=False,  # unknown: test BC\n"
+            "    heater_toggles=False,  # unknown: test D2/D4/D6\n"
             ")"
         )
 
