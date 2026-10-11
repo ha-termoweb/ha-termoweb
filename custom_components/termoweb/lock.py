@@ -81,7 +81,6 @@ class ChildLockEntity(CoordinatorEntity[StateCoordinator], LockEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_translation_key = "child_lock"
-    _attr_name = "Child lock"
 
     def __init__(
         self,

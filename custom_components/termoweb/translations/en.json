@@ -109,9 +109,6 @@
       "nanocul_radio_missing": "The stick answers, but its radio module is not connected. Check the wiring.",
       "gateway_radio_missing": "The gateway answers, but its radio module is not connected. Check the wiring."
     },
-    "progress": {
-      "radio_rescan": "Checking every heater on your radio network. This takes up to a minute."
-    },
     "abort": {
       "already_configured": "This gateway is already set up.",
       "reconfigure_successful": "The settings were saved.",
@@ -123,6 +120,9 @@
       "gateway_radio_missing": "The gateway answers, but its radio module is not connected. Check the wiring.",
       "not_ipv4_address": "The radio gateway announced only an IPv6 address. Add it by hand with its IPv4 address.",
       "nanocul_firmware_too_old": "The firmware on this nanoCUL stick is too old. Put the newest termoweb_rx firmware on the stick (see the nanoCUL guide), then try again."
+    },
+    "progress": {
+      "radio_rescan": "Checking every heater on your radio network. This takes up to a minute."
     }
   },
   "options": {
@@ -196,12 +196,28 @@
       "power_monitor_power": { "name": "Power" },
       "installation_total_energy": { "name": "Total energy" },
       "frames_heard": { "name": "Frames heard" },
-      "installation_info": { "name": "Location" },
       "boost_minutes_remaining": { "name": "Boost minutes remaining" },
       "boost_end": { "name": "Boost end" },
       "accumulator_charging": { "name": "Charging" },
       "accumulator_current_charge": { "name": "Current charge" },
-      "accumulator_target_charge": { "name": "Target charge" }
+      "accumulator_target_charge": { "name": "Target charge" },
+      "installation_info": { "name": "Location" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "None",
+              "temporary_override": "Temporary override",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Child lock" }
     },
     "switch": {
       "runback": { "name": "Runback" },
@@ -223,19 +239,6 @@
       "panel_units": {
         "name": "Panel temperature unit",
         "state": { "celsius": "°C", "fahrenheit": "°F" }
-      }
-    }
-  },
-  "entity_component": {
-    "climate": {
-      "state_attributes": {
-        "preset_mode": {
-          "state": {
-            "none": "None",
-            "temporary_override": "Temporary override",
-            "boost": "Boost"
-          }
-        }
       }
     }
   },

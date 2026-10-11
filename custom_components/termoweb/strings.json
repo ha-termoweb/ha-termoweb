@@ -200,7 +200,21 @@
       "boost_end": { "name": "Boost end" },
       "accumulator_charging": { "name": "Charging" },
       "accumulator_current_charge": { "name": "Current charge" },
-      "accumulator_target_charge": { "name": "Target charge" }
+      "accumulator_target_charge": { "name": "Target charge" },
+      "installation_info": { "name": "Location" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "None",
+              "temporary_override": "Temporary override",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
     },
     "lock": {
       "child_lock": { "name": "Child lock" }
