@@ -32,6 +32,7 @@ from tests.fakes.radio_setup import add_radio_entry
 from tests.fakes.runtime import build_entry_runtime
 
 NET = bytes.fromhex("1234")  # synthetic network id
+OTHER_NET = bytes.fromhex("5678")  # a synthetic dialect-A installation nearby
 ENTRY_ID = "radio-entry"
 MAC = "AA:BB:CC:00:11:22"
 Q_LINE = f"# Q termoweb_rx 3.7-esp32 freq=869.525 id=FE mac={MAC} net=1234"
@@ -103,13 +104,16 @@ class Capture:
             return
         link = self.links[0]
         dialect = DIALECT_A if self.listen_only else link.dialect
+        net = OTHER_NET if self.listen_only else None
         for src, dst, payload in (
             (1, HEATER, p.flash_display()),
             (HEATER, 1, bytes.fromhex("5F55")),
             (HEATER, 1, IDENTITY_SHORT),
             (1, HEATER, bytes.fromhex("E701")),
         ):
-            link.deliver(received(src, payload, dst=dst, dialect=dialect))
+            link.deliver(
+                received(src, payload, dst=dst, dialect=dialect, network_id=net)
+            )
         link.deliver(received_ack(HEATER))
         link.deliver(ReceivedFrame(decode(DIALECT_A, b"\x01\x02"), -90.0, 0, 7))
         link.deliver_line(f"# status mac={MAC} net=1234")
@@ -153,7 +157,7 @@ async def test_capture_on_monitor_entry_saves_every_frame(
     assert rig.links[0].sent == []  # listening only
     assert set(result) == {"file", "frames", "networks", "nodes", "opcodes"}
     assert result["frames"] == 5
-    assert result["networks"] == ["1234", "1B30"]  # the ack is synthetic dialect B
+    assert result["networks"] == ["1234", "5678"]  # the ack is synthetic dialect B
     assert result["nodes"] == [1, HEATER]
     assert result["opcodes"]["5E"] == {"count": 1, "name": "flash display (identify)"}
     assert result["opcodes"]["5F"] == {"count": 1, "name": "flash display reply"}
@@ -188,7 +192,7 @@ async def test_capture_on_monitor_entry_saves_every_frame(
     }
     first = saved["frames"][0]
     assert first["kind"] == "data" and first["dialect"] == "A"
-    assert first["net"] == "1B30" and first["src"] == 1 and first["dst"] == HEATER
+    assert first["net"] == "5678" and first["src"] == 1 and first["dst"] == HEATER
     assert first["payload"] == "5E01" and first["name"] == "flash display (identify)"
     assert first["t"].endswith("+00:00") and len(first["t"]) == 29  # milliseconds
     assert first["rssi"] == -60.0 and first["air"] == first["air"].upper()
@@ -219,7 +223,7 @@ async def test_redacted_capture_masks_networks_and_serial(
     assert saved["redacted"] is True and saved["note"] is None
     assert saved["dialects_listened"] == ["A", "B"]
     assert saved["gateway"].endswith("mac=XX net=XXXX")
-    for secret in ("1234", "1B30", b"X123456".hex().upper(), MAC, "mac=AA"):
+    for secret in ("1234", "5678", b"X123456".hex().upper(), MAC, "mac=AA"):
         assert secret not in text
     payloads = [r["payload"] for r in saved["frames"]]
     assert "5E01" in payloads and "5F55" in payloads and "E701" in payloads

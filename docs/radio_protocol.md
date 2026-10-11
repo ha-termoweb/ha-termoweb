@@ -44,7 +44,7 @@ The layout above is the same in both dialects. Only the framing differs.
 | Byte 0 | total length − 3 | total length |
 | Whitening | PN9, whole frame from byte 0 | none |
 | CRC | CRC-16/CCITT, poly `1021`, init `1D0F`, xorout `FFFF` | CRC-16/MODBUS, reflected poly `A001`, init `FFFF`, no xorout |
-| Network id | `1B 30` on stock gateways; a network Home Assistant pairs uses its own id (section 7) | per installation, learned from traffic (no default) |
+| Network id | learned from traffic (no default); a network Home Assistant pairs uses its own id (section 7) | per installation, learned from traffic (no default) |
 | Ack | logical `05 net acker sender 80 crc` (scrambled) | `08 net acker sender 80 crc` |
 | EB clock sync | 9 bytes, ends `03` | 8 bytes, no `03` |
 | Gateway `Y` mode | `0` | `1` |
@@ -56,14 +56,18 @@ MSB first. The keystream starts `FF 87 B8 59 B7 A1 CC 24`. It is the
 bit-reverse of the table in TI DN509. Because the first keystream byte is
 `FF`, the total length is `(air[0] XOR FF) + 3`.
 
-### Dialect B network id
+### Network id
 
-Each dialect-B installation has its own two-byte network id. There is no
-shared default, so the code never assumes one: `build_frame` and
-`RadioLink` raise `ValueError` for dialect B unless a network id is passed.
+Neither dialect has a default network id, so the code never assumes one:
+`build_frame` needs a network id, and `RadioLink` and `RadioClient` raise
+`ValueError` without one.
 Learn the id from the heater's own traffic: every frame carries it in logical
 bytes 1-2, for example the registration and power-request frames a heater
 sends on its own. The examples below use the synthetic id `12 34`.
+
+The old stock nanoCUL firmware (`termoweb_rx` 3.5, without `Y` and `N`)
+cannot set the network id its auto-acks carry; the firmware in
+`firmware/nanocul` can.
 
 ### Test vectors (dialect B, heater 06, synthetic network id `12 34`)
 
@@ -73,12 +77,12 @@ sends on its own. The examples below use the synthetic id `12 34`.
 | Route probe, 06 → 02 | `0E 12 34 06 02 00 06 02 01 01 01 06 F6 91` |
 | Ack, station 01 for 06 | `08 12 34 01 06 80 A0 E4` |
 
-### Test vectors (dialect A)
+### Test vectors (dialect A, synthetic network id `12 34`, on air)
 
 | Frame | Bytes |
 |---|---|
-| Setpoint 25.5 C, 01 → 04 | `F1 9C 88 58 B3 A1 CD 20 57 5E 4B 9C BA EB D9 F6 E5` |
-| Ack, 04 for 01 | `FA 9C 88 5D B6 21 FB D1` |
+| Setpoint 25.5 C, 01 → 04 | `F1 95 8C 58 B3 A1 CD 20 57 5E 4B 9C BA EB D9 63 42` |
+| Ack, 04 for 01 | `FA 95 8C 5D B6 21 99 5C` |
 
 ## 4. Opcodes
 
@@ -383,8 +387,7 @@ open that long (up to `total_s`), and after a pairing the run ends
 
 Stock gateways have a per-installation network id. Home Assistant derives its
 own: `pairing.site_network_id(seed)` takes the first two bytes of the SHA-256
-of the seed that are not `00 00`, `FF FF` or `1B 30` (the stock dialect-A
-id). The config flow seeds it with the Home Assistant instance id
+of the seed that are not `00 00` or `FF FF`. The config flow seeds it with the Home Assistant instance id
 (`homeassistant.helpers.instance_id`) plus the gateway id, `<instance>:<gateway
 dev_id>`, so two gateways in one installation get two networks. The id is
 stored in the config entry (`network_id`); heaters paired later join the

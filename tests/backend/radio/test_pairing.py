@@ -41,7 +41,14 @@ def announce_b(dst: int = 1) -> str:
 def announce_a(identity: bytes = IDENTITY_A, *, src: int = 0xFF, dst: int = 1) -> str:
     """Return a dialect-A identity announcement; ``src`` != FF is a relayed copy."""
     return rx_line(
-        build_frame(DIALECT_A, src, dst, b"\x77" + identity, path=(0xFF, dst, 1, 1, 1))
+        build_frame(
+            DIALECT_A,
+            src,
+            dst,
+            b"\x77" + identity,
+            path=(0xFF, dst, 1, 1, 1),
+            network_id=b"\x00\x00" if src == 0xFF else NET,  # unjoined: 00 00
+        )
     )
 
 
@@ -199,9 +206,18 @@ def test_classify_announcements() -> None:
         (DIALECT_B, build_frame(DIALECT_B, 6, 1, b"\x55", tag=3, network_id=NET)),
         (DIALECT_B, build_frame(DIALECT_B, 0xFF, 1, b"\x55", tag=0, network_id=NET)),
         (DIALECT_B, build_frame(DIALECT_B, 0xFF, 1, b"\x56", tag=3, network_id=NET)),
-        (DIALECT_B, build_frame(DIALECT_A, 0xFF, 1, b"\x55", tag=3)),  # wrong dialect
-        (DIALECT_A, build_frame(DIALECT_A, 0xFF, 1, b"\x77" + bytes(11))),
-        (DIALECT_A, build_frame(DIALECT_A, 0xFF, 1, b"\x78" + bytes(12))),
+        (
+            DIALECT_B,
+            build_frame(DIALECT_A, 0xFF, 1, b"\x55", tag=3, network_id=NET),
+        ),  # wrong dialect
+        (
+            DIALECT_A,
+            build_frame(DIALECT_A, 0xFF, 1, b"\x77" + bytes(11), network_id=NET),
+        ),
+        (
+            DIALECT_A,
+            build_frame(DIALECT_A, 0xFF, 1, b"\x78" + bytes(12), network_id=NET),
+        ),
     ],
 )
 def test_classify_rejects_other_frames(dialect, air) -> None:
@@ -233,7 +249,7 @@ def test_site_network_id_is_stable_and_never_reserved(monkeypatch) -> None:
 
     class Digest:
         def digest(self) -> bytes:
-            return b"\x00\x00\xff\xff\x1b\x30\x12\x34" + bytes(24)
+            return b"\x00\x00\xff\xff\x12\x34" + bytes(26)
 
     monkeypatch.setattr(pr.hashlib, "sha256", lambda _data: Digest())
     assert pr.site_network_id("x") == b"\x12\x34"

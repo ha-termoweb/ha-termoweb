@@ -153,10 +153,10 @@ async def test_network_heard_twice_is_stored_and_the_entry_reloads(
         await _unload(hass, entry)
 
 
-async def test_stock_nanocul_runs_dialect_a_at_once(
+async def test_stock_nanocul_learns_its_network_in_dialect_a(
     hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Stock nanoCUL firmware speaks dialect A only, whose network is fixed."""
+    """Stock nanoCUL firmware speaks dialect A only; its network is still learned."""
 
     async def _probe(device: str) -> tuple[str, bool]:
         return "stick", capable
@@ -169,8 +169,8 @@ async def test_stock_nanocul_runs_dialect_a_at_once(
     site = await async_site_network_id(hass, "test")
     assert await radio_discovery.async_learning_network(hass, entry) == ("B", site)
     capable = False
-    assert await radio_discovery.async_learning_network(hass, entry) is None
-    assert entry.data["dialect"] == "A" and entry.data["network_id"] == "1B30"
+    assert await radio_discovery.async_learning_network(hass, entry) == ("A", site)
+    assert "network_id" not in entry.data  # nothing is assumed
 
 
 async def test_unplugged_stick_retries_setup(
@@ -235,7 +235,7 @@ async def _learner(
     ("report", "stored"),
     [
         (_report("known", "B", ("0000", "5678")), ("B", "5678")),
-        (_report("known", "A"), ("A", "1B30")),
+        (_report("known", "A", ("5678",)), ("A", "5678")),
     ],
 )
 async def test_survey_stores_the_network_of_a_known_dialect(

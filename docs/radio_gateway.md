@@ -345,7 +345,7 @@ ending with `\n`.
 | Command | Reply | Meaning |
 |---|---|---|
 | (connect) or `V` | `# termoweb_rx 3.7-esp32 freq=869.525 rate=9.6k sync=2DE5 mode=dynamic tx=paC0 mac=AA:BB:CC:DD:EE:FF` | Banner. Sent first on every new connection. |
-| `Q` | `# Q termoweb_rx 3.7-esp32 freq=869.525 pa=C0 sync=2DE5 mode=dynamic autoack=off id=01 dialect=A net=1B30 mac=AA:BB:CC:DD:EE:FF` | Status. `mac` is the WiFi MAC: a stable device id. |
+| `Q` | `# Q termoweb_rx 3.7-esp32 freq=869.525 pa=C0 sync=2DE5 mode=dynamic autoack=off id=01 dialect=A net=1234 mac=AA:BB:CC:DD:EE:FF` | Status. `mac` is the WiFi MAC: a stable device id. |
 | `Y0` / `Y1` | `# dialect=A sync=2DE5` / `# dialect=B sync=2DD4` | Select the on-air dialect (below). Error: `# Y? expected 0 or 1`. |
 | `N<hex4>`, e.g. `N1234` | `# net=1234` | Network id used in auto-acks. Error: `# N? expected 4 hex digits`. |
 | `I<hex2>`, e.g. `I01` | `# id=01` | Our station id, used by auto-ack. |
@@ -379,5 +379,6 @@ Auto-ack fires only for a frame with a valid CRC, addressed to our station id,
 with flags 00.
 
 Every new connection resets the gateway to its defaults: dialect A, network
-1B30, station id 01, auto-ack off, 869.525 MHz. Send `Y`, `N`, `I` and `A1`
+0000 (none until `N` sets it), station id 01, auto-ack off,
+869.525 MHz. Send `Y`, `N`, `I` and `A1`
 again after each connect.

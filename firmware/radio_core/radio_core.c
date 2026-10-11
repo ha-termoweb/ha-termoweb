@@ -283,14 +283,14 @@ uint32_t rc_freq_word(uint32_t khz) { return (khz * 4096UL + 812UL) / 1625UL; }
 int16_t rc_rssi_dbm10(uint8_t raw) { return (int16_t)((int16_t)(int8_t)raw * 5 - 740); }
 
 /* The ESP32's boot self-test vectors (computed in Python from the host
- * codec): ack 01 -> 06 in A (net 1B30) and B (synthetic net 1234); a B
+ * codec, synthetic net 1234): ack 01 -> 06 in A and B; a B
  * registration frame and an A poll pass in their own dialect only. */
-static const uint8_t ST_ACK_A[8] RC_PROGMEM = {0xFA, 0x9C, 0x88, 0x58, 0xB1, 0x21, 0x89, 0xB6};
+static const uint8_t ST_ACK_A[8] RC_PROGMEM = {0xFA, 0x95, 0x8C, 0x58, 0xB1, 0x21, 0xEB, 0x3B};
 static const uint8_t ST_ACK_B[8] RC_PROGMEM = {0x08, 0x12, 0x34, 0x01, 0x06, 0x80, 0xA0, 0xE4};
 static const uint8_t ST_REG_B[15] RC_PROGMEM = {0x0F, 0x12, 0x34, 0x06, 0x01, 0x00, 0x06, 0x01,
                                                 0x01, 0x01, 0x01, 0x00, 0x50, 0x72, 0x22};
-static const uint8_t ST_POLL_A[16] RC_PROGMEM = {0xF2, 0x9C, 0x88, 0x58, 0xB1, 0xA1, 0xCD, 0x22,
-                                                 0x57, 0x5E, 0x4B, 0x9C, 0x59, 0xBC, 0x49, 0xC9};
+static const uint8_t ST_POLL_A[16] RC_PROGMEM = {0xF2, 0x95, 0x8C, 0x58, 0xB1, 0xA1, 0xCD, 0x22,
+                                                 0x57, 0x5E, 0x4B, 0x9C, 0x59, 0xBC, 0x0A, 0x24};
 
 static void copy_p(uint8_t *dst, const uint8_t *src, uint8_t n) {
   for (uint8_t i = 0; i < n; i++) dst[i] = RC_RD(src + i);
@@ -300,7 +300,7 @@ uint8_t rc_self_test(void) {
   uint8_t want[16], got[8];
   uint8_t ok = 1;
   copy_p(want, ST_ACK_A, 8);
-  rc_build_ack(RC_DIALECT_A, 0x1B30, 0x01, 0x06, got);
+  rc_build_ack(RC_DIALECT_A, 0x1234, 0x01, 0x06, got);
   ok &= memcmp(got, want, 8) == 0;
   ok &= rc_frame_crc_ok(RC_DIALECT_A, want, 8);
   copy_p(want, ST_ACK_B, 8);

@@ -18,7 +18,7 @@ from custom_components.termoweb.backend.radio.dialect import (
 )
 from tests.fakes.radio_link import build_ack
 
-NET = bytes.fromhex("1234")  # synthetic dialect-B network id
+NET = bytes.fromhex("1234")  # synthetic network id (both dialects)
 
 # Dialect-B payloads captured from heater 06 (ops/esp32/README.md and logs).
 B_SHORT_STATUS = bytes.fromhex("B921252A02")
@@ -27,22 +27,15 @@ B_ENERGY = bytes.fromhex("BDDB002CF039000000")
 B_HEATER_REPORT = bytes.fromhex("BEDB002CF039000000")
 B_PROGRAM = bytes.fromhex("B155" + "6AAAAAAA9555" * 6 + "6AAAAAAA95")
 
-# Dialect-A payloads from ha-termoweb-local's captures.
-A_E5 = decode(
-    DIALECT_A,
-    bytes.fromhex("E59C885DB6A1C825565F4A9C5850E47E05BCB4E185AE81C3E7BFE380F1"),
-).payload
-A_E6 = decode(
-    DIALECT_A, bytes.fromhex("E69C885BB6A1CE25565F4A9CB7E7C47F2EBE5432FE915DF1F89A3003")
-).payload
-A_E3 = decode(
-    DIALECT_A,
-    bytes.fromhex("E39C885DB6A1C825565F4A9C5850E47E05BAB4F587AD3BF1C286E341886B6A"),
-).payload
-A_E4 = bytes.fromhex("b90e24340200ec341daf00a01d0064a3")
-A_ENERGY = decode(
-    DIALECT_A, bytes.fromhex("EF9C885BB6A1CE25565F4A9CB3E9F2E8034AD8")
-).payload
+# Synthetic dialect-A status records in the captured layout (radio_protocol.md
+# section 5): B9 <af> <eco> <comfort> <mode> <room x10> <setpoint x2>
+# <power W x10> <duty> <flags> <2 bytes>, E5/E3 behind a 56 report marker,
+# E3/E4 with a 2-byte boost tail (day << 12 | minute of day).
+A_E5 = bytes.fromhex("56 B9 0E 24 2A 02 00FA 33 2710 32 01 0000".replace(" ", ""))
+A_E6 = bytes.fromhex("B9 0E 24 2A 04 00E6 2A 3A98 00 00 0000".replace(" ", ""))
+A_E4 = bytes.fromhex("B9 0E 24 34 02 00EC 34 2710 00 A0 0000 64A3".replace(" ", ""))
+A_E3 = bytes.fromhex("56 B9 0E 24 2A 04 00EE 31 2710 00 00 0000 0475".replace(" ", ""))
+A_ENERGY = bytes.fromhex("BD 0001E240".replace(" ", ""))  # 123456 Wh
 A_IDENTITY = bytes.fromhex("5b7701010104a1b2c3d4e5f6071829304a5b0a1a")
 
 
@@ -245,11 +238,11 @@ def test_status_e5_report() -> None:
     """A dialect-A E5 report decodes every field it carries."""
     record = p.decode_status(A_E5)
     assert record.form == "E5"
-    assert (record.anti_frost_c, record.eco_c, record.comfort_c) == (7.0, 23.0, 23.5)
+    assert (record.anti_frost_c, record.eco_c, record.comfort_c) == (7.0, 18.0, 21.0)
     assert record.mode_code == 2
     assert record.room_temp_c == 25.0
     assert record.setpoint_c == 25.5
-    assert record.measured_power_w == 790.0
+    assert record.measured_power_w == 1000.0
     assert record.duty == 0x32
     assert record.flags == p.FLAG_ACTIVE
     assert record.boost_end_day is None
@@ -258,16 +251,16 @@ def test_status_e5_report() -> None:
 def test_status_e6_e4_e3() -> None:
     """E6 drops the 56 marker; E4 and E3 add the boost tail."""
     e6 = p.decode_status(A_E6)
-    assert e6.form == "E6" and e6.measured_power_w == 1846.5
+    assert e6.form == "E6" and e6.measured_power_w == 1500.0
     e4 = p.decode_status(A_E4)
     assert e4.form == "E4"
     assert (e4.anti_frost_c, e4.eco_c, e4.comfort_c) == (7.0, 18.0, 26.0)
-    assert (e4.room_temp_c, e4.setpoint_c, e4.measured_power_w) == (23.6, 26.0, 759.9)
+    assert (e4.room_temp_c, e4.setpoint_c, e4.measured_power_w) == (23.6, 26.0, 1000.0)
     assert e4.flags == 0xA0  # runback + boost
     assert (e4.boost_end_day, e4.boost_end_min) == (6, 1187)
     e3 = p.decode_status(A_E3)
     assert e3.form == "E3" and e3.mode == "off"
-    assert (e3.room_temp_c, e3.setpoint_c, e3.measured_power_w) == (23.8, 24.5, 752.6)
+    assert (e3.room_temp_c, e3.setpoint_c, e3.measured_power_w) == (23.8, 24.5, 1000.0)
     assert (e3.boost_end_day, e3.boost_end_min) == (0, 1141)
 
 
@@ -415,7 +408,7 @@ def test_identity_rejects_garbage(payload) -> None:
         (B_HEATER_REPORT, "B", None),
         (bytes.fromhex("BEDA002CA9390B0100"), "B", None),
         (bytes.fromhex("BEDA002CC8390B0100"), "B", None),
-        (bytes([0xBE, 0x1D, 0x66]), "A", 752.6),
+        (bytes([0xBE, 0x23, 0x28]), "A", 900.0),
     ],
 )
 def test_power_request_forms(payload, form, watts) -> None:
@@ -445,7 +438,7 @@ def test_classify_unsolicited_payloads() -> None:
     assert p.classify_unsolicited(A_E5) is u.REPORT
     assert p.classify_unsolicited(bytes([0x56, 0xB1]) + bytes(84)) is u.PROGRAM_REPORT
     assert p.classify_unsolicited(B_HEATER_REPORT) is u.POWER_REQUEST
-    assert p.classify_unsolicited(bytes([0xBE, 0x1E, 0xDC])) is u.POWER_REQUEST
+    assert p.classify_unsolicited(bytes([0xBE, 0x27, 0x10])) is u.POWER_REQUEST
     assert p.classify_unsolicited(bytes([0xBE, 0x01])) is u.UNKNOWN
     assert p.classify_unsolicited(b"") is u.UNKNOWN
     assert p.classify_unsolicited(B_SHORT_STATUS) is u.UNKNOWN
@@ -477,7 +470,7 @@ def test_power_record_decodes_heating_voltage_and_duty() -> None:
     assert heating.raw[0] == 0xBD
     for bad in (
         A_ENERGY,
-        bytes([0xBE, 0x1D, 0x66]),
+        bytes([0xBE, 0x23, 0x28]),
         bytes.fromhex("B921252A02") + bytes(4),
     ):
         assert p.decode_power_record(bad) is None
@@ -497,14 +490,14 @@ B_REGISTRATION = bytes.fromhex("0F1234060100060101010100507222")
 B_ROUTE_PROBE = bytes.fromhex("0E1234060200060201010106F691")
 B_ACK = bytes.fromhex("081234010680A0E4")
 
-# Dialect-A worked frames from ha-termoweb-local's test_frame.py.
-A_SETPOINT = bytes.fromhex("F19C8858B3A1CD20575E4B9CBAEBD9F6E5")
-A_MODE_OFF = bytes.fromhex("F29C8858B3A1CD20575E4B9CBAEDF895")
-A_E5_REPORT = bytes.fromhex(
-    "E59C885DB6A1C825565F4A9C5850E47E05BCB4E185AE81C3E7BFE380F1"
+# Dialect-A worked frames, re-encoded with the synthetic network id 12 34.
+A_SETPOINT = bytes.fromhex("F1958C58B3A1CD20575E4B9CBAEBD96342")
+A_MODE_OFF = bytes.fromhex("F2958C58B3A1CD20575E4B9CBAEDBB78")
+A_E5_REPORT = build_frame(
+    DIALECT_A, 0x04, 0x01, A_E5, path=(4, 1, 1, 1, 1), network_id=NET
 )
-A_ACK = bytes.fromhex("FA9C885DB621FBD1")
-A_RELAY_PROBE = bytes.fromhex("F49C885BB6A1C826565F4A9AB57C")
+A_ACK = bytes.fromhex("FA958C5DB621995C")
+A_RELAY_PROBE = bytes.fromhex("F4958C5BB6A1C826565F4A9A628E")
 
 
 def test_crc_vectors() -> None:
@@ -560,22 +553,26 @@ def test_dialect_b_ack() -> None:
 
 def test_dialect_a_worked_frames() -> None:
     """Dialect-A builders reproduce the proven worked frames."""
-    assert build_frame(DIALECT_A, 0x01, 0x04, bytes([0xB4, 0x02, 0x33])) == A_SETPOINT
-    assert build_frame(DIALECT_A, 0x01, 0x04, bytes([0xB4, 0x04])) == A_MODE_OFF
-    assert encode(DIALECT_A, DIALECT_A.network_id + bytes([0x04, 0x01, 0x80])) == A_ACK
+    setpoint = bytes([0xB4, 0x02, 0x33])
+    assert build_frame(DIALECT_A, 0x01, 0x04, setpoint, network_id=NET) == A_SETPOINT
+    mode_off = bytes([0xB4, 0x04])
+    assert build_frame(DIALECT_A, 0x01, 0x04, mode_off, network_id=NET) == A_MODE_OFF
+    assert encode(DIALECT_A, NET + bytes([0x04, 0x01, 0x80])) == A_ACK
     relay = decode(DIALECT_A, A_RELAY_PROBE)
     assert relay.ok and relay.tag == 0x06 and relay.path == bytes([4, 2, 1, 1, 1])
     assert (
-        build_frame(DIALECT_A, 0x02, 0x01, b"", tag=0x06, path=relay.path)
+        build_frame(
+            DIALECT_A, 0x02, 0x01, b"", tag=0x06, path=relay.path, network_id=NET
+        )
         == A_RELAY_PROBE
     )
 
 
 def test_dialect_a_report_decodes() -> None:
-    """A captured E5 report decodes with its 56 B9 payload."""
+    """An E5 report frame decodes with its 56 B9 payload."""
     frame = decode(DIALECT_A, A_E5_REPORT)
     assert frame.ok
-    assert frame.network_id == bytes.fromhex("1B30")
+    assert frame.network_id == NET
     assert (frame.src, frame.dst) == (0x04, 0x01)
     assert frame.payload[:2] == bytes([0x56, 0xB9])
     assert len(frame.payload) == 15
@@ -668,8 +665,6 @@ def test_builder_validation() -> None:
         build_frame(DIALECT_B, 1, 6, b"", path=(1, 6), network_id=NET)
     with pytest.raises(ValueError, match="two bytes"):
         build_frame(DIALECT_B, 1, 6, b"", network_id=b"\x01")
-    with pytest.raises(ValueError, match="explicit network_id"):
-        build_frame(DIALECT_B, 1, 6, b"")
     with pytest.raises(ValueError, match="does not fit"):
         encode(DIALECT_B, bytes(253))
     with pytest.raises(ValueError, match="does not fit"):

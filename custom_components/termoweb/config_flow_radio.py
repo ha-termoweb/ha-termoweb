@@ -329,8 +329,6 @@ async def survey_sighting(
         known = DIALECTS[report.dialect]
         if report.network_ids:
             return NetworkSighting(known, bytes.fromhex(report.network_ids[0]))
-        if known.network_id is not None:
-            return NetworkSighting(known, known.network_id)
         return None
     raise UnknownDialectError(report)
 
@@ -351,11 +349,8 @@ async def find_network(
     silent installation (``no_traffic``) from one that speaks an unknown
     dialect (UnknownDialectError).
     """
-    if dialect != DIALECT_AUTO and (
-        network_id is not None or DIALECTS[dialect].network_id is not None
-    ):
-        known = DIALECTS[dialect]
-        return NetworkSighting(known, network_id or known.network_id)
+    if dialect != DIALECT_AUTO and network_id is not None:
+        return NetworkSighting(DIALECTS[dialect], network_id)
     if dialect != DIALECT_AUTO:
         dialects: tuple[Any, ...] = (DIALECTS[dialect],)
     elif dialect_capable:

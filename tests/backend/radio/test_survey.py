@@ -138,10 +138,12 @@ def test_crc_catalogue_matches_reference_values() -> None:
 def test_known_dialects_and_inverted_polarity() -> None:
     """Dialect A and B bursts decode; an inverted demodulator is noticed."""
     a = s.analyse_burst(
-        capture_burst(build_frame(DIALECT_A, 6, 1, b"\xb8"), DIALECT_A.sync, 2)
+        capture_burst(
+            build_frame(DIALECT_A, 6, 1, b"\xb8", network_id=NET), DIALECT_A.sync, 2
+        )
     )
     assert (a.dialect, a.sync, a.inverted) == ("A", "2DE5", False)
-    assert a.frame is not None and a.frame[1:3] == DIALECT_A.network_id
+    assert a.frame is not None and a.frame[1:3] == NET
     b = s.analyse_burst(capture_burst(b_frame(), DIALECT_B.sync, 3, invert=True))
     assert (b.dialect, b.sync, b.inverted) == ("B", "2DD4", True)
     assert b.bits is None and b.fits == ()
@@ -564,12 +566,12 @@ def test_ack_wrong_dialect_and_undecodable() -> None:
     assert record["path"] is None and record["tag"] is None and record["op"] is None
 
     # Heard while the link had already switched to dialect B.
-    a_frame = build_frame(DIALECT_A, 1, 6, p.request_status())
+    a_frame = build_frame(DIALECT_A, 1, 6, p.request_status(), network_id=OTHER_NET)
     record = capture.frame_record(
         ReceivedFrame(decode(DIALECT_B, a_frame), -70.0, 1, 5), DIALECT_B, AT
     )
     assert record["kind"] == "data" and record["dialect"] == "A"
-    assert record["net"] == "1B30" and record["op"] == "B8"
+    assert record["net"] == "5678" and record["op"] == "B8"
 
     junk = ReceivedFrame(decode(DIALECT_A, bytes.fromhex("0102030405")), -90.0, 0, 7)
     assert capture.frame_record(junk, DIALECT_A, AT) is None
@@ -631,7 +633,7 @@ def test_redact_masks_networks_identity_and_hex_but_keeps_payload_bytes() -> Non
             AT,
         ),
         capture.frame_record(
-            rx(DIALECT_A, 0xFF, 1, ANNOUNCE_A, net=DIALECT_A.network_id),
+            rx(DIALECT_A, 0xFF, 1, ANNOUNCE_A, net=OTHER_NET),
             DIALECT_A,
             AT,
         ),
@@ -662,7 +664,7 @@ def test_redact_masks_networks_identity_and_hex_but_keeps_payload_bytes() -> Non
     assert red_raw[0] == {"t": raw[0]["t"], "line": "TX 100 14 <hex> net=XXXX"}
     assert red_raw[1]["line"] == "# Q x mac=XX"
     text = repr((red_frames, red_raw))
-    for secret in ("1234", "BEEF", "1B30", b"X123456".hex().upper(), "AA:BB"):
+    for secret in ("1234", "BEEF", "5678", b"X123456".hex().upper(), "AA:BB"):
         assert secret not in text
 
 

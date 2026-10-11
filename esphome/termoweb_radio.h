@@ -16,7 +16,7 @@
  *   dialect A (termoweb_rx's; default after every reset, as on a nanoCUL):
  *     sync 2DE5; byte 0 = (total - 3); every byte PN9-scrambled; CRC-16/CCITT
  *     (poly 0x1021, init 0x1D0F, final XOR 0xFFFF) over the descrambled bytes
- *     [0, total-3], high byte first; network id 1B 30.
+ *     [0, total-3], high byte first; network id set with 'N'.
  *   dialect B (captured from a second network: 68 frames, all CRC-valid):
  *     sync 2DD4; byte 0 = total (itself and the CRC included); bytes in the
  *     clear; CRC-16/MODBUS (reflected 0xA001, init 0xFFFF, no final XOR) over
@@ -40,7 +40,7 @@
  * ESP32-only commands (none of them changes a termoweb_rx reply):
  *   'Y0'/'Y1'  -> dialect A/B; retunes the sync word live.
  *                 "# dialect=A sync=2DE5" / "# dialect=B sync=2DD4", or "# Y? expected 0 or 1"
- *   'N<hex4>'  -> network id auto-acks carry (default 1B30) -> "# net=1234",
+ *   'N<hex4>'  -> network id auto-acks carry (default 0000) -> "# net=1234",
  *                 or "# N? expected 4 hex digits"
  *   'F<kHz>'   -> retune the carrier, e.g. "F869525" -> "# freq=869.525 word=21717A",
  *                 or "# F? expected kHz" (accepted range 779000-928000)
@@ -170,8 +170,10 @@ enum Dialect : uint8_t { DIALECT_A = 0, DIALECT_B = 1 };
 static constexpr uint8_t SYNC1_VAL = 0x2D;
 static constexpr uint8_t SYNC0_A = 0xE5;
 static constexpr uint8_t SYNC0_B = 0xD4;
-/* Network id auto-acks carry after a reset: termoweb_rx's own, 1B 30. */
-static constexpr uint16_t DEFAULT_NET = 0x1B30;
+/* Network id auto-acks carry after a reset: none until the host sends 'N'.
+ * Auto-ack is off after a reset too, and the host always sends 'N' when it
+ * connects. */
+static constexpr uint16_t DEFAULT_NET = 0x0000;
 
 static constexpr uint8_t PKT_LEN = 64;
 static constexpr uint8_t PA_VAL = TERMOWEB_RADIO_PA;
@@ -990,22 +992,22 @@ class TermowebRadio {
    * fixed vectors computed independently in Python (_vendored_frame.py's
    * build_ack/build_frame for A, a reference MODBUS for B), so this tests the
    * C against the host's own codec rather than against itself:
-   *  - ack 01 -> 06: A, net 1B30 = FA9C8858B12189B6; B, net 1234 (synthetic) = 081234010680A0E4;
-   *  - both acks, and a B registration frame (synthetic network id 1234) and the A poll
+   *  - ack 01 -> 06, synthetic net 1234: A = FA958C58B121EB3B; B = 081234010680A0E4;
+   *  - both acks, and a B registration frame and the A poll (synthetic net 1234)
    *    build_frame(1, 6, 57 55), must pass frame_crc_ok_ in their own
    *    dialect and fail it in the other one (so a wrong 'Y' is visible as
    *    crc_ok=0, not silently accepted).
    * Only logs; a failure means acks and crc_ok verdicts are wrong, which is
    * worth an ERROR line but not worth refusing to run the receiver. */
   static bool self_test_() {
-    static const uint8_t ACK_A[8] = {0xFA, 0x9C, 0x88, 0x58, 0xB1, 0x21, 0x89, 0xB6};
+    static const uint8_t ACK_A[8] = {0xFA, 0x95, 0x8C, 0x58, 0xB1, 0x21, 0xEB, 0x3B};
     static const uint8_t ACK_B[8] = {0x08, 0x12, 0x34, 0x01, 0x06, 0x80, 0xA0, 0xE4};
     static const uint8_t REG_B[15] = {0x0F, 0x12, 0x34, 0x06, 0x01, 0x00, 0x06, 0x01,
                                       0x01, 0x01, 0x01, 0x00, 0x50, 0x72, 0x22};
-    static const uint8_t POLL_A[16] = {0xF2, 0x9C, 0x88, 0x58, 0xB1, 0xA1, 0xCD, 0x22,
-                                       0x57, 0x5E, 0x4B, 0x9C, 0x59, 0xBC, 0x49, 0xC9};
+    static const uint8_t POLL_A[16] = {0xF2, 0x95, 0x8C, 0x58, 0xB1, 0xA1, 0xCD, 0x22,
+                                       0x57, 0x5E, 0x4B, 0x9C, 0x59, 0xBC, 0x0A, 0x24};
     uint8_t a[8], b[8];
-    build_ack_(DIALECT_A, 0x1B30, 0x01, 0x06, a);
+    build_ack_(DIALECT_A, 0x1234, 0x01, 0x06, a);
     build_ack_(DIALECT_B, 0x1234, 0x01, 0x06, b);
     bool ack_a = memcmp(a, ACK_A, 8) == 0;
     bool ack_b = memcmp(b, ACK_B, 8) == 0;
@@ -1161,7 +1163,7 @@ class TermowebRadio {
 
   /* ESP32-only 'N<hex4>': the network id auto-acks carry. Only the ack
    * builder uses it; received frames are never filtered on it, so the host
-   * still sees every network's traffic. Session state, back to 1B30 on the
+   * still sees every network's traffic. Session state, back to 0000 on the
    * next connection. */
   void finish_n_(uint8_t n) {
     char line[48];

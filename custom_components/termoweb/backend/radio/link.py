@@ -232,10 +232,9 @@ class RadioLink:
         self._port = port
         self._dialect = dialect
         self._station_id = station_id
-        net = dialect.network_id if network_id is None else network_id
-        if net is None:
-            raise ValueError(f"dialect {dialect.name} needs an explicit network_id")
-        self._network_id = bytes(net)
+        if network_id is None:
+            raise ValueError("network_id is required")
+        self._network_id = bytes(network_id)
         if listen_only and auto_ack:
             raise ValueError("a listen-only link cannot auto-ack")
         self._auto_ack = auto_ack

@@ -43,14 +43,15 @@ def make_backend():
 def test_create_radio_client_helper() -> None:
     """The factory helper builds a lazily connecting client."""
 
-    client = _mod("").create_radio_client("10.0.0.5", 2323, "A", NODES, None)
+    client = _mod("").create_radio_client("10.0.0.5", 2323, "A", NODES, NET)
     assert isinstance(client, _mod(".radio_client").RadioClient)
     assert client.dialect.name == "A"
     assert client.link is None
     client = _mod("").create_radio_client("10.0.0.5", 2323, "B", NODES, NET)
     assert client.dialect.name == "B"
-    with pytest.raises(ValueError, match="explicit network_id"):
-        _mod("").create_radio_client("10.0.0.5", 2323, "B", NODES, None)
+    for dialect in ("A", "B"):
+        with pytest.raises(ValueError, match="network_id is required"):
+            _mod("").create_radio_client("10.0.0.5", 2323, dialect, NODES, None)
 
 
 def test_create_ws_client_returns_listener() -> None:
@@ -207,10 +208,10 @@ def test_settings_round_trip_through_the_store() -> None:
     assert power.rated_power(6) is None
     power.note_identity_power(6, 1500.0)
     assert power.rated_power(6) == 1500.0
-    power.note_reported_power(6, 752.6)  # measured full-load power wins
-    assert power.rated_power(6) == 752.6
+    power.note_reported_power(6, 900.0)  # measured full-load power wins
+    assert power.rated_power(6) == 900.0
     power.note_identity_power(6, 1000.0)
-    assert power.rated_power(6) == 752.6
+    assert power.rated_power(6) == 900.0
     power.set_power_limit(0)
     assert power.power_limit is None
     with pytest.raises(ValueError, match=">= 0"):

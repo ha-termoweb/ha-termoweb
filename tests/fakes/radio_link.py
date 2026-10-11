@@ -24,7 +24,7 @@ from custom_components.termoweb.backend.radio.link import (
 HEATER = 6
 STATION = 1
 MAC = "AA:BB:CC:00:11:22"
-NET = bytes.fromhex("1234")  # synthetic dialect-B network id
+NET = bytes.fromhex("1234")  # synthetic network id (both dialects)
 
 # Payloads captured from the dialect-B reference heater (node 06); the
 # identity tail is synthetic.
@@ -48,7 +48,7 @@ def build_ack(
     The gateway firmware sends acks itself; tests use this to play the heater.
     """
 
-    net = dialect.network_id if network_id is None else network_id
+    net = NET if network_id is None else network_id
     return encode(dialect, bytes(net) + bytes([acker, sender, ACK_FLAGS]))
 
 
@@ -78,7 +78,7 @@ def received(
         payload,
         tag=tag,
         path=(src, dst, 1, 1, 1),
-        network_id=network_id or dialect.network_id or NET,
+        network_id=network_id or NET,
     )
     return ReceivedFrame(decode(dialect, air), -60.0, 0, 1000)
 
@@ -127,7 +127,7 @@ class FakeRadioLink:
         self.port = port
         self.dialect = dialect
         self.station_id = station_id
-        self.network_id = dialect.network_id if network_id is None else network_id
+        self.network_id = NET if network_id is None else network_id
         self.on_disconnect = on_disconnect
         self.connected = False
         self.connects = 0

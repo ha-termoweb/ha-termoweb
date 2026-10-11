@@ -99,7 +99,13 @@ def test_frames_are_classified_counted_and_masked() -> None:
 def test_dialect_a_announcement_identity_is_masked() -> None:
     """A dialect-A announcement keeps only its marker; a re-decoded frame is logged."""
     log = _log()
-    announce = received(9, bytes([0x77]) + IDENTITY_A, dialect=DIALECT_A, tag=0x03)
+    announce = received(
+        9,
+        bytes([0x77]) + IDENTITY_A,
+        dialect=DIALECT_A,
+        tag=0x03,
+        network_id=bytes.fromhex("5678"),
+    )
     # The link still decodes in dialect B: the log retries every dialect.
     as_b = ReceivedFrame(decode(DIALECT_B, announce.frame.air), -70.0, 1, 5)
     log.on_rx(as_b, DIALECT_B, NET)

@@ -712,7 +712,7 @@ def stick(radio: FakeRadio) -> FakeRadio:
     """A detected nanoCUL whose firmware detects the radio type."""
     radio.ports = [PORT]
     radio.stick = ("nanocul-a1b2c3", True)
-    radio.discover = (NetworkSighting(DIALECT_A, DIALECT_A.network_id), {6: None})
+    radio.discover = (NetworkSighting(DIALECT_A, NET), {6: None})
     return radio
 
 
@@ -864,7 +864,7 @@ async def test_probe_nanocul_with_this_repos_firmware(
     """firmware/nanocul (3.7-nanocul) has no MAC but reports dialects: capable."""
     info = parse_query_line(
         "# Q termoweb_rx 3.7-nanocul freq=869.525 pa=C0 sync=2DE5 mode=dynamic "
-        "autoack=off id=01 dialect=A net=1B30"
+        "autoack=off id=01 dialect=A net=1234"
     )
     monkeypatch.setattr(probe_link, "info", info)
     assert await config_flow_radio.probe_nanocul("/dev/ttyUSB0", "A1B2C3") == (
@@ -951,7 +951,8 @@ def air(monkeypatch: pytest.MonkeyPatch) -> DiscoveryRadio:
         ("auto", None, True, [("listen", ("B", "A")), ("probe", "B", NET, True, True)]),
         ("auto", None, False, [("listen", ("A",)), ("probe", "B", NET, True, True)]),
         ("B", None, True, [("listen", ("B",)), ("probe", "B", NET, True, True)]),
-        ("A", None, True, [("probe", "A", DIALECT_A.network_id, False, True)]),
+        ("A", None, True, [("listen", ("A",)), ("probe", "B", NET, True, True)]),
+        ("A", NET, True, [("probe", "A", NET, False, True)]),
         ("B", NET, True, [("probe", "B", NET, False, True)]),
     ],
 )
@@ -1001,7 +1002,8 @@ def _report(verdict: str, dialect: str | None = None, nets: tuple[str, ...] = ()
         (None, None, None),
         (["b"], _report("silent"), None),
         (["b"], _report("known", "B", ("1234", "5678")), (DIALECT_B, NET)),
-        (["b"], _report("known", "A"), (DIALECT_A, DIALECT_A.network_id)),
+        (["b"], _report("known", "A", ("1234",)), (DIALECT_A, NET)),
+        (["b"], _report("known", "A"), None),
         (["b"], _report("known", "B"), None),
         (["b"], _report("known", "Z"), "raise"),
         (["b"], _report("undecodable"), "raise"),

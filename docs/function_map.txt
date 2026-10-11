@@ -334,8 +334,8 @@ custom_components/termoweb/backend/radio/dialect.py :: decode
     Decode on-air bytes, verifying length and CRC; never raises on bad input.
 custom_components/termoweb/backend/radio/dialect.py :: build_frame
     Return on-air bytes for a data frame; path defaults to (src, dst, 0, 0, 0).
-custom_components/termoweb/backend/radio/dialect.py :: _network_id
-    Return a validated two-byte network id, defaulting to the dialect's own.
+custom_components/termoweb/backend/radio/dialect.py :: _check_network_id
+    Return ``network_id`` as bytes; raise ValueError unless it is two bytes.
 custom_components/termoweb/backend/radio/dialect.py :: detect_dialect
     Return the first dialect under which ``air`` has a valid length and CRC.
 custom_components/termoweb/backend/radio/discovery.py :: listen_once
