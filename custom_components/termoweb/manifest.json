@@ -9,5 +9,6 @@
   "issue_tracker": "https://github.com/ha-termoweb/ha-termoweb/issues",
   "loggers": ["custom_components.termoweb"],
   "requirements": ["pydantic>=2.8.0", "pyserial-asyncio-fast==0.16"],
-  "version": "2.4.0b2"
+  "version": "2.4.0b2",
+  "zeroconf": ["_termoweb-radio._tcp.local."]
 }

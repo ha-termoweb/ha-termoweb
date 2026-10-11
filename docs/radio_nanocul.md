@@ -39,11 +39,12 @@ repository.
 1. In Home Assistant, go to **Settings → Devices & Services → Add Integration**
    and search for **TermoWeb**.
 2. Choose **Local radio: nanoCUL USB stick (CC1101 868 MHz)**.
-3. Choose your stick in the **USB port** list. If it is not in the list,
-   choose **Enter the port path or URL myself** and type the path, for
-   example `/dev/serial/by-id/usb-...`.
-4. Leave **Radio dialect** on **auto** and **Network id** empty, and press
-   **Submit**.
+3. Your stick is usually already selected in the **USB port** list. If
+   another port is selected, or none, choose your stick: its name often
+   contains "CUL", "FTDI", "CH340" or "USB Serial". If it is not in the
+   list, choose **Enter the port path or URL myself** and type the path,
+   for example `/dev/serial/by-id/usb-...`.
+4. Leave **Advanced settings** as they are, and press **Submit**.
 5. Choose one:
    - **Find heaters that are already paired**: turn one heater's
      temperature up, so that it starts heating, and wait. This takes up to
@@ -81,5 +82,6 @@ recordings to learn unknown commands.
 The stock firmware only hears dialect A. The stick never transmits in this
 mode, not even link-layer acks.
 
-Only one entry can use the stick at a time. Delete the listen-only entry
-before you set up the stick to control your heaters.
+Only one entry can use the stick at a time. When you set up the stick to
+control your heaters, the listen-only entry loses the stick. Delete the
+listen-only entry first.

@@ -6,17 +6,23 @@ import asyncio
 from collections.abc import Generator
 import dataclasses
 import hashlib
+from ipaddress import ip_address
 import json
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from homeassistant.config_entries import SOURCE_USER, ConfigEntryDisabler
+from homeassistant.config_entries import SOURCE_USER, SOURCE_ZEROCONF, ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.helpers import instance_id
+from homeassistant.data_entry_flow import FlowResultType, section
+from homeassistant.helpers import config_validation as cv, instance_id
+from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
+import probatio
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+import voluptuous as vol
 
 from custom_components.termoweb import config_flow_radio, radio_pairing, radio_survey
 from custom_components.termoweb.backend.radio import (
@@ -181,59 +187,43 @@ async def _finish_progress(hass: HomeAssistant, result: dict[str, Any]) -> Any:
     return await hass.config_entries.flow.async_configure(result["flow_id"])
 
 
-@pytest.mark.parametrize(
-    ("brand", "host"),
-    [(BRAND_RADIO, "10.0.0.5"), (BRAND_RADIO_MONITOR, "10.0.0.5")],
-)
-async def test_radio_step_refuses_gateway_in_use(
-    hass: HomeAssistant, radio: FakeRadio, brand: str, host: str
-) -> None:
-    """A gateway another entry talks to is not probed (the bridge would drop it)."""
-    _esp32_entry(hass, brand=brand, host=host)
-    form = await _menu(hass, "radio")
-
-    result = await hass.config_entries.flow.async_configure(
-        form["flow_id"], {"host": " 10.0.0.5 ", "port": 2323, "dialect": "auto"}
-    )
-
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_in_use"
-    assert radio.calls == []
-
-
-async def test_radio_step_ignores_disabled_entry_and_other_port(
+async def test_radio_step_takes_over_a_gateway_another_entry_uses(
     hass: HomeAssistant, radio: FakeRadio
 ) -> None:
-    """A disabled entry, or one on another port, does not block the probe."""
-    _esp32_entry(hass, disabled_by=ConfigEntryDisabler.USER)
+    """A gateway another entry talks to is probed anyway: HA takes the link over."""
+    _esp32_entry(hass, brand=BRAND_RADIO_MONITOR)
     form = await _menu(hass, "radio")
-    radio.gateway = OTHER_GATEWAY_ID
 
     result = await hass.config_entries.flow.async_configure(
-        form["flow_id"], {"host": "10.0.0.5", "port": 2323, "dialect": "auto"}
+        form["flow_id"], {"host": " 10.0.0.5 "}
     )
 
     assert result["type"] is FlowResultType.MENU
     assert radio.calls == [("probe", "10.0.0.5", 2323)]
 
 
-async def test_nanocul_step_refuses_stick_in_use(
+async def test_nanocul_step_takes_over_a_stick_another_entry_reads(
     hass: HomeAssistant, radio: FakeRadio
 ) -> None:
-    """A stick another entry reads is not opened a second time."""
-    _stick_entry(hass)
-    with patch.object(config_flow_radio, "list_serial_ports", return_value=[]):
-        form = await _menu(hass, "nanocul")
-        form = await hass.config_entries.flow.async_configure(
-            form["flow_id"], {"device": "manual"}
-        )
-        result = await hass.config_entries.flow.async_configure(
-            form["flow_id"], {"device": f" {STICK} ", "dialect": "auto"}
-        )
+    """A stick another entry reads is opened anyway: HA takes it over."""
+    MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_BRAND: BRAND_RADIO_MONITOR,
+            "radio_type": "nanocul",
+            "device": STICK,
+        },
+    ).add_to_hass(hass)
+    form = await _menu(hass, "nanocul")
+    form = await hass.config_entries.flow.async_configure(
+        form["flow_id"], {"device": "manual"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"], {"device": f" {STICK} "}
+    )
 
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_in_use"
-    assert radio.calls == []
+    assert result["type"] is FlowResultType.MENU
+    assert radio.calls == [("probe", STICK)]
 
 
 async def test_reconfigure_radio_moves_address_and_reloads(
@@ -325,23 +315,6 @@ async def test_reconfigure_radio_refuses_other_gateway(
     assert dict(entry.data) == before
 
 
-async def test_reconfigure_radio_refuses_address_of_other_entry(
-    hass: HomeAssistant, radio: FakeRadio
-) -> None:
-    """The new address must not be one that another entry already uses."""
-    entry = _esp32_entry(hass)
-    _esp32_entry(hass, brand=BRAND_RADIO_MONITOR, host="10.0.0.9")
-    form = await entry.start_reconfigure_flow(hass)
-
-    result = await hass.config_entries.flow.async_configure(
-        form["flow_id"], {"host": "10.0.0.9", "port": 2323, "rescan": False}
-    )
-
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_in_use"
-    assert radio.calls == []
-
-
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
@@ -431,29 +404,6 @@ async def test_reconfigure_nanocul_without_mac_cannot_be_checked(
     assert entry.unique_id == f"{BRAND_RADIO}:nanocul-a1b2c3"
 
 
-async def test_reconfigure_nanocul_refuses_port_of_other_entry(
-    hass: HomeAssistant, radio: FakeRadio
-) -> None:
-    """The new port must not be one that another entry already reads."""
-    entry = _stick_entry(hass)
-    MockConfigEntry(
-        domain=DOMAIN,
-        data={
-            CONF_BRAND: BRAND_RADIO_MONITOR,
-            "radio_type": "nanocul",
-            "device": "/dev/ttyUSB1",
-        },
-    ).add_to_hass(hass)
-    form = await entry.start_reconfigure_flow(hass)
-
-    result = await hass.config_entries.flow.async_configure(
-        form["flow_id"], {"device": "/dev/ttyUSB1", "rescan": False}
-    )
-
-    assert result["reason"] == "already_in_use"
-    assert radio.calls == []
-
-
 @pytest.mark.parametrize(
     ("stick", "expected"),
     [
@@ -492,11 +442,11 @@ async def test_listen_only_entry_cannot_be_reconfigured(
 
 # --- setting up a radio entry ----------------------------------------------------
 
-FORM = {"host": "10.0.0.5", "port": 2323, "dialect": "auto", "network_id": ""}
+FORM = {"host": "10.0.0.5"}  # the manual form needs only the address
 PORT = config_flow_radio.SerialPort(
     "/dev/serial/by-id/usb-SHK_NANO_CUL_868-if00-port0", "nanoCUL 868", "A1B2C3"
 )
-STICK_FORM = {"device": PORT.device, "dialect": "auto", "network_id": ""}
+STICK_FORM = {"device": PORT.device}
 
 
 async def _gateway_menu(hass: HomeAssistant, form: dict[str, Any]) -> dict[str, Any]:
@@ -573,14 +523,37 @@ async def test_radio_discovery_creates_entry(
     assert radio.kwargs[0]["args"] == ("auto", None)
 
 
-async def test_radio_discovery_uses_a_manual_network_id(
+async def test_radio_form_asks_only_for_the_address(
     hass: HomeAssistant, radio: FakeRadio
 ) -> None:
-    """A typed network id (any separators) is passed to discovery."""
-    menu = await _gateway_menu(hass, {**FORM, "dialect": "B", "network_id": "12 34"})
+    """Port and dialect sit in a collapsed section; no network id field."""
+    form = await _menu(hass, "radio")
+    fields = {str(key): value for key, value in form["data_schema"].schema.items()}
+    assert set(fields) == {"host", "advanced"}
+    assert isinstance(fields["advanced"], section)
+    assert fields["advanced"].options == {"collapsed": True}
+    assert {str(key) for key in fields["advanced"].schema.schema} == {
+        "port",
+        "dialect",
+    }
+    fields_json = probatio.to_field_list(
+        form["data_schema"], custom_serializer=cv.custom_serializer
+    )
+    assert [field["name"] for field in fields_json] == ["host", "advanced"]
+    assert fields_json[1]["type"] == "expandable"
+
+
+async def test_radio_advanced_port_and_dialect_are_used(
+    hass: HomeAssistant, radio: FakeRadio
+) -> None:
+    """A port and dialect from the advanced section reach the probe and discovery."""
+    menu = await _gateway_menu(
+        hass, {**FORM, "advanced": {"port": 2424, "dialect": "B"}}
+    )
     result = await _choose(hass, menu, "radio_discover")
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert radio.kwargs[0]["args"] == ("B", NET)
+    assert result["data"]["port"] == 2424
+    assert radio.calls[0] == ("probe", "10.0.0.5", 2424)
+    assert radio.kwargs[0]["args"] == ("B", None)  # the network is learned
 
 
 async def test_radio_step_aborts_for_a_configured_gateway(
@@ -608,15 +581,6 @@ async def test_radio_form_gateway_errors(
     result = await _gateway_menu(hass, FORM)
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": error}
-
-
-async def test_radio_form_rejects_bad_network_id(
-    hass: HomeAssistant, radio: FakeRadio
-) -> None:
-    """A malformed network id is rejected before the gateway is probed."""
-    result = await _gateway_menu(hass, {**FORM, "network_id": "XYZ"})
-    assert result["errors"] == {"network_id": "invalid_network_id"}
-    assert radio.calls == []
 
 
 @pytest.mark.parametrize(
@@ -732,14 +696,15 @@ async def test_site_network_id_hashes_instance_and_gateway(
 @pytest.mark.parametrize(
     ("dialect", "dialects"), [("auto", PAIRING_DIALECTS), ("B", (DIALECT_B,))]
 )
-async def test_pairing_uses_a_network_id_the_user_entered(
+async def test_pairing_uses_the_dialect_the_user_chose(
     hass: HomeAssistant, radio: FakeRadio, dialect: str, dialects: tuple
 ) -> None:
-    """A typed network id and dialect are used for pairing."""
+    """A chosen dialect limits pairing; the network is always the site's."""
+    site_net = await radio_pairing.async_site_network_id(hass, GATEWAY_ID)
     radio.paired = (DIALECT_A, [_paired(2)])
-    menu = await _gateway_menu(hass, {**FORM, "dialect": dialect, "network_id": "1234"})
+    menu = await _gateway_menu(hass, {**FORM, "advanced": {"dialect": dialect}})
     result = await _pair(hass, menu)
-    assert result["data"]["network_id"] == "1234"
+    assert result["data"]["network_id"] == site_net.hex().upper()
     assert result["data"]["dialect"] == "A"
     assert radio.kwargs[-1]["dialects"] == dialects
 
@@ -865,21 +830,16 @@ async def test_manual_path_when_no_port_is_detected(
     [
         (STICK_FORM, RadioLinkError("busy"), {"base": "cannot_connect_nanocul"}),
         (
-            {**STICK_FORM, "dialect": "B"},
+            {**STICK_FORM, "advanced": {"dialect": "B"}},
             ("id", False),
             {"base": "dialect_unsupported_firmware"},
-        ),
-        (
-            {**STICK_FORM, "network_id": "XYZ"},
-            ("id", False),
-            {"network_id": "invalid_network_id"},
         ),
     ],
 )
 async def test_stick_errors_stay_on_the_form(
     hass: HomeAssistant, stick: FakeRadio, form: dict, probe: Any, error: dict
 ) -> None:
-    """A busy stick, a dialect its firmware lacks or a bad id keep the form open."""
+    """A busy stick, or a dialect its firmware lacks, keeps the form open."""
     stick.stick = probe
     result = await _stick_menu(hass, form)
     assert result["type"] is FlowResultType.FORM
@@ -903,7 +863,7 @@ async def test_dialect_b_on_capable_firmware_is_accepted(
     """Firmware that can switch dialects may use dialect B."""
     stick.stick = (GATEWAY_ID, True)
     stick.discover = (NetworkSighting(DIALECT_B, NET), {6: None})
-    menu = await _stick_menu(hass, {**STICK_FORM, "dialect": "B"})
+    menu = await _stick_menu(hass, {**STICK_FORM, "advanced": {"dialect": "B"}})
     result = await _choose(hass, menu, "radio_discover")
     assert result["data"]["dialect"] == "B" and result["data"]["network_id"] == "1234"
     assert stick.kwargs[0]["dialect_capable"] is True
@@ -920,16 +880,6 @@ async def test_stick_discovery_failure_returns_to_the_manual_form(
 
 
 # --- radio helpers used by the flow ---------------------------------------------------
-
-
-def test_parse_network_id() -> None:
-    """Network ids are four hex digits with optional separators."""
-    assert config_flow_radio.parse_network_id("") is None
-    assert config_flow_radio.parse_network_id(None) is None
-    assert config_flow_radio.parse_network_id(" 12:34 ") == NET
-    for bad in ("123", "12345", "GGGG"):
-        with pytest.raises(ValueError):
-            config_flow_radio.parse_network_id(bad)
 
 
 @pytest.fixture
@@ -1160,3 +1110,320 @@ async def test_pairing_shows_progress_until_the_run_ends(
         release.set()
         result = await _finish_progress(hass, again)
     assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+# --- zeroconf discovery of the ESP32 gateway -----------------------------------------
+
+
+def _zeroconf(
+    host: str = "10.0.0.7", mac: str | None = "0A:0B:0C:0D:0E:0F", port: int = 2323
+) -> ZeroconfServiceInfo:
+    """Return the mDNS advertisement of the synthetic gateway."""
+    properties = {"version": "3.7-esp32"}
+    if mac is not None:
+        properties["mac"] = mac.lower().replace(":", "")
+    return ZeroconfServiceInfo(
+        ip_address=ip_address(host),
+        ip_addresses=[ip_address(host)],
+        port=port,
+        hostname="termoweb-radio.local.",
+        type="_termoweb-radio._tcp.local.",
+        name="termoweb-radio._termoweb-radio._tcp.local.",
+        properties=properties,
+    )
+
+
+async def _discovered(
+    hass: HomeAssistant, info: ZeroconfServiceInfo | None = None
+) -> dict[str, Any]:
+    """Start a zeroconf flow for ``info`` (the synthetic gateway by default)."""
+    return await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_ZEROCONF}, data=info or _zeroconf()
+    )
+
+
+async def test_zeroconf_shows_confirm_without_connecting(
+    hass: HomeAssistant, radio: FakeRadio
+) -> None:
+    """The advertisement's MAC names the gateway; nothing is opened before confirm."""
+    result = await _discovered(hass)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "zeroconf_confirm"
+    assert result["description_placeholders"] == {"host": "10.0.0.7"}
+    assert radio.calls == []
+    flow = hass.config_entries.flow.async_get(result["flow_id"])
+    assert flow["context"]["unique_id"] == f"radio:{GATEWAY_ID}"
+    assert flow["context"]["title_placeholders"] == {"name": "Radio gateway (10.0.0.7)"}
+    assert flow["context"]["confirm_only"] is True
+
+
+async def test_zeroconf_confirm_probes_then_offers_the_heater_menu(
+    hass: HomeAssistant, radio: FakeRadio
+) -> None:
+    """Confirming probes the gateway, then discovery creates the entry."""
+    form = await _discovered(hass)
+
+    menu = await hass.config_entries.flow.async_configure(form["flow_id"], {})
+    result = await _choose(hass, menu, "radio_discover")
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == f"radio:{GATEWAY_ID}"
+    assert result["title"] == "Radio gateway (10.0.0.7)"
+    assert (result["data"]["host"], result["data"]["port"]) == ("10.0.0.7", 2323)
+    assert result["data"]["network_id"] == "1234"  # learned from heater traffic
+    assert radio.calls == [("probe", "10.0.0.7", 2323), ("discover", "10.0.0.7", 2323)]
+    assert radio.kwargs[0]["args"] == ("auto", None)
+
+
+async def test_zeroconf_pairing_uses_the_site_network(
+    hass: HomeAssistant, radio: FakeRadio
+) -> None:
+    """Pairing a discovered gateway derives the network: nothing is typed."""
+    site_net = await radio_pairing.async_site_network_id(hass, GATEWAY_ID)
+    form = await _discovered(hass)
+    menu = await hass.config_entries.flow.async_configure(form["flow_id"], {})
+
+    result = await _pair(hass, menu)
+
+    assert result["data"]["network_id"] == site_net.hex().upper()
+    assert radio.calls[-1] == ("pair", "10.0.0.7", 2323, site_net)
+
+
+async def test_zeroconf_moves_a_configured_gateway_to_its_new_address(
+    hass: HomeAssistant, radio: FakeRadio
+) -> None:
+    """A known gateway at a new IP updates its entries and aborts, unprobed."""
+    entry = _esp32_entry(hass)
+    monitor = _esp32_entry(hass, brand=BRAND_RADIO_MONITOR)
+
+    result = await _discovered(hass, _zeroconf(host="10.0.0.8", port=2424))
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert (entry.data["host"], entry.data["port"]) == ("10.0.0.8", 2424)
+    assert entry.data["nodes"] == NODES
+    assert (monitor.data["host"], monitor.data["port"]) == ("10.0.0.8", 2424)
+    assert radio.calls == []
+
+
+async def test_zeroconf_reloads_loaded_entries_at_a_new_address(
+    hass: HomeAssistant, radio: FakeRadio
+) -> None:
+    """Loaded entries are reloaded so they reconnect to the new address."""
+    entry = _esp32_entry(hass)
+    monitor = _esp32_entry(hass, brand=BRAND_RADIO_MONITOR)
+    for each in (entry, monitor):
+        each.mock_state(hass, ConfigEntryState.LOADED)
+    with patch.object(hass.config_entries, "async_schedule_reload") as reload:
+        result = await _discovered(hass, _zeroconf(host="10.0.0.8"))
+        unchanged = await _discovered(hass, _zeroconf(host="10.0.0.8"))
+
+    assert result["reason"] == unchanged["reason"] == "already_configured"
+    assert sorted(call.args[0] for call in reload.call_args_list) == sorted(
+        [entry.entry_id, monitor.entry_id]
+    )
+
+
+async def test_zeroconf_without_mac_probes_for_the_gateway_id(
+    hass: HomeAssistant, radio: FakeRadio
+) -> None:
+    """An advertisement without a MAC is identified by probing the gateway."""
+    result = await _discovered(hass, _zeroconf(mac=None))
+
+    assert result["step_id"] == "zeroconf_confirm"
+    assert radio.calls == [("probe", "10.0.0.7", 2323)]
+    flow = hass.config_entries.flow.async_get(result["flow_id"])
+    assert flow["context"]["unique_id"] == f"radio:{GATEWAY_ID}"
+
+
+@pytest.mark.parametrize(
+    ("probe", "reason"),
+    [
+        (RadioLinkError("down"), "cannot_connect_radio"),
+        (config_flow_radio.RadioSetupError("no_gateway_mac"), "no_gateway_mac"),
+    ],
+)
+async def test_zeroconf_without_mac_aborts_when_the_probe_fails(
+    hass: HomeAssistant, radio: FakeRadio, probe: Exception, reason: str
+) -> None:
+    """A gateway that cannot be identified is not offered."""
+    radio.gateway = probe
+    result = await _discovered(hass, _zeroconf(mac=None))
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == reason
+
+
+async def test_zeroconf_ignores_ipv6_advertisements(
+    hass: HomeAssistant, radio: FakeRadio
+) -> None:
+    """Only an IPv4 address can be used to reach the gateway."""
+    result = await _discovered(hass, _zeroconf(host="fe80::1"))
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "not_ipv4_address"
+    assert radio.calls == []
+
+
+@pytest.mark.parametrize(
+    ("probe", "error"),
+    [
+        (RadioLinkError("down"), "cannot_connect_radio"),
+        (config_flow_radio.RadioSetupError("no_gateway_mac"), "no_gateway_mac"),
+    ],
+)
+async def test_zeroconf_confirm_probe_errors_stay_on_confirm(
+    hass: HomeAssistant, radio: FakeRadio, probe: Exception, error: str
+) -> None:
+    """A gateway that stops answering keeps the confirm step open with the error."""
+    form = await _discovered(hass)
+    radio.gateway = probe
+    result = await hass.config_entries.flow.async_configure(form["flow_id"], {})
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "zeroconf_confirm"
+    assert result["errors"] == {"base": error}
+
+
+async def test_zeroconf_confirm_trusts_the_probed_gateway_id(
+    hass: HomeAssistant, radio: FakeRadio
+) -> None:
+    """A probe naming another (configured) gateway aborts instead of duplicating."""
+    _esp32_entry(hass)  # GATEWAY_ID is configured
+    form = await _discovered(hass, _zeroconf(mac="0F:0E:0D:0C:0B:0A"))
+    assert form["step_id"] == "zeroconf_confirm"
+
+    result = await hass.config_entries.flow.async_configure(form["flow_id"], {})
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_zeroconf_confirm_adopts_a_new_probed_gateway_id(
+    hass: HomeAssistant, radio: FakeRadio
+) -> None:
+    """A probe naming an unconfigured gateway continues under its id."""
+    form = await _discovered(hass, _zeroconf(mac="0F:0E:0D:0C:0B:0A"))
+    menu = await hass.config_entries.flow.async_configure(form["flow_id"], {})
+    result = await _choose(hass, menu, "radio_monitor")
+    assert result["result"].unique_id == f"radio_monitor:{GATEWAY_ID}"
+
+
+# --- nanoCUL port pre-selection ---------------------------------------------------
+
+
+def _port(device: str, description: str = "USB Serial", **kwargs: Any) -> Any:
+    """Return a detected serial port (USB unless told otherwise)."""
+    kwargs.setdefault("usb", True)
+    return config_flow_radio.SerialPort(device, description, None, **kwargs)
+
+
+ZIGBEE = _port("/dev/serial/by-id/usb-ITead_Sonoff_Zigbee_3.0-if00-port0")
+CH340 = _port("/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0")
+FTDI = _port(
+    "/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A1B2C3-if00-port0",
+    manufacturer="FTDI",
+    product="FT232R USB UART",
+)
+UART = _port("/dev/ttyAMA0", "ttyAMA0", usb=False)
+
+
+@pytest.mark.parametrize(
+    ("ports", "used", "expected"),
+    [
+        ([ZIGBEE, PORT], set(), PORT.device),  # "NANO_CUL" in the by-id name
+        ([ZIGBEE, _port("/dev/ttyUSB1", "nanoCUL 868")], set(), "/dev/ttyUSB1"),
+        ([CH340, _port("/dev/ttyACM0", product="culfw CUL868")], set(), "/dev/ttyACM0"),
+        ([PORT, CH340], {PORT.device}, CH340.device),  # the CUL is taken
+        ([FTDI, UART], set(), FTDI.device),  # the only USB serial port
+        ([ZIGBEE, FTDI], set(), None),  # two candidates: let the user choose
+        ([ZIGBEE, FTDI], {ZIGBEE.device}, FTDI.device),
+        ([_port("/dev/ttyUSB0", "Circular buffer"), CH340], set(), None),
+        ([UART], set(), None),
+        ([], set(), None),
+    ],
+)
+def test_likely_nanocul_port(
+    ports: list[Any], used: set[str], expected: str | None
+) -> None:
+    """A CUL-named port wins, else the only free USB serial port, else none."""
+    assert config_flow_radio.likely_nanocul_port(ports, used) == expected
+
+
+def _default_device(form: dict[str, Any]) -> Any:
+    """Return the pre-selected port of a nanoCUL form (None when blank)."""
+    for key in form["data_schema"].schema:
+        if str(key) == "device":
+            default = key.default
+            return None if default is vol.UNDEFINED else default()
+    raise AssertionError("no device field")
+
+
+@pytest.mark.parametrize(
+    ("ports", "expected"),
+    [
+        ([ZIGBEE, PORT], PORT.device),
+        ([FTDI, UART], FTDI.device),
+        ([ZIGBEE, CH340], None),
+        ([], "manual"),
+    ],
+)
+async def test_nanocul_form_preselects_the_likely_port(
+    hass: HomeAssistant, radio: FakeRadio, ports: list[Any], expected: str | None
+) -> None:
+    """The form opens with the stick chosen when it can tell; no port is opened."""
+    radio.ports = ports
+    form = await _menu(hass, "nanocul")
+    assert form["step_id"] == "nanocul"
+    assert _default_device(form) == expected
+    assert {str(key) for key in form["data_schema"].schema} == {"device", "advanced"}
+    assert radio.calls == []
+
+
+async def test_nanocul_form_skips_the_port_of_a_configured_stick(
+    hass: HomeAssistant, radio: FakeRadio
+) -> None:
+    """A port another TermoWeb entry uses is not pre-selected."""
+    _esp32_entry(hass)  # an ESP32 entry has no port to exclude
+    MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_BRAND: BRAND_RADIO_MONITOR,
+            "radio_type": "nanocul",
+            "device": PORT.device,
+        },
+    ).add_to_hass(hass)
+    radio.ports = [PORT, FTDI]
+    form = await _menu(hass, "nanocul")
+    assert _default_device(form) == FTDI.device
+
+
+def test_list_serial_ports_reads_usb_strings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Detected ports carry their USB strings and whether they are USB at all."""
+    usb = SimpleNamespace(
+        device="/dev/ttyUSB0",
+        description="FT232R USB UART",
+        serial_number="A1B2C3",
+        manufacturer="FTDI",
+        product="FT232R USB UART",
+        vid=0x0403,
+    )
+    builtin = SimpleNamespace(
+        device="/dev/ttyS0",
+        description=None,
+        serial_number=None,
+        manufacturer=None,
+        product=None,
+        vid=None,
+    )
+    tools = SimpleNamespace(list_ports=SimpleNamespace(comports=lambda: [usb, builtin]))
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(tools=tools))
+    monkeypatch.setitem(sys.modules, "serial.tools", tools)
+    monkeypatch.setattr(config_flow_radio, "SERIAL_BY_ID_DIR", "/nonexistent")
+
+    assert config_flow_radio.list_serial_ports() == [
+        config_flow_radio.SerialPort(
+            "/dev/ttyUSB0", "FT232R USB UART", "A1B2C3", "FTDI", "FT232R USB UART", True
+        ),
+        config_flow_radio.SerialPort(
+            "/dev/ttyS0", "/dev/ttyS0", None, None, None, False
+        ),
+    ]

@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "user": {
         "title": "How do your heaters connect?",
@@ -21,13 +22,24 @@
       },
       "radio": {
         "title": "Connect to the radio gateway",
-        "description": "Enter the IP address of your ESP32 radio gateway. Leave the dialect on \"auto\" and the network id empty. Keep the gateway near the heaters. In the next step you choose: find heaters that are already paired, or pair new heaters.",
+        "description": "Home Assistant normally finds the ESP32 radio gateway by itself: look for it under **Discovered** on the Devices & Services page. Use this form only if it does not show up there. Enter the IP address of your gateway. In the next step you choose: find heaters that are already paired, or pair new heaters.",
         "data": {
-          "host": "Gateway IP address",
-          "port": "Port",
-          "dialect": "Radio dialect",
-          "network_id": "Network id (4 hex digits, optional)"
+          "host": "Gateway IP address"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced settings",
+            "description": "Leave these as they are unless you changed the gateway firmware.",
+            "data": {
+              "port": "Port",
+              "dialect": "Radio dialect"
+            }
+          }
         }
+      },
+      "zeroconf_confirm": {
+        "title": "Radio gateway found",
+        "description": "Found a TermoWeb radio gateway at {host}. Set it up?\n\nIn the next step you choose: find heaters that are already paired, or pair new heaters."
       },
       "radio_discover": { "title": "Looking for your heaters" },
       "radio_method": {
@@ -55,20 +67,34 @@
       },
       "nanocul": {
         "title": "Connect to the nanoCUL USB stick",
-        "description": "Choose the port of your nanoCUL stick (it usually shows as a USB serial device). Leave the dialect on \"auto\" and the network id empty. In the next step you choose: find heaters that are already paired, or pair new heaters.",
+        "description": "Choose the port of your nanoCUL stick. If Home Assistant recognised the stick, it is already selected: just press Submit. In the next step you choose: find heaters that are already paired, or pair new heaters.",
         "data": {
-          "device": "USB port",
-          "dialect": "Radio dialect",
-          "network_id": "Network id (4 hex digits, optional)"
+          "device": "USB port"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced settings",
+            "description": "Leave the dialect on \"auto\": the setup finds it by itself.",
+            "data": {
+              "dialect": "Radio dialect"
+            }
+          }
         }
       },
       "nanocul_manual": {
         "title": "Enter the nanoCUL port",
         "description": "Type the port path, for example /dev/serial/by-id/usb-..., or a network address such as socket://192.0.2.10:2323 for a stick shared over the network.",
         "data": {
-          "device": "Port path or URL",
-          "dialect": "Radio dialect",
-          "network_id": "Network id (4 hex digits, optional)"
+          "device": "Port path or URL"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced settings",
+            "description": "Leave the dialect on \"auto\": the setup finds it by itself.",
+            "data": {
+              "dialect": "Radio dialect"
+            }
+          }
         }
       },
       "reconfigure_nanocul": {
@@ -103,9 +129,8 @@
       "unknown": "Unknown error",
       "cannot_connect_radio": "Cannot connect to the radio gateway. Check the IP address and port, and that the gateway is powered on.",
       "no_gateway_mac": "The radio gateway did not report its MAC address. Update the gateway firmware.",
-      "no_traffic": "No heater radio traffic was heard. Turn one heater's temperature up so it starts heating, move the gateway closer to it, and try again. You can also enter the dialect and network id.",
+      "no_traffic": "No heater radio traffic was heard. Turn one heater's temperature up so it starts heating, move the gateway closer to it, and try again.",
       "no_heaters": "No heater answered. Move the gateway closer to the heaters and try again.",
-      "invalid_network_id": "The network id must be 4 hex digits, for example 1A2B.",
       "cannot_connect_nanocul": "Cannot open the nanoCUL stick. Check that it is plugged in, that the port is right, and that it runs the termoweb_rx firmware.",
       "dialect_unsupported_firmware": "This nanoCUL firmware only knows radio dialect A. Choose dialect A or auto, or update the stick's firmware.",
       "unknown_dialect": "Radio bursts were heard, but none could be decoded. A weak signal can cause this: move the gateway closer to a heater and try again. If it happens again, your heaters may use a radio dialect this integration does not know yet. Please open an issue at {issue_url} and attach the report file {report}.",
@@ -119,9 +144,11 @@
       "already_configured": "This gateway is already set up.",
       "reconfigure_successful": "The settings were saved.",
       "monitor_reconfigure": "A listen-only entry cannot be changed. Delete it and add it again.",
-      "already_in_use": "Another entry already uses this radio gateway or stick. Only one connection at a time is possible. Change or delete that entry first.",
       "unique_id_mismatch": "This is a different account or device. To use it, add a new entry instead.",
-      "reauth_successful": "The new password was saved."
+      "reauth_successful": "The new password was saved.",
+      "cannot_connect_radio": "Cannot connect to the radio gateway. Check that the gateway is powered on and on your network.",
+      "no_gateway_mac": "The radio gateway did not report its MAC address. Update the gateway firmware.",
+      "not_ipv4_address": "The radio gateway announced only an IPv6 address. Add it by hand with its IPv4 address."
     }
   },
   "options": {

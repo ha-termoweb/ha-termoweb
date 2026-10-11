@@ -8,12 +8,17 @@ from dataclasses import dataclass
 import functools
 import logging
 from pathlib import Path
+import re
 from typing import Any
 
 from homeassistant import config_entries
-from homeassistant.config_entries import SOURCE_RECONFIGURE, ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.config_entries import (
+    SOURCE_RECONFIGURE,
+    ConfigEntry,
+    ConfigEntryState,
+)
+from homeassistant.data_entry_flow import FlowResult, section
+from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 import voluptuous as vol
 
 from .backend import BackendCapabilities, backend_capabilities
@@ -62,35 +67,6 @@ def entry_capabilities(entry: ConfigEntry) -> BackendCapabilities:
     return backend_capabilities(entry.data.get(CONF_BRAND, DEFAULT_BRAND))
 
 
-def _radio_key(data: Mapping[str, Any]) -> tuple[Any, ...]:
-    """Return what identifies the radio connection: the serial port or host:port."""
-    if data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL:
-        return (RADIO_TYPE_NANOCUL, str(data.get(CONF_DEVICE, "")).strip())
-    return (
-        RADIO_TYPE_ESP32,
-        str(data.get(CONF_HOST, "")).strip().casefold(),
-        int(data.get(CONF_PORT, 0)),
-    )
-
-
-def _radio_in_use(
-    hass: HomeAssistant, radio: Mapping[str, Any], exclude_entry_id: str | None = None
-) -> bool:
-    """Return True when another enabled entry already talks to this gateway or stick.
-
-    The ESP32 bridge drops its current client when a new one connects, and a
-    serial port has one reader, so probing such a radio breaks the running entry.
-    """
-    wanted = _radio_key(radio)
-    return any(
-        entry.entry_id != exclude_entry_id
-        and entry.disabled_by is None
-        and entry_capabilities(entry).local_radio
-        and _radio_key(entry.data) == wanted
-        for entry in hass.config_entries.async_entries(DOMAIN)
-    )
-
-
 def _is_mac_id(dev_id: str | None) -> bool:
     """Return True when ``dev_id`` came from a radio MAC (so it names the hardware)."""
     return dev_id is not None and dev_id_from_mac(dev_id) == dev_id
@@ -99,6 +75,7 @@ def _is_mac_id(dev_id: str | None) -> bool:
 DIALECT_AUTO = "auto"
 CONF_RESCAN = "rescan"
 MANUAL_DEVICE = "manual"  # nanoCUL port choice: type a path or URL instead
+ADVANCED = "advanced"  # collapsed form section: port and dialect
 SERIAL_BY_ID_DIR = "/dev/serial/by-id"
 NANOCUL_LABEL = "nanoCUL"
 MONITOR_LABEL = "Radio monitor"  # title of a listen-only entry
@@ -114,6 +91,9 @@ class SerialPort:
     device: str  # stable /dev/serial/by-id path when there is one
     description: str
     serial_number: str | None
+    manufacturer: str | None = None
+    product: str | None = None
+    usb: bool = False  # a USB serial adapter (not a built-in UART)
 
 
 def _by_id_path(device: str) -> str:
@@ -138,9 +118,35 @@ def list_serial_ports() -> list[SerialPort]:
             _by_id_path(port.device),
             port.description or port.device,
             port.serial_number,
+            port.manufacturer,
+            port.product,
+            port.vid is not None,
         )
         for port in list_ports.comports()
     ]
+
+
+# "nanoCUL", "nano_cul", "CUL868" or "culfw" in a port's name or USB strings.
+_CUL_NAME = re.compile(r"(?<![a-z])(?:nano[ _-]?)?cul(?:fw)?(?![a-z])", re.IGNORECASE)
+
+
+def likely_nanocul_port(ports: Sequence[SerialPort], used: set[str]) -> str | None:
+    """Return the port to pre-select for a nanoCUL, or None when unsure.
+
+    A port whose name or USB strings say CUL wins; otherwise the only USB
+    serial port that no TermoWeb entry uses. Nothing is opened to decide.
+    """
+    free = [port for port in ports if port.device not in used]
+    for port in free:
+        text = " ".join(
+            filter(
+                None, (port.device, port.description, port.manufacturer, port.product)
+            )
+        )
+        if _CUL_NAME.search(text):
+            return port.device
+    usb = [port.device for port in free if port.usb]
+    return usb[0] if len(usb) == 1 else None
 
 
 class RadioSetupError(Exception):
@@ -169,20 +175,43 @@ async def _analyse_inline(bursts: Sequence[RawBurst]) -> SurveyReport:
     return analyse(bursts)
 
 
-def _radio_schema(defaults: dict[str, Any]) -> vol.Schema:
-    """Build the radio gateway form schema with provided defaults."""
+def _dialect_field(defaults: Mapping[str, Any]) -> dict[Any, Any]:
+    """Return the optional radio dialect field (auto by default)."""
+    return {
+        vol.Optional(
+            CONF_DIALECT, default=defaults.get(CONF_DIALECT, DIALECT_AUTO)
+        ): vol.In([DIALECT_AUTO, *DIALECTS]),
+    }
+
+
+def _advanced(fields: dict[Any, Any]) -> dict[Any, Any]:
+    """Return ``fields`` as a collapsed "advanced" form section."""
+    return {
+        vol.Required(ADVANCED, default={}): section(
+            vol.Schema(fields), {"collapsed": True}
+        )
+    }
+
+
+def _flatten(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Return form input with the advanced section's fields moved to the top."""
+    flat = {key: value for key, value in user_input.items() if key != ADVANCED}
+    return {**flat, **user_input.get(ADVANCED, {})}
+
+
+def _radio_schema(defaults: Mapping[str, Any]) -> vol.Schema:
+    """Build the radio gateway form: the address, port and dialect tucked away."""
     return vol.Schema(
         {
             vol.Required(CONF_HOST, default=defaults.get(CONF_HOST, "")): str,
-            vol.Required(
-                CONF_PORT, default=defaults.get(CONF_PORT, RADIO_DEFAULT_PORT)
-            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
-            vol.Optional(
-                CONF_DIALECT, default=defaults.get(CONF_DIALECT, DIALECT_AUTO)
-            ): vol.In([DIALECT_AUTO, *DIALECTS]),
-            vol.Optional(
-                CONF_NETWORK_ID, default=defaults.get(CONF_NETWORK_ID, "")
-            ): str,
+            **_advanced(
+                {
+                    vol.Optional(
+                        CONF_PORT, default=defaults.get(CONF_PORT, RADIO_DEFAULT_PORT)
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+                    **_dialect_field(defaults),
+                }
+            ),
         }
     )
 
@@ -200,29 +229,23 @@ def _reconfigure_radio_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
-def _dialect_fields(defaults: Mapping[str, Any]) -> dict[Any, Any]:
-    """Return the optional dialect and network id fields shared by radio forms."""
-    return {
-        vol.Optional(
-            CONF_DIALECT, default=defaults.get(CONF_DIALECT, DIALECT_AUTO)
-        ): vol.In([DIALECT_AUTO, *DIALECTS]),
-        vol.Optional(CONF_NETWORK_ID, default=defaults.get(CONF_NETWORK_ID, "")): str,
-    }
-
-
-def _nanocul_schema(ports: list[SerialPort], defaults: Mapping[str, Any]) -> vol.Schema:
+def _nanocul_schema(
+    ports: list[SerialPort], defaults: Mapping[str, Any], likely: str | None = None
+) -> vol.Schema:
     """Build the nanoCUL port choice: detected ports plus a manual entry."""
     choices = {port.device: f"{port.description} ({port.device})" for port in ports}
     choices[MANUAL_DEVICE] = "Enter the port path or URL myself"
     default = defaults.get(CONF_DEVICE)
     if default not in choices:
-        default = next(iter(choices))
-    return vol.Schema(
-        {
-            vol.Required(CONF_DEVICE, default=default): vol.In(choices),
-            **_dialect_fields(defaults),
-        }
+        default = likely if likely in choices else None
+    if default is None and len(choices) == 1:
+        default = MANUAL_DEVICE  # no port detected: typing it is the only choice
+    device = (
+        vol.Required(CONF_DEVICE)
+        if default is None
+        else vol.Required(CONF_DEVICE, default=default)
     )
+    return vol.Schema({device: vol.In(choices), **_advanced(_dialect_field(defaults))})
 
 
 def _nanocul_manual_schema(defaults: Mapping[str, Any]) -> vol.Schema:
@@ -234,7 +257,7 @@ def _nanocul_manual_schema(defaults: Mapping[str, Any]) -> vol.Schema:
                 CONF_DEVICE,
                 default="" if device in (None, MANUAL_DEVICE) else device,
             ): str,
-            **_dialect_fields(defaults),
+            **_advanced(_dialect_field(defaults)),
         }
     )
 
@@ -247,16 +270,6 @@ def _reconfigure_nanocul_schema(defaults: Mapping[str, Any]) -> vol.Schema:
             vol.Optional(CONF_RESCAN, default=False): bool,
         }
     )
-
-
-def parse_network_id(text: str | None) -> bytes | None:
-    """Return 4 hex digits as two bytes, None when blank; raise ValueError otherwise."""
-    cleaned = (text or "").replace(" ", "").replace(":", "").strip()
-    if not cleaned:
-        return None
-    if len(cleaned) != 4:
-        raise ValueError("network id must be 4 hex digits")
-    return bytes.fromhex(cleaned)
 
 
 async def probe_gateway(host: str, port: int) -> str:
@@ -460,6 +473,11 @@ def radio_entry_data(
     }
 
 
+def _probe_error(err: Exception) -> str:
+    """Return the form error key for a failed gateway probe."""
+    return err.reason if isinstance(err, RadioSetupError) else "cannot_connect_radio"
+
+
 class RadioConfigFlow(config_entries.ConfigFlow):
     """Radio gateway and nanoCUL steps of the config flow (registered by a subclass)."""
 
@@ -475,37 +493,110 @@ class RadioConfigFlow(config_entries.ConfigFlow):
     async def async_step_radio(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Collect the radio gateway address, then discover the heater network."""
+        """Collect the radio gateway address, then discover the heater network.
+
+        The fallback for networks without mDNS: normally the gateway is found
+        by zeroconf discovery and no address is typed at all.
+        """
         if user_input is None:
             return self.async_show_form(
                 step_id="radio", data_schema=_radio_schema(self._radio)
             )
-        self._radio = {**user_input, CONF_RADIO_TYPE: RADIO_TYPE_ESP32}
-        if _radio_in_use(self.hass, self._radio):
-            return self.async_abort(reason="already_in_use")
-        errors: dict[str, str] = {}
+        self._radio = {
+            CONF_PORT: RADIO_DEFAULT_PORT,
+            **_flatten(user_input),
+            CONF_RADIO_TYPE: RADIO_TYPE_ESP32,
+        }
+        self._radio[CONF_HOST] = str(self._radio[CONF_HOST]).strip()
         try:
-            network_id = parse_network_id(user_input.get(CONF_NETWORK_ID))
-        except ValueError:
-            errors[CONF_NETWORK_ID] = "invalid_network_id"
-            network_id = None
-        if not errors:
-            try:
-                dev_id = await probe_gateway(
-                    user_input[CONF_HOST], user_input[CONF_PORT]
-                )
-            except RadioLinkError:
-                errors["base"] = "cannot_connect_radio"
-            except RadioSetupError as err:
-                errors["base"] = err.reason
-        if errors:
+            dev_id = await probe_gateway(self._radio[CONF_HOST], self._radio[CONF_PORT])
+        except (RadioLinkError, RadioSetupError) as err:
             return self.async_show_form(
-                step_id="radio", data_schema=_radio_schema(self._radio), errors=errors
+                step_id="radio",
+                data_schema=_radio_schema(self._radio),
+                errors={"base": _probe_error(err)},
             )
         await self.async_set_unique_id(f"{BRAND_RADIO}:{dev_id}")
         self._abort_if_unique_id_configured()
-        self._radio["network_bytes"] = network_id
         self._radio[_GATEWAY_ID] = dev_id
+        return await self.async_step_radio_method()
+
+    async def async_step_zeroconf(
+        self, discovery_info: ZeroconfServiceInfo
+    ) -> FlowResult:
+        """Handle an ESP32 radio gateway found by its mDNS advertisement.
+
+        The gateway's id comes from the TXT ``mac`` record (or a probe when it
+        is missing). A known gateway at a new address gets its entry updated.
+        """
+        if discovery_info.ip_address.version != 4:
+            return self.async_abort(reason="not_ipv4_address")
+        host = str(discovery_info.ip_address)
+        port = discovery_info.port or RADIO_DEFAULT_PORT
+        _LOGGER.debug(
+            "Radio gateway advertised at %s:%s: %s",
+            host,
+            port,
+            discovery_info.properties,
+        )
+        dev_id = dev_id_from_mac(discovery_info.properties.get("mac"))
+        if dev_id is None:
+            try:
+                dev_id = await probe_gateway(host, port)
+            except RadioLinkError:
+                return self.async_abort(reason="cannot_connect_radio")
+            except RadioSetupError as err:
+                return self.async_abort(reason=err.reason)
+        await self.async_set_unique_id(f"{BRAND_RADIO}:{dev_id}")
+        self._update_monitor_address(dev_id, host, port)
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
+        self._radio = {
+            CONF_HOST: host,
+            CONF_PORT: port,
+            CONF_RADIO_TYPE: RADIO_TYPE_ESP32,
+            _GATEWAY_ID: dev_id,
+        }
+        self.context["title_placeholders"] = {"name": f"{RADIO_GATEWAY_LABEL} ({host})"}
+        return await self.async_step_zeroconf_confirm()
+
+    def _update_monitor_address(self, dev_id: str, host: str, port: int) -> None:
+        """Move a listen-only entry of this gateway to its new address."""
+        entry = self.hass.config_entries.async_entry_for_domain_unique_id(
+            DOMAIN, f"{BRAND_RADIO_MONITOR}:{dev_id}"
+        )
+        if (
+            entry is not None
+            and self.hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_HOST: host, CONF_PORT: port}
+            )
+            and entry.state is ConfigEntryState.LOADED
+        ):
+            self.hass.config_entries.async_schedule_reload(entry.entry_id)
+
+    async def async_step_zeroconf_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask before setting up a discovered gateway, then check it answers."""
+        placeholders = {"host": self._radio[CONF_HOST]}
+        if user_input is None:
+            self._set_confirm_only()
+            return self.async_show_form(
+                step_id="zeroconf_confirm", description_placeholders=placeholders
+            )
+        try:
+            dev_id = await probe_gateway(self._radio[CONF_HOST], self._radio[CONF_PORT])
+        except (RadioLinkError, RadioSetupError) as err:
+            return self.async_show_form(
+                step_id="zeroconf_confirm",
+                description_placeholders=placeholders,
+                errors={"base": _probe_error(err)},
+            )
+        if dev_id != self._radio[_GATEWAY_ID]:
+            await self.async_set_unique_id(
+                f"{BRAND_RADIO}:{dev_id}", raise_on_progress=False
+            )
+            self._abort_if_unique_id_configured()
+            self._radio[_GATEWAY_ID] = dev_id
         return await self.async_step_radio_method()
 
     async def async_step_radio_method(
@@ -551,11 +642,9 @@ class RadioConfigFlow(config_entries.ConfigFlow):
             self._radio_result = None
             self._radio_error = None
             self._radio_placeholders = {}
-            network_id = self._radio.get("network_bytes")
-            if network_id is None:
-                network_id = await async_site_network_id(
-                    self.hass, str(self._radio.get(_GATEWAY_ID))
-                )
+            network_id = await async_site_network_id(
+                self.hass, str(self._radio.get(_GATEWAY_ID))
+            )
             host, port = radio_address(self._radio)
             self._radio_task = self.hass.async_create_task(
                 pair_radio(
@@ -686,12 +775,18 @@ class RadioConfigFlow(config_entries.ConfigFlow):
     async def async_step_nanocul(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Choose the nanoCUL's serial port (or a manual path), then discover."""
+        """Choose the nanoCUL's serial port (or a manual path), then discover.
+
+        The most likely port is pre-selected without opening any port.
+        """
         ports = await self.hass.async_add_executor_job(list_serial_ports)
         if user_input is None:
+            likely = likely_nanocul_port(ports, self._used_serial_ports())
             return self.async_show_form(
-                step_id="nanocul", data_schema=_nanocul_schema(ports, self._radio)
+                step_id="nanocul",
+                data_schema=_nanocul_schema(ports, self._radio, likely),
             )
+        user_input = _flatten(user_input)
         if user_input[CONF_DEVICE] == MANUAL_DEVICE:
             self._radio = {**user_input, CONF_RADIO_TYPE: RADIO_TYPE_NANOCUL}
             return await self.async_step_nanocul_manual()
@@ -712,9 +807,19 @@ class RadioConfigFlow(config_entries.ConfigFlow):
                 step_id="nanocul_manual",
                 data_schema=_nanocul_manual_schema(self._radio),
             )
+        user_input = _flatten(user_input)
         return await self._start_nanocul(
             "nanocul_manual", user_input, None, _nanocul_manual_schema(user_input)
         )
+
+    def _used_serial_ports(self) -> set[str]:
+        """Return the serial ports that TermoWeb entries already use."""
+        return {
+            str(entry.data[CONF_DEVICE])
+            for entry in self.hass.config_entries.async_entries(DOMAIN)
+            if entry.data.get(CONF_RADIO_TYPE) == RADIO_TYPE_NANOCUL
+            and CONF_DEVICE in entry.data
+        }
 
     async def _start_nanocul(
         self,
@@ -730,26 +835,18 @@ class RadioConfigFlow(config_entries.ConfigFlow):
             CONF_DEVICE: device,
             CONF_RADIO_TYPE: RADIO_TYPE_NANOCUL,
         }
-        if _radio_in_use(self.hass, self._radio):
-            return self.async_abort(reason="already_in_use")
         errors: dict[str, str] = {}
-        network_id = None
         try:
-            network_id = parse_network_id(user_input.get(CONF_NETWORK_ID))
-        except ValueError:
-            errors[CONF_NETWORK_ID] = "invalid_network_id"
-        if not errors:
-            try:
-                dev_id, capable = await probe_nanocul(device, usb_serial)
-            except RadioLinkError:
-                errors["base"] = "cannot_connect_nanocul"
-            else:
-                wants_b = user_input.get(CONF_DIALECT, DIALECT_AUTO) not in (
-                    DIALECT_AUTO,
-                    "A",
-                )
-                if wants_b and not capable:
-                    errors["base"] = "dialect_unsupported_firmware"
+            dev_id, capable = await probe_nanocul(device, usb_serial)
+        except RadioLinkError:
+            errors["base"] = "cannot_connect_nanocul"
+        else:
+            wants_b = user_input.get(CONF_DIALECT, DIALECT_AUTO) not in (
+                DIALECT_AUTO,
+                "A",
+            )
+            if wants_b and not capable:
+                errors["base"] = "dialect_unsupported_firmware"
         if errors:
             return self.async_show_form(
                 step_id=step_id, data_schema=schema, errors=errors
@@ -758,7 +855,6 @@ class RadioConfigFlow(config_entries.ConfigFlow):
         self._abort_if_unique_id_configured()
         self._radio.update(
             {
-                "network_bytes": network_id,
                 CONF_RADIO_DEVICE_ID: dev_id,
                 _CAPABLE: capable,
                 _GATEWAY_ID: dev_id,
@@ -778,8 +874,6 @@ class RadioConfigFlow(config_entries.ConfigFlow):
             )
         device = str(user_input[CONF_DEVICE]).strip()
         self._radio = {**entry.data, CONF_DEVICE: device}
-        if _radio_in_use(self.hass, self._radio, entry.entry_id):
-            return self.async_abort(reason="already_in_use")
         try:
             dev_id, capable = await probe_nanocul(device)
         except RadioLinkError:
@@ -825,8 +919,6 @@ class RadioConfigFlow(config_entries.ConfigFlow):
             )
         host, port = user_input[CONF_HOST], user_input[CONF_PORT]
         self._radio = {**entry.data, CONF_HOST: host, CONF_PORT: port}
-        if _radio_in_use(self.hass, self._radio, entry.entry_id):
-            return self.async_abort(reason="already_in_use")
         try:
             dev_id = await probe_gateway(host, port)
         except (RadioLinkError, RadioSetupError) as err:
