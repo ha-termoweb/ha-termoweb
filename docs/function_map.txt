@@ -33,7 +33,7 @@ custom_components/termoweb/__init__.py :: _async_shutdown_entry
 custom_components/termoweb/__init__.py :: async_unload_entry
     Unload the platforms; the runtime shuts down afterwards via async_on_unload.
 custom_components/termoweb/__init__.py :: async_remove_entry
-    Delete the entry's stored energy import progress and pairing window.
+    Delete the entry's stored data; the last entry also removes the card resource.
 custom_components/termoweb/__init__.py :: _cloud_unique_id
     Return the entry's canonical account unique ID, or its own on a collision.
 custom_components/termoweb/__init__.py :: _migrate_to_1_2
@@ -2386,6 +2386,10 @@ custom_components/termoweb/runtime.py :: require_runtime
     Return the running runtime of ``entry_id``; raise LookupError otherwise.
 custom_components/termoweb/runtime.py :: loaded_runtimes
     Return the runtimes of every running TermoWeb entry.
+custom_components/termoweb/schedule_card.py :: async_register_schedule_card
+    Serve the card and make sure exactly one dashboard resource loads it.
+custom_components/termoweb/schedule_card.py :: async_remove_schedule_card
+    Remove the card's dashboard resource when the last entry is deleted.
 custom_components/termoweb/select.py :: async_setup_entry
     Add control mode and panel unit selects for heaters with advanced setup.
 custom_components/termoweb/select.py :: ControlModeSelect.current_option

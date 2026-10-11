@@ -62,6 +62,7 @@ from .radio_discovery import (
 )
 from .radio_identity import async_learn_serials, async_rekey_inventory
 from .runtime import EntryRuntime, TermoWebConfigEntry
+from .schedule_card import async_register_schedule_card, async_remove_schedule_card
 from .services.energy_history import async_register_import_energy_history_service
 from .services.radio_capture import async_register_radio_capture_service
 from .services.radio_pairing import async_register_radio_pairing_services
@@ -97,6 +98,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     await async_register_radio_survey_service(hass)
     await async_register_radio_capture_service(hass)
     await async_register_radio_pairing_services(hass)
+    try:
+        await async_register_schedule_card(hass)
+    except Exception:  # the card is optional; heaters must still load
+        _LOGGER.exception("Could not register the schedule card")
     return True
 
 
@@ -584,9 +589,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: TermoWebConfigEntry) ->
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Delete the entry's stored energy import progress and pairing window."""
+    """Delete the entry's stored data; the last entry also removes the card resource."""
     await energy_import_store(hass, entry.entry_id).async_remove()
     async_forget_pairing_window(hass, entry.entry_id)
+    if not hass.config_entries.async_entries(DOMAIN):
+        await async_remove_schedule_card(hass)
 
 
 def _cloud_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> str | None:

@@ -194,7 +194,7 @@ If your dashboard shows a preset label, **temporary override** means: “Use thi
    by itself, usually within a few minutes. You get a notification for each heater it finds.
    New heaters pair by themselves: put the heater into pairing mode within 30 minutes of adding the gateway,
    or press **Pair new heaters** on the gateway device first. Pairing is then open for 10 minutes.
-7) Copy the custom card for a dashboard element that allows you to program presets and weekly schedule across heaters. 
+7) Optional: add the **TermoWeb Schedule** card to a dashboard to edit each heater's weekly schedule and preset temperatures. There is nothing to install. See [Schedule card: edit the weekly schedule](docs/schedule_card.md).
 ---
 
 ## After the upgrade (2026-10 release)
@@ -250,11 +250,11 @@ Please do not add automations that call the cloud very often.
 - **Voice control:** Expose heater entities via Home Assistant’s Google or Alexa integrations.
 - **Automations idea:** Lower temperature when nobody’s home; switch to **Off** if a window sensor is open for 10+ minutes.
 
-## Install custom weekly schedule card
+## Weekly schedule card
 
-See instructions in custom_components/termoweb/assets, to install the card and create a dashboard with weekly programming like this:
+The integration includes a dashboard card for the weekly schedule and the preset temperatures. It comes with the integration, so there is nothing to copy or install. To add it: edit a dashboard, click **+ Add card**, open the **By card** tab, search for `termoweb` and pick **TermoWeb Schedule**. See [Schedule card: edit the weekly schedule](docs/schedule_card.md).
 
-![programming-card-preview](docs/programming-card-preview.png)
+![The schedule card](docs/programming-card-preview.png)
 
 
 ## Energy monitoring & history

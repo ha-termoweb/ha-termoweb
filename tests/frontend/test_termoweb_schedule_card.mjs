@@ -293,6 +293,19 @@ assert(card._progLocal.length === 168, "Program array should have 168 slots");
 assert(Array.isArray(card._ptempLocal), "Preset temperatures should hydrate");
 assert(card._entities.length === 2, "Two climate entities should be detected");
 
+// ---------- default heater without a configured entity ----------
+const autoCard = new cardClass();
+autoCard.setConfig({});
+autoCard.hass = hass;
+assert(
+  autoCard._entity && autoCard._els.entitySelect.value === autoCard._entity,
+  "Entity select should show the default heater on first load",
+);
+assert(
+  autoCard._copyEntityTarget && autoCard._copyEntityTarget !== autoCard._entity,
+  "Copy target should default to another heater",
+);
+
 // ---------- _copyDays behaviour ----------
 card._progLocal = Array.from({ length: 168 }, (_, idx) => (idx % 3));
 card._copyFrom = 1;
