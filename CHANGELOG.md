@@ -1,19 +1,21 @@
 # Changelog
 
-## Unreleased
+## 2.4.0b7 (pre-release, 2026-10-11)
+
+Beta for testing. HACS shows it only when "Show beta versions" is enabled for this repository.
 
 ### Added
 - nanoCUL stick: new firmware **3.7-nanocul** in this repository (`firmware/nanocul`). The stick now works with the same heaters as the ESP32 gateway, and has the same commands: radio survey, frequency setting and network id. Download the ready-made file from the release page, or build it yourself; see [Radio stick: use a nanoCUL USB stick](docs/radio_nanocul.md), step 2.
 - The radio survey (**TermoWeb: Radio survey**) also works with a nanoCUL stick that has the new firmware.
-- Radio: heaters of radio type A keep their own energy meter. The **Energy** sensor now shows that meter, read every 10 minutes, instead of an estimate. The first reading after this update is the heater's total so far, so the Energy Dashboard can show one large step that day. Heaters of radio type B have no meter and keep the estimate.
-- Radio: heaters of radio type A can **boost**. Choose the **Boost** preset on the heater, or use the **Start boost** and **Cancel boost** actions. The heater boosts for its own boost time, so leave the duration out. The heater shows when the boost ends.
-- Radio: heaters of radio type A get two switches, **Runback** and **EASY mode**. When you turn Runback off, the heater gets back the mode and temperature it had before.
+- Radio: heaters that keep their own energy meter now report it. The **Energy** sensor now shows that meter, read every 10 minutes, instead of an estimate. The first reading after this update is the heater's total so far, so the Energy Dashboard can show one large step that day. Heaters without a meter keep the estimate.
+- Radio: heaters that support it can **boost**. Choose the **Boost** preset on the heater, or use the **Start boost** and **Cancel boost** actions. The heater boosts for its own boost time, so leave the duration out. The heater shows when the boost ends.
+- Radio: heaters that support it get two switches, **Runback** and **EASY mode**. When you turn Runback off, the heater gets back the mode and temperature it had before.
 - Radio: heater advanced settings under the device's **Configuration**: **Temperature offset**, **Control mode**, **Panel temperature unit**, **Open window detection** and **True radiant**. The heater cannot report them, so they show **Unknown** until you set them in Home Assistant. When you set one, the others are sent too (unknown ones as the factory defaults). Heaters that do not support these settings show them as unavailable.
 
 ### Changed
 - The **Start accumulator boost** and **Cancel accumulator boost** actions are now called **Start boost** and **Cancel boost**, because they also work for radio heaters.
-- Radio setup: the radio type is always detected by itself. The **Radio dialect** choice is gone from the ESP32 gateway and nanoCUL forms (the nanoCUL forms now ask only for the port). A nanoCUL with old firmware that cannot detect it stops the setup with "The firmware on this nanoCUL stick is too old": put the new firmware on the stick, then try again. Listen only still works with old firmware.
-- Radio, dialect A: Home Assistant no longer has a built-in dialect-A network id. A new dialect-A gateway learns its heaters' network from their radio traffic, the same way as dialect B, or uses its own network when you pair heaters. Gateways you already set up keep the network they have. A nanoCUL stick with the old firmware (3.5) cannot change its network: update it to the new firmware.
+- Radio setup: the radio type is always detected by itself. The radio type choice is gone from the ESP32 gateway and nanoCUL forms (the nanoCUL forms now ask only for the port). A nanoCUL with old firmware that cannot detect it stops the setup with "The firmware on this nanoCUL stick is too old": put the new firmware on the stick, then try again. Listen only still works with old firmware.
+- Radio: Home Assistant no longer has a built-in network id for any heater. A new gateway learns its heaters' network from their radio traffic, or uses its own network when you pair heaters. Gateways you already set up keep the network they have. A nanoCUL stick with the old firmware (3.5) cannot change its network: update it to the new firmware.
 - ESP32 gateway and nanoCUL firmware: after a restart the network id is empty until Home Assistant sets it (Home Assistant always sets it when it connects).
 - Docs: the README and the radio guides are rewritten for local-first use: why a local radio is cheaper and more private, a comparison of the nanoCUL stick and the ESP32 gateway, shopping lists, and step-by-step firmware flashing (in the browser first, then a desktop program, then the command line).
 
