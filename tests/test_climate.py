@@ -647,7 +647,7 @@ async def test_no_mode_reported_is_unknown(
     for entity_id in (HTR, ACM):
         state = hass.states.get(entity_id)
         assert state.state == "unknown"
-        assert state.attributes[ATTR_PRESET_MODE] is None
+        assert state.attributes.get(ATTR_PRESET_MODE) is None
         assert state.attributes.get(ATTR_HVAC_ACTION) is None
 
 
@@ -683,38 +683,33 @@ async def test_accumulator_without_manual_mode_lists_off_and_auto(
     assert hass.states.get(ACM).attributes[ATTR_HVAC_MODES] == ["off", "auto"]
 
 
-async def test_temporary_override_is_display_only(
+async def test_heater_without_boost_has_no_preset(
     hass: HomeAssistant, devices: FakeDevices, config_entry: MockConfigEntry
 ) -> None:
-    """temporary_override shows as the preset but cannot be selected."""
+    """A heater without boost offers no preset, even during an override."""
     devices.settings[("htr", "1")]["mode"] = "modified_auto"
     await _setup(hass, config_entry)
 
     state = hass.states.get(HTR)
     assert state.state == HVACMode.AUTO
-    assert state.attributes[ATTR_PRESET_MODES] == ["none"]
-    assert state.attributes[ATTR_PRESET_MODE] == "temporary_override"
+    assert ATTR_PRESET_MODES not in state.attributes
+    assert ATTR_PRESET_MODE not in state.attributes
 
     with pytest.raises(ServiceValidationError):
-        await _call(hass, "set_preset_mode", HTR, preset_mode="temporary_override")
+        await _call(hass, "set_preset_mode", HTR, preset_mode="none")
     devices.writes.assert_not_awaited()
 
 
-async def test_preset_none_ends_temporary_override(
+async def test_auto_ends_temporary_override(
     hass: HomeAssistant, devices: FakeDevices, config_entry: MockConfigEntry
 ) -> None:
-    """Selecting preset none during an override resumes the Auto program."""
+    """Selecting Auto during an override resumes the Auto program."""
     devices.settings[("htr", "1")]["mode"] = "modified_auto"
     await _setup(hass, config_entry)
 
-    await _call(hass, "set_preset_mode", HTR, preset_mode="none")
+    await _call(hass, "set_hvac_mode", HTR, hvac_mode=HVACMode.AUTO)
 
     assert devices.writes.await_args.kwargs["mode"] == "auto"
-    assert hass.states.get(HTR).attributes[ATTR_PRESET_MODE] == "none"
-
-    devices.writes.reset_mock()
-    await _call(hass, "set_preset_mode", HTR, preset_mode="none")
-    devices.writes.assert_not_awaited()
 
 
 HTR_TEMP = "sensor.living_room_temperature"

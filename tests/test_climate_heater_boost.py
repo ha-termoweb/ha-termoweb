@@ -8,6 +8,9 @@ gateway link is faked.
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import patch
+
 from homeassistant.components.climate import ATTR_PRESET_MODE, ATTR_PRESET_MODES
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
@@ -15,6 +18,7 @@ from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.termoweb import climate as climate_module
 from custom_components.termoweb.codecs.radio_codec import boost_end
 from custom_components.termoweb.const import DOMAIN
 from tests.fakes.radio_link import STATUS_SHORT, dialect_a_heater, status_a
@@ -107,7 +111,7 @@ async def test_dialect_b_heaters_have_no_boost(hass: HomeAssistant) -> None:
     with fake_radio_links(dialect_a_heater(STATUS_SHORT)) as links:
         await setup_entry(hass, config)
         state = hass.states.get(CLIMATE)
-        assert state.attributes[ATTR_PRESET_MODES] == ["none"]
+        assert ATTR_PRESET_MODES not in state.attributes
         assert "boost_active" not in state.attributes
         links[-1].sent.clear()
         with pytest.raises(ServiceValidationError, match="heaters with boost"):
@@ -115,4 +119,25 @@ async def test_dialect_b_heaters_have_no_boost(hass: HomeAssistant) -> None:
         with pytest.raises(ServiceValidationError):
             await call(hass, "climate", "set_preset_mode", preset_mode="boost")
         assert links[-1].sent == []
+        await unload(hass, config)
+
+
+async def test_preset_none_ends_a_temporary_override(hass: HomeAssistant) -> None:
+    """A boost heater shows its override as a preset; preset none resumes Auto."""
+
+    config = radio_entry("radio", [HEATER], dialect="A")
+    with fake_radio_links(dialect_a_heater(status_a(0x00, mode=0x03))) as links:
+        await setup_entry(hass, config)
+        state = hass.states.get(CLIMATE)
+        assert state.attributes[ATTR_PRESET_MODE] == "temporary_override"
+        link = links[-1]
+        link.sent.clear()
+
+        with patch.object(climate_module, "_WRITE_DEBOUNCE", 0):
+            await call(hass, "climate", "set_preset_mode", preset_mode="none")
+            for _ in range(100):  # the write runs after a debounce task
+                if link.sent:
+                    break
+                await asyncio.sleep(0.01)
+        assert link.payloads() == [b"\xb4\x01"]  # mode Auto
         await unload(hass, config)
