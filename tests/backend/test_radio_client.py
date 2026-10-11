@@ -760,6 +760,99 @@ async def test_samples_report_the_estimated_energy_counter() -> None:
     assert sample["counter"] == pytest.approx(1500 * 0.12 * 600 / 3600, abs=1e-3)
 
 
+COUNTER_A = bytes.fromhex("BD0001E240")  # synthetic: 123456 Wh
+COUNTER_A_LATER = bytes.fromhex("BD0001E2A4")  # 100 Wh later
+
+
+def make_dialect_a_client():
+    """Return a dialect-A client (synthetic network) whose heater answers ``BC``."""
+
+    client, links, clock = make_client("A", network_id=NET)
+    return client, links, clock
+
+
+@pytest.mark.asyncio
+async def test_dialect_a_samples_report_the_heaters_own_counter() -> None:
+    """Dialect A reads ``BC`` → ``BD`` + u32 Wh and reports it, not the estimate."""
+
+    client, links, clock = make_dialect_a_client()
+    link = await client.async_connect()
+    link.reply(0xBC, COUNTER_A)
+    client.note_max_power(HEATER, 1500.0)  # an estimate would start at 0 Wh
+    (sample,) = await client.get_node_samples("dev", ("htr", "6"), 0, 1)
+    assert sample["counter"] == 123456
+    assert link.sent == [(HEATER, b"\xbc")]
+
+
+@pytest.mark.asyncio
+async def test_dialect_a_counter_is_reread_after_the_refresh_window() -> None:
+    """The counter is cached for ``energy_counter_refresh_s`` and then read again."""
+
+    client, links, clock = make_dialect_a_client()
+    link = await client.async_connect()
+    link.reply(0xBC, COUNTER_A, COUNTER_A_LATER)
+    assert await client.read_energy_counter(HEATER) == 123456
+    clock.now += client.energy_counter_refresh_s - 1
+    assert await client.read_energy_counter(HEATER) == 123456
+    assert link.payloads() == [b"\xbc"]
+    clock.now += 1
+    assert await client.read_energy_counter(HEATER) == 123556
+    assert link.payloads() == [b"\xbc", b"\xbc"]
+
+
+@pytest.mark.asyncio
+async def test_dialect_a_counter_read_failure_keeps_the_last_value() -> None:
+    """A missed read never drops a known counter, and is retried after the window."""
+
+    client, links, clock = make_dialect_a_client()
+    link = await client.async_connect()
+    link.reply(0xBC, COUNTER_A)
+    assert await client.read_energy_counter(HEATER) == 123456
+    link.no_ack.add(HEATER)
+    clock.now += client.energy_counter_refresh_s
+    assert await client.read_energy_counter(HEATER) == 123456
+    link.no_ack.clear()
+    link.reply(0xBC, POWER_RECORD_IDLE)  # not a counter: the predicate ignores it
+    clock.now += client.energy_counter_refresh_s
+    (sample,) = await client.get_node_samples("dev", ("htr", "6"), 0, 1)
+    assert sample["counter"] == 123456
+
+
+@pytest.mark.asyncio
+async def test_dialect_a_heater_that_never_answers_has_no_sample() -> None:
+    """No counter yet means no sample; the estimate is never mixed in."""
+
+    client, links, clock = make_dialect_a_client()
+    link = await client.async_connect()
+    link.no_ack.add(HEATER)
+    client.note_max_power(HEATER, 1500.0)
+    assert await client.get_node_samples("dev", ("htr", "6"), 0, 1) == []
+
+
+@pytest.mark.asyncio
+async def test_pairing_forgets_the_counter_of_the_address() -> None:
+    """A heater paired to an address does not inherit its predecessor's counter."""
+
+    client, links, clock = make_dialect_a_client()
+    link = await client.async_connect()
+    link.reply(0xBC, COUNTER_A)
+    assert await client.read_energy_counter(HEATER) == 123456
+    client._forget(HEATER)
+    link.reply(0xBC, bytes.fromhex("BD00000010"))
+    assert await client.read_energy_counter(HEATER) == 16
+
+
+@pytest.mark.asyncio
+async def test_dialect_b_has_no_counter_to_read() -> None:
+    """Dialect B's ``BC`` reply is the power record: no counter read is sent."""
+
+    client, links, _clock = make_client()
+    link = await client.async_connect()
+    assert DIALECT_A.energy_counter and not DIALECT_B.energy_counter
+    assert await client.read_energy_counter(HEATER) is None
+    assert link.sent == []
+
+
 @pytest.mark.asyncio
 async def test_unsupported_features() -> None:
     """Cloud-only features raise or report "no data" per call site."""

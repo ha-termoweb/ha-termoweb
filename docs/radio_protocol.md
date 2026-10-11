@@ -169,6 +169,18 @@ The fields were checked against a whole-house energy meter during a heat test:
 - The record carries no power value. An earlier reading of bytes 3–4 as
   deciwatts (`2C F0` ≈ 1150 W) was a coincidence of the 22.0 °C setpoint.
 
+### Energy counter (dialect A)
+
+`BC` (no argument) is answered by a 5-byte `BD` record: `BD` then a 32-bit
+big-endian counter in watt-hours, the heater's own cumulative meter. It is
+only a reply (no `57 55`). ha-termoweb-local reads it hourly; this
+integration reads it at most every 10 minutes. Example (synthetic):
+`BD 00 01 E2 40` = 123 456 Wh.
+
+A dialect-B heater answers `BC` with its 9-byte power record instead (above),
+so dialect B has no counter. The two replies differ by length, which is how
+`decode_energy_counter` and `decode_power_record` tell them apart.
+
 ### Program record
 
 Four 2-bit slot codes per byte, MSB first, day-major, **Sunday first** on the

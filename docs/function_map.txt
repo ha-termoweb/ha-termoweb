@@ -481,7 +481,7 @@ custom_components/termoweb/backend/radio/protocol.py :: request_status
 custom_components/termoweb/backend/radio/protocol.py :: request_program
     Return the ``B0`` program read request.
 custom_components/termoweb/backend/radio/protocol.py :: request_energy
-    Return the ``BC`` energy counter request.
+    Return ``BC``: dialect A's energy counter, dialect B's power record request.
 custom_components/termoweb/backend/radio/protocol.py :: request_identity
     Return the ``5A`` identity request.
 custom_components/termoweb/backend/radio/protocol.py :: reply_predicate
@@ -518,6 +518,8 @@ custom_components/termoweb/backend/radio/protocol.py :: _deciwatts
     Return big-endian deciwatts as watts.
 custom_components/termoweb/backend/radio/protocol.py :: decode_power_request
     Decode ``BE <hi> <lo>`` (dialect A) or the 9-byte ``BE`` record (dialect B).
+custom_components/termoweb/backend/radio/protocol.py :: decode_energy_counter
+    Decode dialect A's ``BD`` + u32 big-endian cumulative Wh counter, else None.
 custom_components/termoweb/backend/radio/protocol.py :: decode_power_record
     Decode a dialect-B ``BE`` or ``BD`` power record (9 bytes), else None.
 custom_components/termoweb/backend/radio/protocol.py :: classify_unsolicited
@@ -657,7 +659,7 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.async_restore
 custom_components/termoweb/backend/radio_client.py :: RadioClient.manual_setpoint
     Return the heater's last manual target seen or written, if any.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._forget
-    Drop what this client remembers about a heater's program and lock.
+    Drop what this client remembers about the heater at ``addr``.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._exchange
     Send ``payload`` to ``addr`` and return its reply; raise on no ack or reply.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._write
@@ -680,6 +682,8 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient._read_status
     Return the heater's decoded ``B8`` status; raise on no ack or reply.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.read_power_record
     Return the heater's dialect-B power record (``BC`` → ``BD``), or None.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.read_energy_counter
+    Return a dialect-A heater's own cumulative Wh counter (``BC`` → ``BD`` + u32).
 custom_components/termoweb/backend/radio_client.py :: RadioClient._program
     Return the heater's ``prog``, re-reading it after ``program_refresh_s``.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.list_devices
@@ -709,7 +713,7 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.set_power_limi
 custom_components/termoweb/backend/radio_client.py :: RadioClient.set_acm_extra_options
     Raise: accumulator boost defaults are not known on radio.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.get_node_samples
-    Return the latest estimated Wh counter as one sample (no history).
+    Return the heater's Wh counter as one sample (no history).
 custom_components/termoweb/backend/radio_client.py :: RadioClient.get_geo_data
     Return None: the radio gateway has no account location.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.get_rtc_time
@@ -797,7 +801,7 @@ custom_components/termoweb/backend/radio_ws.py :: RadioListener._reply
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._grant_power
     Acknowledge a power request, push the heating state, apply the power limit.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._push_energy
-    Hand the heater's latest estimated energy counter to the energy sensors.
+    Hand the heater's latest energy counter (read or estimated) to the energy sensors.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._push
     Send one settings delta to the coordinator and mark the payload fresh.
 custom_components/termoweb/backend/rest_client.py :: BackendRateLimitError.__init__

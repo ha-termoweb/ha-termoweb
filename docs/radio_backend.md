@@ -154,7 +154,7 @@ re-reads it.
 | `get_power_limit` | None ("no data"); never polled (`power_limit` False) | ❌ |
 | `set_power_limit` | `RadioUnsupportedError`; entity not created | ❌ |
 | `set_acm_extra_options` | `RadioUnsupportedError` (accumulator boost defaults) | ❌ |
-| `get_node_samples` | One sample: the estimated Wh counter (see Local power manager); `[]` while the heater's power is unknown. No history. | 🟡 |
+| `get_node_samples` | One sample. Dialect A: the heater's own Wh counter (`BC` → `BD` + u32), re-read at most every 10 minutes (`energy_counter_refresh_s`); `[]` until the heater first answers. Dialect B: the estimated Wh counter (see Local power manager); `[]` while the heater's power is unknown. No history. | 🟡 A, ✅ B |
 | `get_geo_data` | None ("no data"); setup treats it as optional | ❌ |
 | `get_rtc_time` | Home Assistant local time as `{"y","n","d","h","m","s"}`, the cloud shape. The radio station is the heaters' clock master. | ✅ |
 
@@ -228,7 +228,7 @@ reconnects; it does no harm.
 | Display flash button | 🟡 | `5E 01`: dialect A answers `5F 55`; a dialect-B heater acks it (no reply record). The visible flash on dialect B is not yet confirmed. |
 | Heater priority numbers | ✅ | Local power manager (see below). Higher numbers win. |
 | Installation power limit | ✅ | Local power manager (see below), verified with a house meter. Needs each heater's power: reported by dialect-A heaters, read from the identity record for dialect B. |
-| Energy and power sensors | ✅ (estimated) | Within ~4 % of a house meter over a heating episode. Estimated: rated power × duty while the heating flag is set, integrated between power records. Needs each heater's power (read from the heater). Starts at 0 when Home Assistant starts. |
+| Energy and power sensors | 🟡 A (heater's own meter) / ✅ B (estimated) | Dialect A: the heater's own cumulative Wh counter. Dialect B keeps no counter, so it is estimated: rated power × duty while the heating flag is set, integrated between power records; within ~4 % of a house meter over a heating episode. The estimate needs each heater's power (read from the heater) and starts at 0 when Home Assistant starts. Power is derived from the counter's changes in both dialects. |
 | Energy history import service | ➖ | Not applicable: radio heaters keep no energy history to import. Logs "not supported by this backend". |
 | Hourly samples poller | ➖ | Not needed: the listener pushes the energy estimate live; the poller gets `{}`. |
 | Gateway connectivity binary sensor | ✅ | From the listener's health tracker. |
@@ -258,8 +258,15 @@ power manager (`backend/radio_power.py`) sheds load:
 Higher priority numbers win. While switched off, a heater shows as Off in Home
 Assistant.
 
-Energy: the heaters keep no energy counter on the radio, so the client
-estimates one (`EnergyEstimator`). Between two power records a heater draws
+Energy: a dialect-A heater keeps its own cumulative energy counter and answers
+`BC` with `BD` + a 32-bit big-endian Wh value (see
+[radio protocol §4](radio_protocol.md#energy-counter-dialect-a)). The client
+reads it at most every 10 minutes (`read_energy_counter`) and reports it as
+it is; a missed read keeps the last value, and the estimate below is never
+mixed in. (ha-termoweb-local reads it hourly.)
+
+Dialect-B heaters keep no energy counter on the radio (their `BD` reply is the
+power record), so the client estimates one (`EnergyEstimator`). Between two power records a heater draws
 its power × duty (byte 6 of the record, ≈ the measured pulse ratio) while its
 heating flag is set, and nothing otherwise; a gap longer than 15 minutes is
 cut off. The counter feeds the normal energy and power sensors through
@@ -394,9 +401,9 @@ both: `addr` addresses radio frames; `serial` names and identifies it.
 - Keypad lock on dialect B: acked; whether the keypad locks is not yet confirmed.
 - Boost, runback and EASY on dialect B: `D2` answers `D3 00 00`, `D6` answers `D7 19`, `D4` is ack only; no effect seen. Their meaning is unknown.
 - Display flash on dialect-B heaters: the command is acked, the visible flash is not yet confirmed.
-- Energy counter: dialect A has `BC` → `BD` + u32 Wh (not used yet; the
-  estimate is used for both dialects); dialect B has none, so energy is
-  estimated.
+- Energy counter: dialect B has none, so energy is estimated. Dialect A's
+  counter is read from captures of a dialect-A installation; it is not yet
+  checked on a dialect-A heater through this integration.
 
 ## Setup (config flow)
 
