@@ -1,174 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Hvordan er dine varmeapparater forbundet?",
+        "description": "Vælg cloud-kontoen, hvis du bruger TermoWeb-, Ducaheat- eller Tevolve-appen. Hvis du vil styre varmeapparaterne lokalt uden cloud, er det nemmeste en nanoCUL USB-stick sat i denne Home Assistant-computer (ingen lodning). ESP32-radiogatewayen er for avancerede brugere: den skal bygges og loddes.",
+        "menu_options": {
+          "cloud": "Cloud-konto (TermoWeb-, Ducaheat- eller Tevolve-appen)",
+          "nanocul": "Lokal radio: nanoCUL USB-stick (nemmest, ingen lodning)",
+          "radio": "Lokal radiogateway: ESP32 + CC1101 (avanceret, kræver lodning)"
+        }
+      },
       "cloud": {
         "title": "Opret forbindelse til TermoWeb-familiens varmeapparater",
-        "description": "Version: {version}\n\nVælg dit TermoWeb- eller Ducaheat-mærke, og indtast dine kontooplysninger.",
+        "description": "Version: {version}\n\nVælg dit mærke, TermoWeb, Ducaheat eller Tevolve, og indtast dine kontooplysninger. Tevolve bruger Ducaheat-backend.",
         "data": {
-          "brand": "Brand",
+          "brand": "Mærke",
           "username": "E-mail",
+          "password": "Adgangskode"
+        }
+      },
+      "radio": {
+        "title": "Opret forbindelse til radiogatewayen",
+        "description": "Home Assistant finder normalt selv ESP32-radiogatewayen: se efter den under **Fundet** på siden Enheder og tjenester. Brug kun denne formular, hvis den ikke vises der. Indtast IP-adressen på din gateway. I næste trin vælger du: tilføj gatewayen og lad den finde dine varmeapparater, eller par nye varmeapparater.",
+        "data": {
+          "host": "Gatewayens IP-adresse"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Avancerede indstillinger",
+            "description": "Lad disse være, som de er, medmindre du har ændret gatewayens firmware.",
+            "data": {
+              "port": "Port"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Radiogateway fundet",
+        "description": "Der blev fundet en TermoWeb-radiogateway på {host}. Vil du konfigurere den?\n\nI næste trin vælger du: tilføj gatewayen (den finder og parrer dine varmeapparater), eller lyt kun."
+      },
+      "radio_method": {
+        "title": "Tilføj din gateway",
+        "description": "Vælg \"Tilføj gatewayen\" for at styre dine varmeapparater. Opsætningen afsluttes med det samme. Derefter:\n\n- Varmeapparater, der allerede fungerer med en TermoWeb-gateway eller -app, bliver fundet af sig selv, som regel inden for få minutter. Varmeapparater sender, når de begynder at varme, så det hjælper at skrue op for temperaturen på et af dem.\n- Nye eller nulstillede varmeapparater: sæt hvert varmeapparat i parringstilstand inden for 30 minutter. Varmeapparatets vejledning fortæller, hvilke knapper du skal trykke på. Tag ét varmeapparat ad gangen. Senere skal du først trykke på **Par nye varmeapparater** på gateway-enheden.\n\nDu får en notifikation for hvert varmeapparat, der tilføjes.\n\nVælg \"Kun lyt\" for at optage radiotrafik til en test ved siden af en TermoWeb-gateway, der stadig kører. Integrationen sender aldrig i denne tilstand og tilføjer ingen varmeapparater.",
+        "menu_options": {
+          "radio_discover": "Tilføj gatewayen",
+          "radio_monitor": "Kun lyt (optag radiotrafik, send aldrig)"
+        }
+      },
+      "radio_rescan": { "title": "Søger efter dine varmeapparater" },
+      "reconfigure_radio": {
+        "title": "Skift radiogatewayen",
+        "description": "Skift gatewayens adresse. Sæt flueben ved \"Søg efter varmeapparater igen\", hvis du har tilføjet eller fjernet et varmeapparat.",
+        "data": {
+          "host": "Gatewayens IP-adresse",
+          "port": "Port",
+          "rescan": "Søg efter varmeapparater igen"
+        }
+      },
+      "nanocul": {
+        "title": "Opret forbindelse til nanoCUL USB-sticken",
+        "description": "Vælg porten til din nanoCUL-stick. Hvis Home Assistant har genkendt sticken, er den allerede valgt: tryk bare på Indsend. I næste trin vælger du: tilføj gatewayen og lad den finde dine varmeapparater, eller par nye varmeapparater.",
+        "data": {
+          "device": "USB-port"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Indtast nanoCUL-porten",
+        "description": "Skriv portens sti, for eksempel /dev/serial/by-id/usb-..., eller en netværksadresse som socket://192.0.2.10:2323 for en stick, der deles over netværket.",
+        "data": {
+          "device": "Portsti eller URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Skift nanoCUL-porten",
+        "description": "Skift stickens portsti eller URL. Sæt flueben ved \"Søg efter varmeapparater igen\", hvis du har tilføjet eller fjernet et varmeapparat.",
+        "data": {
+          "device": "Portsti eller URL",
+          "rescan": "Søg efter varmeapparater igen"
+        }
+      },
+      "reconfigure": {
+        "title": "Skift kontoindstillingerne",
+        "description": "Version: {version}\n\nIndtast den nye adgangskode til denne konto. Du kan ikke skifte til en anden konto her: tilføj en ny post til det.",
+        "data": {
+          "brand": "Mærke",
+          "username": "E-mail",
+          "password": "Adgangskode"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Log ind igen",
+        "description": "{brand} accepterede ikke den gemte adgangskode for {username}. Indtast den aktuelle adgangskode.",
+        "data": {
           "password": "Adgangskode"
         }
       }
     },
     "error": {
       "invalid_auth": "Ugyldigt brugernavn eller adgangskode (eller klientnøgle).",
-      "cannot_connect": "Kan ikke oprette forbindelse til TermoWeb - netværks-/DNS/SSL-fejl.",
-      "rate_limited": "Midlertidigt hastighedsbegrænset af API. Prøv igen senere.",
-      "unknown": "Ukendt fejl"
+      "cannot_connect": "Kan ikke oprette forbindelse til TermoWeb – netværks-/DNS-/SSL-fejl.",
+      "rate_limited": "Midlertidigt begrænset af API'et på grund af for mange forespørgsler. Prøv igen senere.",
+      "unknown": "Ukendt fejl",
+      "cannot_connect_radio": "Kan ikke oprette forbindelse til radiogatewayen. Kontrollér IP-adressen og porten, og at gatewayen er tændt.",
+      "no_gateway_mac": "Radiogatewayen oplyste ikke sin MAC-adresse. Opdater gatewayens firmware.",
+      "no_heaters": "Intet varmeapparat svarede. Flyt gatewayen tættere på varmeapparaterne, og prøv igen.",
+      "cannot_connect_nanocul": "Kan ikke åbne nanoCUL-sticken. Kontrollér, at den er sat i, at porten er rigtig, og at den kører termoweb_rx-firmwaren.",
+      "nanocul_radio_missing": "Sticken svarer, men dens radiomodul er ikke tilsluttet. Kontrollér ledningerne.",
+      "gateway_radio_missing": "Gatewayen svarer, men dens radiomodul er ikke tilsluttet. Kontrollér ledningerne."
+    },
+    "abort": {
+      "already_configured": "Denne gateway er allerede konfigureret.",
+      "reconfigure_successful": "Indstillingerne blev gemt.",
+      "monitor_reconfigure": "En post, der kun lytter, kan ikke ændres. Slet den, og tilføj den igen.",
+      "unique_id_mismatch": "Dette er en anden konto eller enhed. Tilføj en ny post i stedet for at bruge den.",
+      "reauth_successful": "Den nye adgangskode blev gemt.",
+      "cannot_connect_radio": "Kan ikke oprette forbindelse til radiogatewayen. Kontrollér, at gatewayen er tændt og på dit netværk.",
+      "no_gateway_mac": "Radiogatewayen oplyste ikke sin MAC-adresse. Opdater gatewayens firmware.",
+      "gateway_radio_missing": "Gatewayen svarer, men dens radiomodul er ikke tilsluttet. Kontrollér ledningerne.",
+      "not_ipv4_address": "Radiogatewayen meldte kun en IPv6-adresse. Tilføj den manuelt med dens IPv4-adresse.",
+      "nanocul_firmware_too_old": "Firmwaren på denne nanoCUL-stick er for gammel. Læg den nyeste termoweb_rx-firmware på sticken (se nanoCUL-vejledningen), og prøv igen."
+    },
+    "progress": {
+      "radio_rescan": "Kontrollerer alle varmeapparater på dit radionetværk. Det tager op til et minut."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "TermoWeb-indstillinger"
+      "rehome": {
+        "title": "Flyt varmeapparater til denne installations eget netværk",
+        "description": "Brug dette, når dine varmeapparater stadig bruger radionetværket fra en gammel TermoWeb-gateway. Varmeapparater: {heaters}.\n\nSådan foregår det:\n1. Hvert varmeapparat nulstilles til fabriksindstillingerne. Home Assistant gemmer først dets indstillinger.\n2. Du sætter varmeapparaterne i parringstilstand, ét ad gangen. Varmeapparatets vejledning fortæller, hvilke knapper du skal trykke på. Vent ca. 10 sekunder mellem hvert varmeapparat. Du har 5 minutter.\n3. Varmeapparaterne får nye numre fra 2 og opefter. Deres entitets-id'er ændres. Varmeapparaternes navne forbliver de samme, når Home Assistant genkender varmeapparatet.\n4. Home Assistant giver hvert varmeapparat dets indstillinger tilbage: tilstand, forudindstillede temperaturer, manuel temperatur og ugeprogram.\n\nStyringen af varmeapparaterne er sat på pause, mens dette kører. Nogle ældre varmeapparater kan ikke nulstilles via radio, så de kan ikke flyttes på denne måde. Tryk på **Indsend** for at starte, og sæt derefter det første varmeapparat i parringstilstand efter ca. 10 sekunder."
+      },
+      "rehome_run": { "title": "Flytter dine varmeapparater" },
+      "rehome_done": {
+        "title": "Flytning afsluttet",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Integrationen kører ikke. Start den først, og prøv så igen."
+    },
+    "progress": {
+      "rehome": "Nulstiller varmeapparaterne og venter derefter på varmeapparater i parringstilstand. Sæt nu ét varmeapparat i parringstilstand, derefter det næste. Dette stopper 1 minut efter, at det sidste varmeapparat blev parret, eller efter 5 minutter."
+    }
+  },
+  "device": {
+    "heater": {
+      "name": "Varmeapparat {addr}"
+    },
+    "accumulator": {
+      "name": "Akkumulator {addr}"
+    },
+    "thermostat": {
+      "name": "Termostat {addr}"
+    },
+    "power_monitor": {
+      "name": "Effektmåler {addr}"
+    },
+    "node": {
+      "name": "Node {addr}"
+    },
+    "site": {
+      "name": "Hjem"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway online"
+      "gateway_online": { "name": "Gateway online" },
+      "pairing_open": {
+        "name": "Parring åben",
+        "state_attributes": { "ends_at": { "name": "Slutter kl." } }
       },
-      "boost_active": {
-        "name": "Boost aktiv"
-      }
+      "boost_active": { "name": "Boost aktiv" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Fremtving opdatering"
-      },
-      "accumulator_boost_start": {
-        "name": "Start boost"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Annuller boost"
-      }
+      "force_refresh": { "name": "Gennemtving opdatering" },
+      "pair_new_heaters": { "name": "Par nye varmeapparater" },
+      "accumulator_boost_start": { "name": "Start boost" },
+      "accumulator_boost_cancel": { "name": "Annuller boost" },
+      "flash_display": { "name": "Blink display" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Varighed af boost"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Boost-temperatur"
-      }
+      "accumulator_boost_duration": { "name": "Boost-varighed" },
+      "accumulator_boost_temperature": { "name": "Boost-temperatur" },
+      "heater_priority": { "name": "Prioritet" },
+      "installation_power_limit": { "name": "Effektgrænse" },
+      "temperature_offset": { "name": "Temperaturforskydning" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatur"
+      "heater_temperature": { "name": "Temperatur" },
+      "heater_energy_total": { "name": "Energi" },
+      "heater_power": { "name": "Effekt" },
+      "radio_address": { "name": "Radioadresse" },
+      "power_monitor_energy": { "name": "Energi" },
+      "power_monitor_power": { "name": "Effekt" },
+      "installation_total_energy": { "name": "Samlet energi" },
+      "frames_heard": { "name": "Modtagne rammer" },
+      "boost_minutes_remaining": { "name": "Resterende boost-minutter" },
+      "boost_end": { "name": "Boost slutter" },
+      "accumulator_charging": { "name": "Opladning" },
+      "accumulator_current_charge": { "name": "Aktuel opladning" },
+      "accumulator_target_charge": { "name": "Mål for opladning" },
+      "installation_info": { "name": "Placering" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Ingen",
+              "temporary_override": "Midlertidig tilsidesættelse",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Børnesikring" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "EASY-tilstand" },
+      "open_window_detection": { "name": "Registrering af åbent vindue" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Styringstilstand",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Hysterese 0,25 °C",
+          "hysteresis_0_35": "Hysterese 0,35 °C",
+          "hysteresis_0_5": "Hysterese 0,5 °C",
+          "hysteresis_0_75": "Hysterese 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energi"
-      },
-      "heater_power": {
-        "name": "Kraft"
-      },
-      "power_monitor_energy": {
-        "name": "Energi"
-      },
-      "power_monitor_power": {
-        "name": "Kraft"
-      },
-      "installation_total_energy": {
-        "name": "Samlet energi"
-      },
-      "boost_minutes_remaining": {
-        "name": "Boost minutter tilbage"
-      },
-      "boost_end": {
-        "name": "Boost-ende"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Panelets temperaturenhed",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
       "name": "Konfigurer akkumulatorens boost-forudindstilling",
-      "description": "Opdater standard boostvarighed og/eller -temperatur for en TermoWeb-akkumulator. Minutter skal være mellem 60 og 600 i intervaller på 60 minutter; udelad et felt for at beholde den eksisterende værdi.",
+      "description": "Opdater standardvarighed og/eller -temperatur for boost på en TermoWeb-akkumulator. Minutter skal være mellem 60 og 600 i trin på 60 minutter; udelad et felt for at beholde den eksisterende værdi.",
       "fields": {
         "minutes": {
-          "name": "Standard boost-varighed",
-          "description": "Antal minutter, boostet skal køre, når der ikke er nogen overstyring (60-600, trin 60).",
+          "name": "Standardvarighed for boost",
+          "description": "Antal minutter, boostet skal køre, når der ikke angives en anden varighed (60–600, trin 60).",
           "example": "120"
         },
         "temperature": {
           "name": "Boost-temperatur",
-          "description": "Valgfrit boost-setpunkt til anvendelse under boost-sessionen (°C eller °F).",
+          "description": "Valgfri måltemperatur under boostet (°C eller °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Start akkumulator boost",
-      "description": "Udløs et øjeblikkeligt boost på en TermoWeb-akkumulator. Angiv en varighed for at tilsidesætte standardindstillingen (60-600 minutter i intervaller på 60 minutter), eller udelad den for at bruge den gemte forudindstilling.",
+      "name": "Start boost",
+      "description": "Start et boost nu på en TermoWeb-akkumulator eller på et radiovarmeapparat med boost. Akkumulator: angiv en varighed (60–600 minutter i trin på 60), eller udelad den for at bruge den gemte forudindstilling. Radiovarmeapparat: udelad varigheden; varmeapparatet booster i sin egen boost-tid.",
       "fields": {
         "minutes": {
-          "name": "Varighed af boost",
-          "description": "Varighed af boost-sessionen i minutter (60-600, trin 60). Valgfri indstilling.",
+          "name": "Boost-varighed",
+          "description": "Boostets varighed i minutter (60–600, trin 60). Valgfri.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Annuller akkumulator-boost",
-      "description": "Afbryd den aktive boost-session på en TermoWeb-akkumulator."
+      "name": "Annuller boost",
+      "description": "Stop boostet på en TermoWeb-akkumulator eller et radiovarmeapparat."
     },
     "set_schedule": {
-      "name": "Lav en ugentlig tidsplan",
-      "description": "Indstil 7×24-ugeprogrammet for et TermoWeb-varmelegeme. Programmet er en liste med 168 heltal, hvor hver værdi svarer til en time i ugen med start mandag 00:00. Brug 0 for kuldeindstilling, 1 for natindstilling og 2 for dagindstilling.",
+      "name": "Indstil ugeprogram",
+      "description": "Indstil 7×24-ugeprogrammet for et TermoWeb-varmeapparat. Programmet er en liste med 168 heltal, hvor hver værdi svarer til én time i ugen med start mandag kl. 00:00. Brug 0 for kold-forudindstillingen, 1 for nat-forudindstillingen og 2 for dag-forudindstillingen.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "En liste med 168 heltal (0, 1 eller 2), der repræsenterer varmeapparatets ugentlige tidsplan. Indeks 0 er mandag 00:00, indeks 1 er mandag 01:00 og så videre.",
+          "description": "En liste med 168 heltal (0, 1 eller 2), der udgør varmeapparatets ugeprogram. Indeks 0 er mandag kl. 00:00, indeks 1 er mandag kl. 01:00 og så videre.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
       "name": "Indstil forudindstillede temperaturer",
-      "description": "Indstil de forudindstillede temperaturer for kulde, nat og dag for en TermoWeb-varmer. Du kan enten angive alle tre temperaturer som en enkelt liste (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "description": "Indstil de forudindstillede temperaturer for kold, nat og dag på et TermoWeb-varmeapparat. Du kan enten angive alle tre temperaturer som én liste (``ptemp``) eller angive hver for sig (``cold``, ``night`` og ``day``). Forudindstillinger, du udelader, beholder deres nuværende værdi.",
       "fields": {
         "ptemp": {
           "name": "Forudindstillede temperaturer",
-          "description": "En liste med tre temperaturer [kulde, nat, dag] i samme enheder som varmelegemet (°C eller °F). Hvis den er angivet, vil den tilsidesætte de individuelle værdier for kulde, nat og dag.",
+          "description": "En liste med tre temperaturer [kold, nat, dag] i samme enhed som varmeapparatet (°C eller °F). Hvis den angives, tilsidesætter den de enkelte værdier for kold, nat og dag.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Kold forudindstilling",
-          "description": "Temperatur for den kolde forudindstilling (°C eller °F).",
+          "name": "Kold-forudindstilling",
+          "description": "Temperatur for kold-forudindstillingen (°C eller °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Forudindstillet til nat",
-          "description": "Temperatur for nattens forudindstilling (°C eller °F).",
+          "name": "Nat-forudindstilling",
+          "description": "Temperatur for nat-forudindstillingen (°C eller °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Forudindstillet dag",
-          "description": "Temperatur for den forudindstillede dag (°C eller °F).",
+          "name": "Dag-forudindstilling",
+          "description": "Temperatur for dag-forudindstillingen (°C eller °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Import af energihistorie",
-      "description": "Importer historiske timebaserede energitællere for TermoWeb-varmere for op til et år siden til Home Assistant-statistikker for hver konfigureret varmer.",
+      "name": "Importer energihistorik",
+      "description": "Importer tidligere energiforbrug pr. time for alle varmeapparater og effektmålere til Home Assistant-statistikken (Energi-dashboardet). Fremskridtet gemmes: hvis importen stopper, så kør den igen for at fortsætte.",
       "fields": {
         "reset_progress": {
           "name": "Nulstil fremskridt",
-          "description": "Slet gemte fremskridt og genimporter historikken fra bunden."
+          "description": "Glem det gemte fremskridt, og importer hele perioden igen. Eksisterende statistik overskrives, men slettes ikke."
         },
         "max_history_retrieval": {
-          "name": "Max historie dage",
-          "description": "Antal dages historik, der skal hentes. Overstyrer kun den konfigurerede standard for denne import."
+          "name": "Maks. antal dages historik",
+          "description": "Hvor mange dage tilbage der skal importeres (1 til 3650, standard 7). Hvis du allerede har importeret færre dage, hentes kun de ældre dage."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Radiooptagelse",
+      "description": "Optag alle radiorammer, som gatewayen eller nanoCUL hører i et stykke tid, og gem dem som en JSON-fil i Home Assistants konfigurationsmappe. Der sendes aldrig noget. På en normal radiopost venter kommandoer til varmeapparaterne, til optagelsen er slut.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurationspost-ID",
+          "description": "Den radiogateway- eller nanoCUL-konfigurationspost, der skal bruges, normalt den, der kun lytter.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Varighed",
+          "description": "Hvor længe der skal optages, 10 til 1800 sekunder."
+        },
+        "redact": {
+          "name": "Skjul private data",
+          "description": "Erstat netværks-id'er og varmeapparaternes serienumre i filen. Uden dette indeholder filen dit netværks-id: del den kun privat."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Valgfri tekst, der gemmes i filen, for eksempel hvilket varmeapparat du brugte.",
+          "example": "skruede op for varmeapparatet i stuen"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Radioundersøgelse",
+      "description": "Lyt til al radiotrafik på varmeapparaternes frekvensbånd i et stykke tid, også trafik som denne integration ikke forstår, og gem en rapportfil i Home Assistants konfigurationsmappe. Vedhæft filen til et GitHub-issue for at bede om understøttelse af en ny type varmeapparat.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurationspost-ID",
+          "description": "Den radiogateway- eller nanoCUL-konfigurationspost, der skal bruges.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Varighed",
+          "description": "Hvor længe der skal lyttes. Varmeapparater sender mest, når de begynder eller holder op med at varme."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Radio-fabriksnulstilling",
+      "description": "DESTRUKTIV. Nulstil ét radiovarmeapparat til fabriksindstillingerne. Varmeapparatet mister alle indstillinger, sit ur, sit ugeprogram og sin radioparring og holder op med at kommunikere med Home Assistant. Dets sidst kendte indstillinger gemmes først. For at bruge varmeapparatet igen skal du trykke på \"Par nye varmeapparater\" på gateway-enheden og sætte varmeapparatet i parringstilstand. De gemte indstillinger kommer tilbage, når det bliver genkendt. Nogle ældre varmeapparater kan ikke nulstilles via radio: nulstil dem manuelt (se varmeapparatets vejledning).",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurationspost-ID",
+          "description": "Den radiogateway- eller nanoCUL-konfigurationspost, der skal bruges.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Varmeapparatets nummer",
+          "description": "Varmeapparatets radionummer (tallet i \"Varmeapparat 6\")."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radio: flyt varmeapparater til eget netværk",
+      "description": "Flyt alle varmeapparater i en radiopost over på denne installations eget radionetværk. Hvert varmeapparat nulstilles først (dets indstillinger gemmes), og derefter sætter du varmeapparaterne i parringstilstand ét ad gangen. Varmeapparaterne får nye numre fra 2 og opefter, og deres indstillinger gendannes. Nogle ældre varmeapparater kan ikke nulstilles via radio, så de kan ikke flyttes på denne måde. Styringen af varmeapparaterne er sat på pause, mens dette kører.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurationspost-ID",
+          "description": "Den radiogateway- eller nanoCUL-konfigurationspost, der skal bruges.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Ventetid",
+          "description": "Hvor længe der skal ventes på, at der trykkes på varmeapparaternes parringsknapper."
         }
       }
     }

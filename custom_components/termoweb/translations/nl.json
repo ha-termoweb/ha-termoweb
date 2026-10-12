@@ -1,144 +1,297 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Hoe zijn je verwarmingen verbonden?",
+        "description": "Kies het cloudaccount als je de TermoWeb-, Ducaheat- of Tevolve-app gebruikt. Wil je de verwarmingen lokaal bedienen zonder cloud, dan is een nanoCUL-USB-stick in deze Home Assistant-computer het eenvoudigst (geen solderen nodig). De ESP32-radiogateway is voor gevorderde gebruikers: die moet je zelf bouwen en solderen.",
+        "menu_options": {
+          "cloud": "Cloudaccount (TermoWeb-, Ducaheat- of Tevolve-app)",
+          "nanocul": "Lokale radio: nanoCUL-USB-stick (eenvoudigst, zonder solderen)",
+          "radio": "Lokale radiogateway: ESP32 + CC1101 (gevorderd, solderen nodig)"
+        }
+      },
       "cloud": {
-        "title": "Verbinding maken met TermoWeb familieverwarmers",
-        "description": "Versie: {version}\n\nKies uw merk TermoWeb of Ducaheat en voer uw accountgegevens in.",
+        "title": "Verbinden met verwarmingen uit de TermoWeb-familie",
+        "description": "Versie: {version}\n\nKies je merk (TermoWeb, Ducaheat of Tevolve) en voer je accountgegevens in. Tevolve gebruikt de Ducaheat-backend.",
         "data": {
           "brand": "Merk",
           "username": "E-mail",
+          "password": "Wachtwoord"
+        }
+      },
+      "radio": {
+        "title": "Verbinden met de radiogateway",
+        "description": "Home Assistant vindt de ESP32-radiogateway normaal gesproken zelf: kijk onder **Ontdekt** op de pagina Apparaten & diensten. Gebruik dit formulier alleen als hij daar niet verschijnt. Voer het IP-adres van je gateway in. In de volgende stap kies je: de gateway toevoegen en hem je verwarmingen laten zoeken, of nieuwe verwarmingen koppelen.",
+        "data": {
+          "host": "IP-adres van de gateway"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Geavanceerde instellingen",
+            "description": "Laat deze ongewijzigd, tenzij je de firmware van de gateway hebt aangepast.",
+            "data": {
+              "port": "Poort"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Radiogateway gevonden",
+        "description": "Er is een TermoWeb-radiogateway gevonden op {host}. Wil je hem instellen?\n\nIn de volgende stap kies je: de gateway toevoegen (hij zoekt en koppelt je verwarmingen) of alleen luisteren."
+      },
+      "radio_method": {
+        "title": "Je gateway toevoegen",
+        "description": "Kies \"Gateway toevoegen\" om je verwarmingen te bedienen. De installatie is meteen klaar. Daarna:\n\n- Verwarmingen die al met een TermoWeb-gateway of -app werken, worden vanzelf gevonden, meestal binnen enkele minuten. Verwarmingen zenden een signaal zodra ze beginnen te verwarmen, dus het helpt om de temperatuur van één verwarming hoger te zetten.\n- Nieuwe of gereset verwarmingen: zet elke verwarming binnen 30 minuten in koppelmodus. In de handleiding van de verwarming staat welke knoppen je moet indrukken. Doe één verwarming tegelijk. Druk later eerst op **Nieuwe verwarmingen koppelen** op het gateway-apparaat.\n\nJe krijgt een melding voor elke verwarming die wordt toegevoegd.\n\nKies \"Alleen luisteren\" om radioverkeer op te nemen voor een test, naast een TermoWeb-gateway die nog in gebruik is. De integratie zendt in deze modus nooit en voegt geen verwarmingen toe.",
+        "menu_options": {
+          "radio_discover": "Gateway toevoegen",
+          "radio_monitor": "Alleen luisteren (radioverkeer opnemen, nooit zenden)"
+        }
+      },
+      "radio_rescan": { "title": "Zoeken naar je verwarmingen" },
+      "reconfigure_radio": {
+        "title": "Radiogateway wijzigen",
+        "description": "Wijzig het adres van de gateway. Vink \"Opnieuw naar verwarmingen zoeken\" aan als je een verwarming hebt toegevoegd of verwijderd.",
+        "data": {
+          "host": "IP-adres van de gateway",
+          "port": "Poort",
+          "rescan": "Opnieuw naar verwarmingen zoeken"
+        }
+      },
+      "nanocul": {
+        "title": "Verbinden met de nanoCUL-USB-stick",
+        "description": "Kies de poort van je nanoCUL-stick. Als Home Assistant de stick heeft herkend, is hij al geselecteerd: druk dan gewoon op Verzenden. In de volgende stap kies je: de gateway toevoegen en hem je verwarmingen laten zoeken, of nieuwe verwarmingen koppelen.",
+        "data": {
+          "device": "USB-poort"
+        }
+      },
+      "nanocul_manual": {
+        "title": "De nanoCUL-poort invoeren",
+        "description": "Typ het pad van de poort, bijvoorbeeld /dev/serial/by-id/usb-..., of een netwerkadres zoals socket://192.0.2.10:2323 voor een stick die via het netwerk wordt gedeeld.",
+        "data": {
+          "device": "Poortpad of URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "De nanoCUL-poort wijzigen",
+        "description": "Wijzig het poortpad of de URL van de stick. Vink \"Opnieuw naar verwarmingen zoeken\" aan als je een verwarming hebt toegevoegd of verwijderd.",
+        "data": {
+          "device": "Poortpad of URL",
+          "rescan": "Opnieuw naar verwarmingen zoeken"
+        }
+      },
+      "reconfigure": {
+        "title": "Accountinstellingen wijzigen",
+        "description": "Versie: {version}\n\nVoer het nieuwe wachtwoord voor dit account in. Je kunt hier niet naar een ander account overstappen: voeg daarvoor een nieuw item toe.",
+        "data": {
+          "brand": "Merk",
+          "username": "E-mail",
+          "password": "Wachtwoord"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Opnieuw aanmelden",
+        "description": "{brand} heeft het opgeslagen wachtwoord voor {username} niet geaccepteerd. Voer het huidige wachtwoord in.",
+        "data": {
           "password": "Wachtwoord"
         }
       }
     },
     "error": {
       "invalid_auth": "Ongeldige gebruikersnaam of wachtwoord (of clientsleutel).",
-      "cannot_connect": "Kan geen verbinding maken met TermoWeb - netwerk/DNS/SSL-fout.",
-      "rate_limited": "Tijdelijk beperkt door API. Probeer het later nog eens.",
-      "unknown": "Onbekende fout"
+      "cannot_connect": "Kan geen verbinding maken met TermoWeb — netwerk-, DNS- of SSL-fout.",
+      "rate_limited": "Tijdelijk beperkt door de API. Probeer het later opnieuw.",
+      "unknown": "Onbekende fout",
+      "cannot_connect_radio": "Kan geen verbinding maken met de radiogateway. Controleer het IP-adres en de poort, en of de gateway aanstaat.",
+      "no_gateway_mac": "De radiogateway heeft zijn MAC-adres niet doorgegeven. Werk de firmware van de gateway bij.",
+      "no_heaters": "Geen enkele verwarming reageerde. Zet de gateway dichter bij de verwarmingen en probeer het opnieuw.",
+      "cannot_connect_nanocul": "Kan de nanoCUL-stick niet openen. Controleer of hij is aangesloten, of de poort klopt en of de termoweb_rx-firmware erop staat.",
+      "nanocul_radio_missing": "De stick reageert, maar de radiomodule is niet aangesloten. Controleer de bedrading.",
+      "gateway_radio_missing": "De gateway reageert, maar de radiomodule is niet aangesloten. Controleer de bedrading."
+    },
+    "abort": {
+      "already_configured": "Deze gateway is al ingesteld.",
+      "reconfigure_successful": "De instellingen zijn opgeslagen.",
+      "monitor_reconfigure": "Een item voor alleen luisteren kan niet worden gewijzigd. Verwijder het en voeg het opnieuw toe.",
+      "unique_id_mismatch": "Dit is een ander account of apparaat. Voeg in plaats daarvan een nieuw item toe om het te gebruiken.",
+      "reauth_successful": "Het nieuwe wachtwoord is opgeslagen.",
+      "cannot_connect_radio": "Kan geen verbinding maken met de radiogateway. Controleer of de gateway aanstaat en met je netwerk is verbonden.",
+      "no_gateway_mac": "De radiogateway heeft zijn MAC-adres niet doorgegeven. Werk de firmware van de gateway bij.",
+      "gateway_radio_missing": "De gateway reageert, maar de radiomodule is niet aangesloten. Controleer de bedrading.",
+      "not_ipv4_address": "De radiogateway heeft alleen een IPv6-adres gemeld. Voeg hem handmatig toe met zijn IPv4-adres.",
+      "nanocul_firmware_too_old": "De firmware op deze nanoCUL-stick is te oud. Zet de nieuwste termoweb_rx-firmware op de stick (zie de nanoCUL-handleiding) en probeer het opnieuw."
+    },
+    "progress": {
+      "radio_rescan": "Elke verwarming in je radionetwerk wordt gecontroleerd. Dit duurt maximaal een minuut."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "TermoWeb Opties"
+      "rehome": {
+        "title": "Verwarmingen naar het eigen netwerk van deze installatie verplaatsen",
+        "description": "Gebruik dit als je verwarmingen nog het radionetwerk van een oude TermoWeb-gateway gebruiken. Verwarmingen: {heaters}.\n\nWat er gebeurt:\n1. Elke verwarming wordt teruggezet naar de fabrieksinstellingen. Home Assistant slaat eerst de instellingen op.\n2. Je zet de verwarmingen één voor één in koppelmodus. In de handleiding van de verwarming staat welke knoppen je moet indrukken. Wacht ongeveer 10 seconden tussen de verwarmingen. Je hebt 5 minuten.\n3. De verwarmingen krijgen nieuwe nummers, vanaf 2. Hun entiteit-ID's veranderen. De namen van de verwarmingen blijven gelijk als Home Assistant de verwarming herkent.\n4. Home Assistant zet de instellingen van elke verwarming terug: modus, voorinstellingstemperaturen, handmatige temperatuur en weekprogramma.\n\nDe bediening van de verwarmingen wordt gepauzeerd zolang dit loopt. Sommige oudere verwarmingen kunnen niet via de radio worden gereset en kunnen dus niet op deze manier worden verplaatst. Druk op **Verzenden** om te beginnen en zet na ongeveer 10 seconden de eerste verwarming in koppelmodus."
+      },
+      "rehome_run": { "title": "Je verwarmingen worden verplaatst" },
+      "rehome_done": {
+        "title": "Verplaatsen voltooid",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "De integratie is niet actief. Start haar eerst en probeer het dan opnieuw."
+    },
+    "progress": {
+      "rehome": "De verwarmingen worden gereset; daarna wordt gewacht op verwarmingen in koppelmodus. Zet nu één verwarming in koppelmodus, daarna de volgende. Dit stopt 1 minuut nadat de laatste verwarming is gekoppeld, of na 5 minuten."
+    }
+  },
+  "device": {
+    "heater": {
+      "name": "Verwarming {addr}"
+    },
+    "accumulator": {
+      "name": "Accumulator {addr}"
+    },
+    "thermostat": {
+      "name": "Thermostaat {addr}"
+    },
+    "power_monitor": {
+      "name": "Vermogensmeter {addr}"
+    },
+    "node": {
+      "name": "Knooppunt {addr}"
+    },
+    "site": {
+      "name": "Thuis"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway online"
+      "gateway_online": { "name": "Gateway online" },
+      "pairing_open": {
+        "name": "Koppelen open",
+        "state_attributes": { "ends_at": { "name": "Eindigt om" } }
       },
-      "boost_active": {
-        "name": "Actieve boost"
-      }
+      "boost_active": { "name": "Boost actief" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Forceer verversen"
-      },
-      "accumulator_boost_start": {
-        "name": "Startboost"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Boost annuleren"
-      }
+      "force_refresh": { "name": "Geforceerd verversen" },
+      "pair_new_heaters": { "name": "Nieuwe verwarmingen koppelen" },
+      "accumulator_boost_start": { "name": "Boost starten" },
+      "accumulator_boost_cancel": { "name": "Boost annuleren" },
+      "flash_display": { "name": "Display laten knipperen" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Duur van boost"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Verhoogde temperatuur"
-      }
+      "accumulator_boost_duration": { "name": "Boostduur" },
+      "accumulator_boost_temperature": { "name": "Boosttemperatuur" },
+      "heater_priority": { "name": "Prioriteit" },
+      "installation_power_limit": { "name": "Vermogenslimiet" },
+      "temperature_offset": { "name": "Temperatuurcorrectie" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatuur"
+      "heater_temperature": { "name": "Temperatuur" },
+      "heater_energy_total": { "name": "Energie" },
+      "heater_power": { "name": "Vermogen" },
+      "radio_address": { "name": "Radioadres" },
+      "power_monitor_energy": { "name": "Energie" },
+      "power_monitor_power": { "name": "Vermogen" },
+      "installation_total_energy": { "name": "Totale energie" },
+      "frames_heard": { "name": "Ontvangen frames" },
+      "boost_minutes_remaining": { "name": "Resterende boostminuten" },
+      "boost_end": { "name": "Einde boost" },
+      "accumulator_charging": { "name": "Opladen" },
+      "accumulator_current_charge": { "name": "Huidige lading" },
+      "accumulator_target_charge": { "name": "Doellading" },
+      "installation_info": { "name": "Locatie" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Geen",
+              "temporary_override": "Tijdelijke aanpassing",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Kinderslot" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "EASY-modus" },
+      "open_window_detection": { "name": "Open-raamdetectie" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Regelmodus",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Hysterese 0,25 °C",
+          "hysteresis_0_35": "Hysterese 0,35 °C",
+          "hysteresis_0_5": "Hysterese 0,5 °C",
+          "hysteresis_0_75": "Hysterese 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energie"
-      },
-      "heater_power": {
-        "name": "Stroom"
-      },
-      "power_monitor_energy": {
-        "name": "Energie"
-      },
-      "power_monitor_power": {
-        "name": "Stroom"
-      },
-      "installation_total_energy": {
-        "name": "Totale energie"
-      },
-      "boost_minutes_remaining": {
-        "name": "Boost resterende minuten"
-      },
-      "boost_end": {
-        "name": "Einde boost"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Temperatuureenheid op het display",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Accumulator boost preset configureren",
-      "description": "Update de standaard boost-duur en/of temperatuur voor een TermoWeb accumulator. Minuten moeten tussen 60 en 600 liggen in stappen van 60 minuten; laat een veld weg om de bestaande waarde te behouden.",
+      "name": "Boostvoorinstelling van accumulator instellen",
+      "description": "Wijzig de standaardduur en/of -temperatuur van de boost voor een TermoWeb-accumulator. Het aantal minuten moet tussen 60 en 600 liggen, in stappen van 60 minuten; laat een veld leeg om de huidige waarde te behouden.",
       "fields": {
         "minutes": {
-          "name": "Standaard boost duur",
-          "description": "Aantal minuten dat de boost moet draaien als er geen override is voorzien (60-600, stap 60).",
+          "name": "Standaard boostduur",
+          "description": "Aantal minuten dat de boost duurt als er geen andere duur wordt opgegeven (60–600, stap 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Verhoogde temperatuur",
-          "description": "Optioneel boost-setpoint om toe te passen tijdens de boost-sessie (°C of °F).",
+          "name": "Boosttemperatuur",
+          "description": "Optionele doeltemperatuur tijdens de boost (°C of °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Accumulator boost starten",
-      "description": "Activeer een onmiddellijke boost op een TermoWeb accumulator. Geef een tijdsduur op om de standaardwaarde te overschrijven (60-600 minuten in stappen van 60 minuten), of laat deze weg om de opgeslagen voorinstelling te gebruiken.",
+      "name": "Boost starten",
+      "description": "Start nu een boost op een TermoWeb-accumulator of op een radioverwarming met boostfunctie. Accumulator: geef een duur op (60–600 minuten, in stappen van 60), of laat die weg om de opgeslagen voorinstelling te gebruiken. Radioverwarming: laat de duur weg; de verwarming gebruikt haar eigen boosttijd.",
       "fields": {
         "minutes": {
-          "name": "Duur van boost",
-          "description": "Duur van de boostsessie in minuten (60-600, stap 60). Optioneel.",
+          "name": "Boostduur",
+          "description": "Duur van de boost in minuten (60–600, stap 60). Optioneel.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Accumulator boost annuleren",
-      "description": "De actieve boost-sessie op een TermoWeb accumulator annuleren."
+      "name": "Boost annuleren",
+      "description": "Stop de boost op een TermoWeb-accumulator of radioverwarming."
     },
     "set_schedule": {
-      "name": "Weekschema opstellen",
-      "description": "Stel het 7×24 weekprogramma in voor een TermoWeb verwarming. Het programma is een lijst van 168 gehele getallen, waarbij elke waarde overeenkomt met één uur van de week vanaf maandag 00:00 uur. Gebruik 0 voor de koude voorinstelling, 1 voor de nacht voorinstelling en 2 voor de dag voorinstelling.",
+      "name": "Weekprogramma instellen",
+      "description": "Stel het weekprogramma van 7×24 uur in voor een TermoWeb-verwarming. Het programma is een lijst van 168 gehele getallen, waarbij elke waarde overeenkomt met één uur van de week, beginnend op maandag 00:00. Gebruik 0 voor de koude voorinstelling, 1 voor de nachtvoorinstelling en 2 voor de dagvoorinstelling.",
       "fields": {
         "prog": {
           "name": "Programma",
-          "description": "Een lijst van 168 gehele getallen (0, 1 of 2) die het weekschema van de verwarming voorstelt. Index 0 is maandag 00:00, index 1 is maandag 01:00, enzovoort.",
+          "description": "Een lijst van 168 gehele getallen (0, 1 of 2) die het weekprogramma van de verwarming vormen. Index 0 is maandag 00:00, index 1 is maandag 01:00, enzovoort.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Vooraf ingestelde temperaturen instellen",
-      "description": "Stel de vooringestelde temperaturen voor koude, nacht en dag in voor een TermoWeb verwarming. U kunt alle drie de temperaturen als één lijst opgeven (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Voorinstellingstemperaturen instellen",
+      "description": "Stel de temperaturen van de koude, nacht- en dagvoorinstelling in voor een TermoWeb-verwarming. Je kunt alle drie de temperaturen als één lijst opgeven (``ptemp``) of elk apart (``cold``, ``night`` en ``day``). Voorinstellingen die je weglaat, behouden hun huidige waarde.",
       "fields": {
         "ptemp": {
-          "name": "Vooraf ingestelde temperaturen",
-          "description": "Een lijst van drie temperaturen [koud, nacht, dag] in dezelfde eenheden als de verwarmer (°C of °F). Indien opgegeven, overschrijft dit de individuele waarden voor koud, nacht en dag.",
+          "name": "Voorinstellingstemperaturen",
+          "description": "Een lijst van drie temperaturen [koud, nacht, dag] in dezelfde eenheid als de verwarming (°C of °F). Indien opgegeven, heeft deze lijst voorrang op de afzonderlijke waarden voor koud, nacht en dag.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
@@ -147,28 +300,97 @@
           "example": "10.0"
         },
         "night": {
-          "name": "Voorkeuze nacht",
-          "description": "Temperatuur voor de nachtinstelling (°C of °F).",
+          "name": "Nachtvoorinstelling",
+          "description": "Temperatuur voor de nachtvoorinstelling (°C of °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Dag voorinstelling",
-          "description": "Vooringestelde temperatuur voor de dag (°C of °F).",
+          "name": "Dagvoorinstelling",
+          "description": "Temperatuur voor de dagvoorinstelling (°C of °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Energie importeren geschiedenis",
-      "description": "Importeer historische uurlijkse energietellers voor TermoWeb verwarmers tot een jaar geleden in de statistieken van Home Assistant voor elke geconfigureerde verwarmer.",
+      "name": "Energiegeschiedenis importeren",
+      "description": "Importeer het eerdere energieverbruik per uur van elke verwarming en vermogensmeter in de statistieken van Home Assistant (het Energie-dashboard). De voortgang wordt opgeslagen: als het importeren stopt, voer het dan opnieuw uit om verder te gaan.",
       "fields": {
         "reset_progress": {
           "name": "Voortgang resetten",
-          "description": "Wis opgeslagen voortgang en importeer de geschiedenis opnieuw."
+          "description": "Vergeet de opgeslagen voortgang en importeer de hele periode opnieuw. Bestaande statistieken worden overschreven, niet verwijderd."
         },
         "max_history_retrieval": {
-          "name": "Max geschiedenis dagen",
-          "description": "Aantal dagen geschiedenis om op te halen. Overschrijft de geconfigureerde standaard alleen voor deze import."
+          "name": "Maximaal aantal dagen geschiedenis",
+          "description": "Hoeveel dagen terug er geïmporteerd wordt (1 tot 3650, standaard 7). Als je al minder dagen hebt geïmporteerd, worden alleen de oudere dagen opgehaald."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Radio-opname",
+      "description": "Neem een tijdlang elk radioframe op dat de gateway of nanoCUL ontvangt en sla het op als JSON-bestand in de configuratiemap van Home Assistant. Er wordt nooit gezonden. Bij een normaal radio-item wachten opdrachten aan de verwarmingen tot de opname klaar is.",
+      "fields": {
+        "entry_id": {
+          "name": "Configuratie-item-ID",
+          "description": "Het configuratie-item van de radiogateway of nanoCUL dat gebruikt moet worden, normaal gesproken het item voor alleen luisteren.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Duur",
+          "description": "Hoe lang er wordt opgenomen, 10 tot 1800 seconden."
+        },
+        "redact": {
+          "name": "Privégegevens verbergen",
+          "description": "Vervang netwerk-ID's en serienummers van verwarmingen in het bestand. Zonder deze optie bevat het bestand je netwerk-ID: deel het alleen privé."
+        },
+        "note": {
+          "name": "Notitie",
+          "description": "Optionele tekst die in het bestand wordt opgeslagen, bijvoorbeeld welke verwarming je hebt gebruikt.",
+          "example": "verwarming woonkamer hoger gezet"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Radioscan",
+      "description": "Luister een tijdlang naar al het radioverkeer op de frequentieband van de verwarmingen, ook verkeer dat deze integratie niet begrijpt, en sla een rapport op in de configuratiemap van Home Assistant. Voeg het bestand toe aan een GitHub-issue om ondersteuning voor een nieuw type verwarming aan te vragen.",
+      "fields": {
+        "entry_id": {
+          "name": "Configuratie-item-ID",
+          "description": "Het configuratie-item van de radiogateway of nanoCUL dat gebruikt moet worden.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Duur",
+          "description": "Hoe lang er wordt geluisterd. Verwarmingen zenden het meest wanneer ze beginnen of stoppen met verwarmen."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Radio-fabrieksreset",
+      "description": "ONOMKEERBAAR. Zet één radioverwarming terug naar de fabrieksinstellingen. De verwarming verliest alle instellingen, haar klok, haar weekprogramma en haar radiokoppeling, en communiceert niet meer met Home Assistant. De laatst bekende instellingen worden eerst opgeslagen. Om de verwarming weer te gebruiken, druk je op \"Nieuwe verwarmingen koppelen\" op het gateway-apparaat en zet je de verwarming in koppelmodus. De opgeslagen instellingen komen terug zodra ze wordt herkend. Sommige oudere verwarmingen kunnen niet via de radio worden gereset: reset die met de hand (zie de handleiding van de verwarming).",
+      "fields": {
+        "entry_id": {
+          "name": "Configuratie-item-ID",
+          "description": "Het configuratie-item van de radiogateway of nanoCUL dat gebruikt moet worden.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Verwarmingsnummer",
+          "description": "Het radionummer van de verwarming (het getal in \"Verwarming 6\")."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radio: verwarmingen naar eigen netwerk verplaatsen",
+      "description": "Verplaats alle verwarmingen van een radio-item naar het eigen radionetwerk van deze installatie. Elke verwarming wordt eerst gereset (de instellingen worden opgeslagen); daarna zet je de verwarmingen één voor één in koppelmodus. De verwarmingen krijgen nieuwe nummers vanaf 2 en hun instellingen worden hersteld. Sommige oudere verwarmingen kunnen niet via de radio worden gereset en kunnen dus niet op deze manier worden verplaatst. De bediening van de verwarmingen wordt gepauzeerd zolang dit loopt.",
+      "fields": {
+        "entry_id": {
+          "name": "Configuratie-item-ID",
+          "description": "Het configuratie-item van de radiogateway of nanoCUL dat gebruikt moet worden.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Wachttijd",
+          "description": "Hoe lang er wordt gewacht op de koppelknoppen van de verwarmingen."
         }
       }
     }

@@ -1,188 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Cum sunt conectate radiatoarele dumneavoastră?",
+        "description": "Alegeți contul cloud dacă folosiți aplicația TermoWeb, Ducaheat sau Tevolve. Pentru a controla radiatoarele local, fără cloud, cel mai simplu este un stick USB nanoCUL conectat la acest computer cu Home Assistant (fără lipire). Gateway-ul radio ESP32 este pentru utilizatori avansați: trebuie asamblat și lipit.",
+        "menu_options": {
+          "cloud": "Cont cloud (aplicația TermoWeb, Ducaheat sau Tevolve)",
+          "nanocul": "Radio local: stick USB nanoCUL (cel mai simplu, fără lipire)",
+          "radio": "Gateway radio local: ESP32 + CC1101 (avansat, necesită lipire)"
+        }
+      },
       "cloud": {
-        "title": "Conectați-vă la încălzitoarele familiei TermoWeb",
-        "description": "Versiune: {version}\n\nAlegeți marca TermoWeb sau Ducaheat și introduceți datele de identificare ale contului dvs.",
+        "title": "Conectare la radiatoarele din familia TermoWeb",
+        "description": "Versiune: {version}\n\nAlegeți marca (TermoWeb, Ducaheat sau Tevolve) și introduceți datele contului. Tevolve folosește serverul Ducaheat.",
         "data": {
-          "brand": "Marca",
+          "brand": "Marcă",
           "username": "E-mail",
+          "password": "Parolă"
+        }
+      },
+      "radio": {
+        "title": "Conectare la gateway-ul radio",
+        "description": "De obicei, Home Assistant găsește singur gateway-ul radio ESP32: căutați-l la **Descoperite** pe pagina Dispozitive și servicii. Folosiți acest formular doar dacă nu apare acolo. Introduceți adresa IP a gateway-ului. În pasul următor alegeți: adăugați gateway-ul și îl lăsați să vă găsească radiatoarele, sau asociați radiatoare noi.",
+        "data": {
+          "host": "Adresa IP a gateway-ului"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Setări avansate",
+            "description": "Nu le modificați decât dacă ați schimbat firmware-ul gateway-ului.",
+            "data": {
+              "port": "Port"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Gateway radio găsit",
+        "description": "A fost găsit un gateway radio TermoWeb la {host}. Îl configurați?\n\nÎn pasul următor alegeți: adăugați gateway-ul (vă găsește și asociază radiatoarele) sau doar ascultare."
+      },
+      "radio_method": {
+        "title": "Adăugați gateway-ul",
+        "description": "Alegeți „Adaugă gateway-ul” pentru a vă controla radiatoarele. Configurarea se încheie imediat. Apoi:\n\n- Radiatoarele care funcționează deja cu un gateway sau o aplicație TermoWeb sunt găsite automat, de obicei în câteva minute. Radiatoarele transmit atunci când încep să încălzească, așa că ajută să măriți temperatura la un radiator.\n- Radiatoare noi sau resetate: puneți fiecare radiator în modul de asociere în cel mult 30 de minute. Manualul radiatorului vă arată ce butoane să apăsați. Faceți câte un radiator pe rând. Mai târziu, apăsați mai întâi **Asociază radiatoare noi** pe dispozitivul gateway.\n\nPrimiți o notificare pentru fiecare radiator adăugat.\n\nAlegeți „Doar ascultare” pentru a înregistra traficul radio pentru un test, lângă un gateway TermoWeb care încă funcționează. În acest mod, integrarea nu transmite niciodată și nu adaugă radiatoare.",
+        "menu_options": {
+          "radio_discover": "Adaugă gateway-ul",
+          "radio_monitor": "Doar ascultare (înregistrează traficul radio, nu transmite niciodată)"
+        }
+      },
+      "radio_rescan": { "title": "Se caută radiatoarele dumneavoastră" },
+      "reconfigure_radio": {
+        "title": "Modificați gateway-ul radio",
+        "description": "Modificați adresa gateway-ului. Bifați „Caută din nou radiatoarele” dacă ați adăugat sau eliminat un radiator.",
+        "data": {
+          "host": "Adresa IP a gateway-ului",
+          "port": "Port",
+          "rescan": "Caută din nou radiatoarele"
+        }
+      },
+      "nanocul": {
+        "title": "Conectare la stick-ul USB nanoCUL",
+        "description": "Alegeți portul stick-ului nanoCUL. Dacă Home Assistant a recunoscut stick-ul, acesta este deja selectat: apăsați doar Trimite. În pasul următor alegeți: adăugați gateway-ul și îl lăsați să vă găsească radiatoarele, sau asociați radiatoare noi.",
+        "data": {
+          "device": "Port USB"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Introduceți portul nanoCUL",
+        "description": "Scrieți calea portului, de exemplu /dev/serial/by-id/usb-..., sau o adresă de rețea precum socket://192.0.2.10:2323 pentru un stick partajat prin rețea.",
+        "data": {
+          "device": "Calea portului sau URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Modificați portul nanoCUL",
+        "description": "Modificați calea portului sau URL-ul stick-ului. Bifați „Caută din nou radiatoarele” dacă ați adăugat sau eliminat un radiator.",
+        "data": {
+          "device": "Calea portului sau URL",
+          "rescan": "Caută din nou radiatoarele"
+        }
+      },
+      "reconfigure": {
+        "title": "Modificați setările contului",
+        "description": "Versiune: {version}\n\nIntroduceți parola nouă pentru acest cont. Aici nu puteți trece la alt cont: pentru asta, adăugați o intrare nouă.",
+        "data": {
+          "brand": "Marcă",
+          "username": "E-mail",
+          "password": "Parolă"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Autentificați-vă din nou",
+        "description": "{brand} nu a acceptat parola salvată pentru {username}. Introduceți parola actuală.",
+        "data": {
           "password": "Parolă"
         }
       }
     },
     "error": {
-      "invalid_auth": "Nume de utilizator sau parolă (sau cheie client) invalide.",
-      "cannot_connect": "Nu vă puteți conecta la TermoWeb - eroare de rețea/DNS/SSL.",
-      "rate_limited": "Rata limitată temporar de API. Încercați din nou mai târziu.",
-      "unknown": "Eroare necunoscută"
+      "invalid_auth": "Nume de utilizator sau parolă incorecte (sau cheie de client).",
+      "cannot_connect": "Nu se poate conecta la TermoWeb — eroare de rețea, DNS sau SSL.",
+      "rate_limited": "Limita de cereri către API a fost atinsă temporar. Încercați din nou mai târziu.",
+      "unknown": "Eroare necunoscută",
+      "cannot_connect_radio": "Nu se poate conecta la gateway-ul radio. Verificați adresa IP și portul și dacă gateway-ul este pornit.",
+      "no_gateway_mac": "Gateway-ul radio nu și-a raportat adresa MAC. Actualizați firmware-ul gateway-ului.",
+      "no_heaters": "Niciun radiator nu a răspuns. Mutați gateway-ul mai aproape de radiatoare și încercați din nou.",
+      "cannot_connect_nanocul": "Stick-ul nanoCUL nu poate fi deschis. Verificați dacă este conectat, dacă portul este corect și dacă rulează firmware-ul termoweb_rx.",
+      "nanocul_radio_missing": "Stick-ul răspunde, dar modulul radio nu este conectat. Verificați cablajul.",
+      "gateway_radio_missing": "Gateway-ul răspunde, dar modulul radio nu este conectat. Verificați cablajul."
+    },
+    "abort": {
+      "already_configured": "Acest gateway este deja configurat.",
+      "reconfigure_successful": "Setările au fost salvate.",
+      "monitor_reconfigure": "O intrare de tip doar ascultare nu poate fi modificată. Ștergeți-o și adăugați-o din nou.",
+      "unique_id_mismatch": "Acesta este un alt cont sau dispozitiv. Pentru a-l folosi, adăugați în schimb o intrare nouă.",
+      "reauth_successful": "Parola nouă a fost salvată.",
+      "cannot_connect_radio": "Nu se poate conecta la gateway-ul radio. Verificați dacă gateway-ul este pornit și conectat la rețeaua dumneavoastră.",
+      "no_gateway_mac": "Gateway-ul radio nu și-a raportat adresa MAC. Actualizați firmware-ul gateway-ului.",
+      "gateway_radio_missing": "Gateway-ul răspunde, dar modulul radio nu este conectat. Verificați cablajul.",
+      "not_ipv4_address": "Gateway-ul radio a anunțat doar o adresă IPv6. Adăugați-l manual folosind adresa sa IPv4.",
+      "nanocul_firmware_too_old": "Firmware-ul de pe acest stick nanoCUL este prea vechi. Instalați pe stick cel mai nou firmware termoweb_rx (consultați ghidul nanoCUL), apoi încercați din nou."
+    },
+    "progress": {
+      "radio_rescan": "Se verifică fiecare radiator din rețeaua radio. Durează până la un minut."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Opțiuni TermoWeb"
+      "rehome": {
+        "title": "Mutați radiatoarele în rețeaua proprie a acestei instalații",
+        "description": "Folosiți această opțiune când radiatoarele încă folosesc rețeaua radio a unui gateway TermoWeb vechi. Radiatoare: {heaters}.\n\nCe se întâmplă:\n1. Fiecare radiator este resetat la setările din fabrică. Home Assistant îi salvează mai întâi setările.\n2. Puneți radiatoarele în modul de asociere, câte unul pe rând. Manualul radiatorului vă arată ce butoane să apăsați. Așteptați aproximativ 10 secunde între radiatoare. Aveți la dispoziție 5 minute.\n3. Radiatoarele primesc numere noi, începând de la 2. ID-urile entităților se schimbă. Numele radiatoarelor rămân aceleași atunci când Home Assistant recunoaște radiatorul.\n4. Home Assistant redă fiecărui radiator setările sale: modul, temperaturile presetate, temperatura manuală și programul săptămânal.\n\nControlul radiatoarelor este suspendat cât timp rulează acest proces. Unele radiatoare mai vechi nu pot fi resetate prin radio, deci nu pot fi mutate în acest mod. Apăsați **Trimite** pentru a începe, apoi, după aproximativ 10 secunde, puneți primul radiator în modul de asociere."
+      },
+      "rehome_run": { "title": "Se mută radiatoarele" },
+      "rehome_done": {
+        "title": "Mutare finalizată",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Integrarea nu rulează. Porniți-o mai întâi, apoi încercați din nou."
+    },
+    "progress": {
+      "rehome": "Se resetează radiatoarele, apoi se așteaptă radiatoare în modul de asociere. Puneți acum un radiator în modul de asociere, apoi pe următorul. Procesul se oprește la 1 minut după asocierea ultimului radiator sau după 5 minute."
     }
   },
   "device": {
     "heater": {
-      "name": "Încălzitor {addr}"
+      "name": "Radiator {addr}"
+    },
+    "accumulator": {
+      "name": "Acumulator {addr}"
     },
     "thermostat": {
       "name": "Termostat {addr}"
     },
+    "power_monitor": {
+      "name": "Monitor de putere {addr}"
+    },
     "node": {
       "name": "Nod {addr}"
     },
-    "power_monitor": {
-      "name": "Monitor de energie {addr}"
+    "site": {
+      "name": "Acasă"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway online"
+      "gateway_online": { "name": "Gateway online" },
+      "pairing_open": {
+        "name": "Asociere deschisă",
+        "state_attributes": { "ends_at": { "name": "Se încheie la" } }
       },
-      "boost_active": {
-        "name": "Boost activ"
-      }
+      "boost_active": { "name": "Boost activ" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Forțați actualizarea"
-      },
-      "accumulator_boost_start": {
-        "name": "Start boost"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Anulează impulsul"
-      }
+      "force_refresh": { "name": "Forțează reîmprospătarea" },
+      "pair_new_heaters": { "name": "Asociază radiatoare noi" },
+      "accumulator_boost_start": { "name": "Pornește boost" },
+      "accumulator_boost_cancel": { "name": "Anulează boost" },
+      "flash_display": { "name": "Clipire afișaj" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Durata impulsului"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Creșterea temperaturii"
-      }
+      "accumulator_boost_duration": { "name": "Durata boost" },
+      "accumulator_boost_temperature": { "name": "Temperatura boost" },
+      "heater_priority": { "name": "Prioritate" },
+      "installation_power_limit": { "name": "Limită de putere" },
+      "temperature_offset": { "name": "Corecție de temperatură" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatura"
+      "heater_temperature": { "name": "Temperatură" },
+      "heater_energy_total": { "name": "Energie" },
+      "heater_power": { "name": "Putere" },
+      "radio_address": { "name": "Adresă radio" },
+      "power_monitor_energy": { "name": "Energie" },
+      "power_monitor_power": { "name": "Putere" },
+      "installation_total_energy": { "name": "Energie totală" },
+      "frames_heard": { "name": "Cadre recepționate" },
+      "boost_minutes_remaining": { "name": "Minute de boost rămase" },
+      "boost_end": { "name": "Sfârșit boost" },
+      "accumulator_charging": { "name": "Încărcare" },
+      "accumulator_current_charge": { "name": "Încărcare actuală" },
+      "accumulator_target_charge": { "name": "Încărcare țintă" },
+      "installation_info": { "name": "Locație" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Niciunul",
+              "temporary_override": "Modificare temporară",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Blocare pentru copii" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "Mod EASY" },
+      "open_window_detection": { "name": "Detectare fereastră deschisă" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Mod de reglare",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Histerezis 0,25 °C",
+          "hysteresis_0_35": "Histerezis 0,35 °C",
+          "hysteresis_0_5": "Histerezis 0,5 °C",
+          "hysteresis_0_75": "Histerezis 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energie"
-      },
-      "heater_power": {
-        "name": "Putere"
-      },
-      "power_monitor_energy": {
-        "name": "Energie"
-      },
-      "power_monitor_power": {
-        "name": "Putere"
-      },
-      "installation_total_energy": {
-        "name": "Energie totală"
-      },
-      "boost_minutes_remaining": {
-        "name": "Boost minute rămase"
-      },
-      "boost_end": {
-        "name": "Sfârșit boost"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Unitate de temperatură pe panou",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Configurarea presetării amplificării acumulatorului",
-      "description": "Actualizați durata și/sau temperatura de amplificare implicită pentru un acumulator TermoWeb. Minutele trebuie să fie între 60 și 600 în trepte de 60 de minute; omiteți un câmp pentru a păstra valoarea existentă.",
+      "name": "Configurează presetarea boost a acumulatorului",
+      "description": "Actualizează durata și/sau temperatura implicită a boost-ului pentru un acumulator TermoWeb. Minutele trebuie să fie între 60 și 600, în trepte de 60 de minute; omiteți un câmp pentru a păstra valoarea existentă.",
       "fields": {
         "minutes": {
-          "name": "Durata implicită de amplificare",
-          "description": "Numărul de minute în care ar trebui să funcționeze impulsul atunci când nu este prevăzută nicio comandă (60-600, pasul 60).",
+          "name": "Durata implicită a boost-ului",
+          "description": "Numărul de minute cât durează boost-ul atunci când nu este indicată altă durată (60–600, pas 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Creșterea temperaturii",
-          "description": "Punct de referință opțional de amplificare care se aplică în timpul sesiunii de amplificare (°C sau °F).",
+          "name": "Temperatura boost",
+          "description": "Temperatură țintă opțională aplicată în timpul boost-ului (°C sau °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Pornirea amplificării acumulatorului",
-      "description": "Declanșează un impuls imediat asupra unui acumulator TermoWeb. Furnizați o durată pentru a trece peste valoarea implicită (60-600 de minute în trepte de 60 de minute) sau omiteți-o pentru a utiliza valoarea prestabilită stocată.",
+      "name": "Pornește boost",
+      "description": "Pornește acum un boost pe un acumulator TermoWeb sau pe un radiator radio care are boost. Acumulator: indicați o durată (60–600 de minute, în trepte de 60) sau omiteți-o pentru a folosi presetarea salvată. Radiator radio: omiteți durata; radiatorul folosește propriul timp de boost.",
       "fields": {
         "minutes": {
-          "name": "Durata impulsului",
-          "description": "Durata sesiunii de stimulare în minute (60-600, pasul 60). Opțional.",
+          "name": "Durata boost",
+          "description": "Durata boost-ului în minute (60–600, pas 60). Opțional.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Anularea amplificării acumulatorului",
-      "description": "Anularea sesiunii de amplificare activă pe un acumulator TermoWeb."
+      "name": "Anulează boost",
+      "description": "Oprește boost-ul pe un acumulator TermoWeb sau pe un radiator radio."
     },
     "set_schedule": {
-      "name": "Setați programul săptămânal",
-      "description": "Setați programul săptămânal 7×24 pentru un încălzitor TermoWeb. Programul este o listă de 168 de numere întregi, unde fiecare valoare corespunde unei ore din săptămână începând de luni 00:00. Utilizați 0 pentru preselecția rece, 1 pentru preselecția de noapte și 2 pentru preselecția de zi.",
+      "name": "Setează programul săptămânal",
+      "description": "Setează programul săptămânal 7×24 pentru un radiator TermoWeb. Programul este o listă de 168 de numere întregi, fiecare valoare corespunzând unei ore din săptămână, începând de luni la 00:00. Folosiți 0 pentru presetarea rece, 1 pentru presetarea de noapte și 2 pentru presetarea de zi.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "O listă de 168 de numere întregi (0, 1 sau 2) care reprezintă programul săptămânal al încălzitorului. Indicele 0 este luni 00:00, indicele 1 este luni 01:00 și așa mai departe.",
+          "description": "O listă de 168 de numere întregi (0, 1 sau 2) care reprezintă programul săptămânal al radiatorului. Indexul 0 este luni la 00:00, indexul 1 este luni la 01:00 și așa mai departe.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Setarea temperaturilor prestabilite",
-      "description": "Setați temperaturile presetate pentru frig, noapte și zi pentru un încălzitor TermoWeb. Puteți furniza toate cele trei temperaturi ca o singură listă (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Setează temperaturile presetate",
+      "description": "Setează temperaturile presetărilor rece, noapte și zi pentru un radiator TermoWeb. Puteți indica toate cele trei temperaturi într-o singură listă (``ptemp``) sau fiecare separat (``cold``, ``night`` și ``day``). Presetările omise își păstrează valoarea actuală.",
       "fields": {
         "ptemp": {
-          "name": "Temperaturi prestabilite",
-          "description": "O listă de trei temperaturi [rece, noapte, zi] în aceleași unități ca și încălzitorul (°C sau °F). Dacă este furnizată, aceasta va avea prioritate față de valorile individuale pentru frig, noapte și zi.",
+          "name": "Temperaturi presetate",
+          "description": "O listă de trei temperaturi [rece, noapte, zi] în aceleași unități ca radiatorul (°C sau °F). Dacă este indicată, înlocuiește valorile separate pentru rece, noapte și zi.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Pre-setare rece",
+          "name": "Presetare rece",
           "description": "Temperatura pentru presetarea rece (°C sau °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Preset de noapte",
+          "name": "Presetare noapte",
           "description": "Temperatura pentru presetarea de noapte (°C sau °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Ziua prestabilită",
-          "description": "Temperatura pentru ziua presetată (°C sau °F).",
+          "name": "Presetare zi",
+          "description": "Temperatura pentru presetarea de zi (°C sau °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Istoricul energiei de import",
-      "description": "Importați contoare istorice de energie orară pentru încălzitoarele TermoWeb cu până la un an în urmă în statisticile Home Assistant pentru fiecare încălzitor configurat.",
+      "name": "Importă istoricul energiei",
+      "description": "Importă consumul orar de energie din trecut al fiecărui radiator și monitor de putere în statisticile Home Assistant (panoul Energie). Progresul este salvat: dacă importul se oprește, rulați-l din nou pentru a continua.",
       "fields": {
         "reset_progress": {
-          "name": "Resetați progresul",
-          "description": "Ștergeți progresul stocat și reimportați istoricul de la zero."
+          "name": "Resetează progresul",
+          "description": "Uită progresul salvat și importă din nou întreaga perioadă. Statisticile existente sunt suprascrise, nu șterse."
         },
         "max_history_retrieval": {
-          "name": "Max zile de istorie",
-          "description": "Numărul de zile de istoric care urmează să fie recuperat. Suprascrie valoarea implicită configurată numai pentru acest import."
+          "name": "Număr maxim de zile de istoric",
+          "description": "Câte zile în urmă să se importe (de la 1 la 3650, implicit 7). Dacă ați importat deja mai puține zile, se preiau doar zilele mai vechi."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Captură radio",
+      "description": "Înregistrează pentru o perioadă fiecare cadru radio recepționat de gateway sau de nanoCUL și îl salvează ca fișier JSON în folderul de configurare Home Assistant. Nu transmite niciodată. Pe o intrare radio obișnuită, comenzile pentru radiatoare așteaptă până se încheie captura.",
+      "fields": {
+        "entry_id": {
+          "name": "ID intrare de configurare",
+          "description": "Intrarea de configurare a gateway-ului radio sau a nanoCUL de folosit, de obicei cea de tip doar ascultare.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Durată",
+          "description": "Cât timp să se înregistreze, între 10 și 1800 de secunde."
+        },
+        "redact": {
+          "name": "Ascunde datele private",
+          "description": "Înlocuiește în fișier ID-urile de rețea și numerele de serie ale radiatoarelor. Fără această opțiune, fișierul conține ID-ul rețelei dumneavoastră: partajați-l doar în privat."
+        },
+        "note": {
+          "name": "Notă",
+          "description": "Text opțional salvat în fișier, de exemplu ce radiator ați folosit.",
+          "example": "am mărit temperatura la radiatorul din sufragerie"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Scanare radio",
+      "description": "Ascultă pentru o perioadă tot traficul radio din banda radiatoarelor, inclusiv traficul pe care această integrare nu îl înțelege, și salvează un fișier raport în folderul de configurare Home Assistant. Atașați fișierul la un issue pe GitHub pentru a cere suport pentru un nou tip de radiator.",
+      "fields": {
+        "entry_id": {
+          "name": "ID intrare de configurare",
+          "description": "Intrarea de configurare a gateway-ului radio sau a nanoCUL de folosit.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Durată",
+          "description": "Cât timp să se asculte. Radiatoarele transmit cel mai mult când pornesc sau opresc încălzirea."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Resetare din fabrică prin radio",
+      "description": "DISTRUCTIV. Resetează un radiator radio la setările din fabrică. Radiatorul pierde toate setările, ceasul, programul săptămânal și asocierea radio și nu mai comunică cu Home Assistant. Ultimele setări cunoscute sunt salvate mai întâi. Pentru a folosi din nou radiatorul, apăsați „Asociază radiatoare noi” pe dispozitivul gateway și puneți radiatorul în modul de asociere. Setările salvate revin când radiatorul este recunoscut. Unele radiatoare mai vechi nu pot fi resetate prin radio: resetați-le manual (consultați manualul radiatorului).",
+      "fields": {
+        "entry_id": {
+          "name": "ID intrare de configurare",
+          "description": "Intrarea de configurare a gateway-ului radio sau a nanoCUL de folosit.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Numărul radiatorului",
+          "description": "Numărul radio al radiatorului (numărul din „Radiator 6”)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radio: mută radiatoarele în rețeaua proprie",
+      "description": "Mută toate radiatoarele unei intrări radio în rețeaua radio proprie a acestei instalații. Fiecare radiator este resetat mai întâi (setările îi sunt salvate), apoi puneți radiatoarele în modul de asociere, câte unul pe rând. Radiatoarele primesc numere noi începând de la 2, iar setările lor sunt restaurate. Unele radiatoare mai vechi nu pot fi resetate prin radio, deci nu pot fi mutate în acest mod. Controlul radiatoarelor este suspendat cât timp rulează acest proces.",
+      "fields": {
+        "entry_id": {
+          "name": "ID intrare de configurare",
+          "description": "Intrarea de configurare a gateway-ului radio sau a nanoCUL de folosit.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Timp de așteptare",
+          "description": "Cât timp să se aștepte apăsarea butoanelor de asociere ale radiatoarelor."
         }
       }
     }

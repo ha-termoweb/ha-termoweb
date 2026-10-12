@@ -1,174 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Miten lämmittimesi on yhdistetty?",
+        "description": "Valitse pilvitili, jos käytät TermoWeb-, Ducaheat- tai Tevolve-sovellusta. Jos haluat ohjata lämmittimiä paikallisesti ilman pilveä, helpoin tapa on tähän Home Assistant -tietokoneeseen kytketty nanoCUL-USB-tikku (ei juottamista). ESP32-radioyhdyskäytävä on edistyneille käyttäjille: se pitää koota ja juottaa itse.",
+        "menu_options": {
+          "cloud": "Pilvitili (TermoWeb-, Ducaheat- tai Tevolve-sovellus)",
+          "nanocul": "Paikallinen radio: nanoCUL-USB-tikku (helpoin, ei juottamista)",
+          "radio": "Paikallinen radioyhdyskäytävä: ESP32 + CC1101 (edistynyt, vaatii juottamista)"
+        }
+      },
       "cloud": {
-        "title": "Liity TermoWeb-perheen lämmittimiin",
-        "description": "Versio: {version}__\n\nValitse TermoWeb- tai Ducaheat-tuotemerkki ja anna tilitietosi.",
+        "title": "Yhdistä TermoWeb-perheen lämmittimiin",
+        "description": "Versio: {version}\n\nValitse merkiksi TermoWeb, Ducaheat tai Tevolve ja anna tilisi tunnukset. Tevolve käyttää Ducaheatin palvelinta.",
         "data": {
           "brand": "Merkki",
           "username": "Sähköposti",
           "password": "Salasana"
         }
+      },
+      "radio": {
+        "title": "Yhdistä radioyhdyskäytävään",
+        "description": "Home Assistant löytää ESP32-radioyhdyskäytävän yleensä itse: etsi se kohdasta **Löydetty** Laitteet ja palvelut -sivulla. Käytä tätä lomaketta vain, jos se ei näy siellä. Anna yhdyskäytävän IP-osoite. Seuraavassa vaiheessa valitset: lisää yhdyskäytävä ja anna sen löytää lämmittimesi, tai muodosta pariliitos uusiin lämmittimiin.",
+        "data": {
+          "host": "Yhdyskäytävän IP-osoite"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Lisäasetukset",
+            "description": "Älä muuta näitä, ellet ole muuttanut yhdyskäytävän laiteohjelmistoa.",
+            "data": {
+              "port": "Portti"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Radioyhdyskäytävä löytyi",
+        "description": "Osoitteesta {host} löytyi TermoWeb-radioyhdyskäytävä. Otetaanko se käyttöön?\n\nSeuraavassa vaiheessa valitset: lisää yhdyskäytävä (se löytää lämmittimesi ja muodostaa niihin pariliitoksen) tai pelkkä kuuntelu."
+      },
+      "radio_method": {
+        "title": "Lisää yhdyskäytävä",
+        "description": "Valitse ”Lisää yhdyskäytävä”, jos haluat ohjata lämmittimiäsi. Määritys valmistuu heti. Sen jälkeen:\n\n- Lämmittimet, jotka jo toimivat TermoWeb-yhdyskäytävän tai -sovelluksen kanssa, löytyvät itsestään, yleensä muutamassa minuutissa. Lämmittimet lähettävät tietoja, kun ne alkavat lämmittää, joten yhden lämmittimen lämpötilan nostaminen auttaa.\n- Uudet tai nollatut lämmittimet: aseta jokainen lämmitin pariliitostilaan 30 minuutin kuluessa. Lämmittimen käyttöohjeessa kerrotaan, mitä painikkeita painaa. Yksi lämmitin kerrallaan. Myöhemmin paina ensin **Muodosta pariliitos uusiin lämmittimiin** yhdyskäytävälaitteessa.\n\nSaat ilmoituksen jokaisesta lisätystä lämmittimestä.\n\nValitse ”Pelkkä kuuntelu”, jos haluat tallentaa radioliikennettä testiä varten edelleen toimivan TermoWeb-yhdyskäytävän rinnalla. Tässä tilassa integraatio ei koskaan lähetä mitään eikä lisää lämmittimiä.",
+        "menu_options": {
+          "radio_discover": "Lisää yhdyskäytävä",
+          "radio_monitor": "Pelkkä kuuntelu (tallentaa radioliikennettä, ei koskaan lähetä)"
+        }
+      },
+      "radio_rescan": { "title": "Etsitään lämmittimiäsi" },
+      "reconfigure_radio": {
+        "title": "Muuta radioyhdyskäytävää",
+        "description": "Muuta yhdyskäytävän osoitetta. Valitse ”Etsi lämmittimet uudelleen”, jos olet lisännyt tai poistanut lämmittimen.",
+        "data": {
+          "host": "Yhdyskäytävän IP-osoite",
+          "port": "Portti",
+          "rescan": "Etsi lämmittimet uudelleen"
+        }
+      },
+      "nanocul": {
+        "title": "Yhdistä nanoCUL-USB-tikkuun",
+        "description": "Valitse nanoCUL-tikun portti. Jos Home Assistant tunnisti tikun, se on jo valittuna: paina vain Lähetä. Seuraavassa vaiheessa valitset: lisää yhdyskäytävä ja anna sen löytää lämmittimesi, tai muodosta pariliitos uusiin lämmittimiin.",
+        "data": {
+          "device": "USB-portti"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Anna nanoCUL-portti",
+        "description": "Kirjoita portin polku, esimerkiksi /dev/serial/by-id/usb-..., tai verkko-osoite, kuten socket://192.0.2.10:2323, jos tikku on jaettu verkon kautta.",
+        "data": {
+          "device": "Portin polku tai URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Muuta nanoCUL-porttia",
+        "description": "Muuta tikun portin polkua tai URL-osoitetta. Valitse ”Etsi lämmittimet uudelleen”, jos olet lisännyt tai poistanut lämmittimen.",
+        "data": {
+          "device": "Portin polku tai URL",
+          "rescan": "Etsi lämmittimet uudelleen"
+        }
+      },
+      "reconfigure": {
+        "title": "Muuta tilin asetuksia",
+        "description": "Versio: {version}\n\nAnna tämän tilin uusi salasana. Täällä et voi vaihtaa toiseen tiliin: lisää sitä varten uusi merkintä.",
+        "data": {
+          "brand": "Merkki",
+          "username": "Sähköposti",
+          "password": "Salasana"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Kirjaudu uudelleen",
+        "description": "{brand} ei hyväksynyt käyttäjän {username} tallennettua salasanaa. Anna nykyinen salasana.",
+        "data": {
+          "password": "Salasana"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Virheellinen käyttäjänimi tai salasana (tai asiakasavain).",
-      "cannot_connect": "Yhteyttä TermoWebiin ei voida muodostaa - verkko/DNS/SSL-virhe.",
-      "rate_limited": "API rajoittaa tilapäisesti nopeutta. Yritä myöhemmin uudelleen.",
-      "unknown": "Tuntematon virhe"
+      "invalid_auth": "Virheellinen käyttäjätunnus tai salasana (tai asiakasavain).",
+      "cannot_connect": "Yhteyttä TermoWebiin ei saada – verkko-, DNS- tai SSL-virhe.",
+      "rate_limited": "API rajoittaa pyyntöjä tilapäisesti. Yritä myöhemmin uudelleen.",
+      "unknown": "Tuntematon virhe",
+      "cannot_connect_radio": "Radioyhdyskäytävään ei saada yhteyttä. Tarkista IP-osoite ja portti sekä se, että yhdyskäytävässä on virta päällä.",
+      "no_gateway_mac": "Radioyhdyskäytävä ei ilmoittanut MAC-osoitettaan. Päivitä yhdyskäytävän laiteohjelmisto.",
+      "no_heaters": "Yksikään lämmitin ei vastannut. Siirrä yhdyskäytävä lähemmäs lämmittimiä ja yritä uudelleen.",
+      "cannot_connect_nanocul": "nanoCUL-tikkua ei voi avata. Tarkista, että se on kytketty, portti on oikea ja tikussa on termoweb_rx-laiteohjelmisto.",
+      "nanocul_radio_missing": "Tikku vastaa, mutta sen radiomoduulia ei ole kytketty. Tarkista johdotus.",
+      "gateway_radio_missing": "Yhdyskäytävä vastaa, mutta sen radiomoduulia ei ole kytketty. Tarkista johdotus."
+    },
+    "abort": {
+      "already_configured": "Tämä yhdyskäytävä on jo määritetty.",
+      "reconfigure_successful": "Asetukset tallennettiin.",
+      "monitor_reconfigure": "Pelkän kuuntelun merkintää ei voi muuttaa. Poista se ja lisää se uudelleen.",
+      "unique_id_mismatch": "Tämä on eri tili tai laite. Jos haluat käyttää sitä, lisää sen sijaan uusi merkintä.",
+      "reauth_successful": "Uusi salasana tallennettiin.",
+      "cannot_connect_radio": "Radioyhdyskäytävään ei saada yhteyttä. Tarkista, että yhdyskäytävässä on virta päällä ja että se on verkossasi.",
+      "no_gateway_mac": "Radioyhdyskäytävä ei ilmoittanut MAC-osoitettaan. Päivitä yhdyskäytävän laiteohjelmisto.",
+      "gateway_radio_missing": "Yhdyskäytävä vastaa, mutta sen radiomoduulia ei ole kytketty. Tarkista johdotus.",
+      "not_ipv4_address": "Radioyhdyskäytävä ilmoitti vain IPv6-osoitteen. Lisää se käsin sen IPv4-osoitteella.",
+      "nanocul_firmware_too_old": "Tämän nanoCUL-tikun laiteohjelmisto on liian vanha. Asenna tikkuun uusin termoweb_rx-laiteohjelmisto (katso nanoCUL-ohje) ja yritä sitten uudelleen."
+    },
+    "progress": {
+      "radio_rescan": "Tarkistetaan jokainen radioverkkosi lämmitin. Tämä kestää enintään minuutin."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "TermoWeb-vaihtoehdot"
+      "rehome": {
+        "title": "Siirrä lämmittimet tämän asennuksen omaan verkkoon",
+        "description": "Käytä tätä, jos lämmittimesi käyttävät yhä vanhan TermoWeb-yhdyskäytävän radioverkkoa. Lämmittimet: {heaters}.\n\nMitä tapahtuu:\n1. Jokainen lämmitin palautetaan tehdasasetuksiin. Home Assistant tallentaa ensin sen asetukset.\n2. Asetat lämmittimet pariliitostilaan yksi kerrallaan. Lämmittimen käyttöohjeessa kerrotaan, mitä painikkeita painaa. Odota noin 10 sekuntia lämmittimien välillä. Aikaa on 5 minuuttia.\n3. Lämmittimet saavat uudet numerot, 2:sta alkaen. Niiden kohdetunnukset muuttuvat. Lämmittimien nimet pysyvät samoina, kun Home Assistant tunnistaa lämmittimen.\n4. Home Assistant palauttaa jokaiselle lämmittimelle sen asetukset: tilan, esiasetusten lämpötilat, manuaalisen lämpötilan ja viikko-ohjelman.\n\nLämmittimien ohjaus on keskeytetty tämän ajan. Joitakin vanhempia lämmittimiä ei voi nollata radion kautta, joten niitä ei voi siirtää tällä tavalla. Aloita painamalla **Lähetä** ja aseta ensimmäinen lämmitin pariliitostilaan noin 10 sekunnin kuluttua."
+      },
+      "rehome_run": { "title": "Siirretään lämmittimiäsi" },
+      "rehome_done": {
+        "title": "Siirto valmis",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Integraatio ei ole käynnissä. Käynnistä se ensin ja yritä sitten uudelleen."
+    },
+    "progress": {
+      "rehome": "Nollataan lämmittimiä ja odotetaan sitten pariliitostilassa olevia lämmittimiä. Aseta nyt yksi lämmitin pariliitostilaan, sitten seuraava. Tämä päättyy 1 minuutti viimeisen pariliitoksen jälkeen tai 5 minuutin kuluttua."
+    }
+  },
+  "device": {
+    "heater": {
+      "name": "Lämmitin {addr}"
+    },
+    "accumulator": {
+      "name": "Varaava lämmitin {addr}"
+    },
+    "thermostat": {
+      "name": "Termostaatti {addr}"
+    },
+    "power_monitor": {
+      "name": "Energiamittari {addr}"
+    },
+    "node": {
+      "name": "Solmu {addr}"
+    },
+    "site": {
+      "name": "Koti"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway verkossa"
+      "gateway_online": { "name": "Yhdyskäytävä verkossa" },
+      "pairing_open": {
+        "name": "Pariliitos auki",
+        "state_attributes": { "ends_at": { "name": "Päättyy" } }
       },
-      "boost_active": {
-        "name": "Boost aktiivinen"
-      }
+      "boost_active": { "name": "Tehostus päällä" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Pakota päivitys"
-      },
-      "accumulator_boost_start": {
-        "name": "Start boost"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Peruuta nosto"
-      }
+      "force_refresh": { "name": "Pakota päivitys" },
+      "pair_new_heaters": { "name": "Muodosta pariliitos uusiin lämmittimiin" },
+      "accumulator_boost_start": { "name": "Aloita tehostus" },
+      "accumulator_boost_cancel": { "name": "Peruuta tehostus" },
+      "flash_display": { "name": "Vilkuta näyttöä" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Boostin kesto"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Boost-lämpötila"
-      }
+      "accumulator_boost_duration": { "name": "Tehostuksen kesto" },
+      "accumulator_boost_temperature": { "name": "Tehostuksen lämpötila" },
+      "heater_priority": { "name": "Prioriteetti" },
+      "installation_power_limit": { "name": "Tehoraja" },
+      "temperature_offset": { "name": "Lämpötilan korjaus" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Lämpötila"
+      "heater_temperature": { "name": "Lämpötila" },
+      "heater_energy_total": { "name": "Energia" },
+      "heater_power": { "name": "Teho" },
+      "radio_address": { "name": "Radio-osoite" },
+      "power_monitor_energy": { "name": "Energia" },
+      "power_monitor_power": { "name": "Teho" },
+      "installation_total_energy": { "name": "Kokonaisenergia" },
+      "frames_heard": { "name": "Vastaanotetut kehykset" },
+      "boost_minutes_remaining": { "name": "Tehostusta jäljellä (min)" },
+      "boost_end": { "name": "Tehostus päättyy" },
+      "accumulator_charging": { "name": "Lataus" },
+      "accumulator_current_charge": { "name": "Nykyinen varaus" },
+      "accumulator_target_charge": { "name": "Tavoitevaraus" },
+      "installation_info": { "name": "Sijainti" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Ei mitään",
+              "temporary_override": "Tilapäinen ohitus",
+              "boost": "Tehostus"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Lapsilukko" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "EASY-tila" },
+      "open_window_detection": { "name": "Avoimen ikkunan tunnistus" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Säätötapa",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Hystereesi 0,25 °C",
+          "hysteresis_0_35": "Hystereesi 0,35 °C",
+          "hysteresis_0_5": "Hystereesi 0,5 °C",
+          "hysteresis_0_75": "Hystereesi 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energia"
-      },
-      "heater_power": {
-        "name": "Teho"
-      },
-      "power_monitor_energy": {
-        "name": "Energia"
-      },
-      "power_monitor_power": {
-        "name": "Teho"
-      },
-      "installation_total_energy": {
-        "name": "Kokonaisenergia"
-      },
-      "boost_minutes_remaining": {
-        "name": "Boost minuuttia jäljellä"
-      },
-      "boost_end": {
-        "name": "Boost-pääte"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Paneelin lämpötilayksikkö",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Akun tehostuksen esiasetuksen määrittäminen",
-      "description": "Päivitä TermoWeb-akun oletusarvoinen tehostuksen kesto ja/tai lämpötila. Minuuttien on oltava 60 ja 600 välillä 60 minuutin välein; jätä kenttä pois, jos haluat säilyttää nykyisen arvon.",
+      "name": "Määritä varaavan lämmittimen oletustehostus",
+      "description": "Päivittää TermoWeb-varaavan lämmittimen tehostuksen oletuskeston ja/tai -lämpötilan. Minuuttien on oltava välillä 60–600 ja 60 minuutin välein; jätä kenttä tyhjäksi, jos haluat säilyttää nykyisen arvon.",
       "fields": {
         "minutes": {
           "name": "Tehostuksen oletuskesto",
-          "description": "Niiden minuuttien määrä, joiden ajan tehostuksen pitäisi toimia, kun ohitusta ei ole annettu (60-600, askel 60).",
+          "description": "Kuinka monta minuuttia tehostus kestää, kun muuta kestoa ei anneta (60–600, 60 minuutin välein).",
           "example": "120"
         },
         "temperature": {
-          "name": "Boost-lämpötila",
-          "description": "Valinnainen tehostusasetuspiste, jota käytetään tehostusjakson aikana (°C tai °F).",
+          "name": "Tehostuksen lämpötila",
+          "description": "Valinnainen tavoitelämpötila tehostuksen ajaksi (°C tai °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Käynnistä akun lisäys",
-      "description": "Käynnistää TermoWeb-akun välittömän lisäyksen. Anna kesto, joka ohittaa oletusarvon (60-600 minuuttia 60 minuutin välein), tai jätä se pois, jos haluat käyttää tallennettua esiasetusta.",
+      "name": "Aloita tehostus",
+      "description": "Aloittaa tehostuksen heti TermoWeb-varaavassa lämmittimessä tai radiolämmittimessä, jossa on tehostus. Varaava lämmitin: anna kesto (60–600 minuuttia, 60 minuutin välein) tai jätä se tyhjäksi, jolloin käytetään tallennettua oletusta. Radiolämmitin: jätä kesto tyhjäksi; lämmitin käyttää omaa tehostusaikaansa.",
       "fields": {
         "minutes": {
-          "name": "Boostin kesto",
-          "description": "Tehostusistunnon kesto minuutteina (60-600, askel 60). Valinnainen.",
+          "name": "Tehostuksen kesto",
+          "description": "Tehostuksen kesto minuutteina (60–600, 60 minuutin välein). Valinnainen.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Peruuta akun lisäys",
-      "description": "Peruuttaa TermoWeb-akun aktiivisen tehostusistunnon."
+      "name": "Peruuta tehostus",
+      "description": "Lopettaa TermoWeb-varaavan lämmittimen tai radiolämmittimen tehostuksen."
     },
     "set_schedule": {
-      "name": "Aseta viikoittainen aikataulu",
-      "description": "Aseta TermoWeb-lämmittimen 7×24-viikko-ohjelma. Ohjelma on 168 kokonaisluvun luettelo, jossa jokainen arvo vastaa yhtä viikkotuntia maanantaista 00:00 alkaen. Käytä 0 kylmää esiasetusta, 1 yötä esiasetusta ja 2 päivää esiasetusta varten.",
+      "name": "Aseta viikko-ohjelma",
+      "description": "Asettaa TermoWeb-lämmittimen 7×24-viikko-ohjelman. Ohjelma on 168 kokonaisluvun luettelo, jossa jokainen arvo vastaa yhtä viikon tuntia maanantaista klo 00:00 alkaen. Käytä arvoa 0 kylmä-esiasetukselle, 1 yö-esiasetukselle ja 2 päivä-esiasetukselle.",
       "fields": {
         "prog": {
           "name": "Ohjelma",
-          "description": "168 kokonaisluvun (0, 1 tai 2) luettelo, joka edustaa lämmittimen viikko-ohjelmaa. Indeksi 0 on maanantai 00:00, indeksi 1 on maanantai 01:00 jne.",
+          "description": "168 kokonaisluvun (0, 1 tai 2) luettelo, joka kuvaa lämmittimen viikko-ohjelmaa. Indeksi 0 on maanantai klo 00:00, indeksi 1 on maanantai klo 01:00 ja niin edelleen.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Aseta esiasetetut lämpötilat",
-      "description": "Aseta TermoWeb-lämmittimen kylmän, yön ja päivän esiasetetut lämpötilat. Voit joko antaa kaikki kolme lämpötilaa yhtenä luettelona (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Aseta esiasetusten lämpötilat",
+      "description": "Asettaa TermoWeb-lämmittimen kylmä-, yö- ja päivä-esiasetusten lämpötilat. Voit antaa kaikki kolme lämpötilaa yhtenä luettelona (``ptemp``) tai kunkin erikseen (``cold``, ``night`` ja ``day``). Esiasetukset, jotka jätät tyhjiksi, säilyttävät nykyisen arvonsa.",
       "fields": {
         "ptemp": {
-          "name": "Esiasetetut lämpötilat",
-          "description": "Luettelo kolmesta lämpötilasta [kylmä, yö, päivä] samoissa yksiköissä kuin lämmitin (°C tai °F). Jos tämä annetaan, se ohittaa yksittäiset kylmän, yön ja päivän arvot.",
+          "name": "Esiasetusten lämpötilat",
+          "description": "Kolmen lämpötilan luettelo [kylmä, yö, päivä] samassa yksikössä kuin lämmitin (°C tai °F). Jos se annetaan, se korvaa erilliset kylmä-, yö- ja päiväarvot.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Kylmä esiasetus",
-          "description": "Kylmän esiasetuksen lämpötila (°C tai °F).",
+          "name": "Kylmä-esiasetus",
+          "description": "Kylmä-esiasetuksen lämpötila (°C tai °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Yön esiasetus",
-          "description": "Lämpötila yön esiasetusta varten (°C tai °F).",
+          "name": "Yö-esiasetus",
+          "description": "Yö-esiasetuksen lämpötila (°C tai °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Päivän esiasetus",
-          "description": "Päivän esiasetettu lämpötila (°C tai °F).",
+          "name": "Päivä-esiasetus",
+          "description": "Päivä-esiasetuksen lämpötila (°C tai °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Energian tuontihistoria",
-      "description": "Tuo TermoWeb-lämmittimien historialliset tuntikohtaiset energialaskurit vuoden takaisiin tilastoihin Home Assistant -ohjelmassa jokaisen määritetyn lämmittimen osalta.",
+      "name": "Tuo energiahistoria",
+      "description": "Tuo jokaisen lämmittimen ja energiamittarin aiemman tuntikohtaisen energiankulutuksen Home Assistantin tilastoihin (Energia-hallintapaneeliin). Edistyminen tallennetaan: jos tuonti keskeytyy, jatka suorittamalla se uudelleen.",
       "fields": {
         "reset_progress": {
           "name": "Nollaa edistyminen",
-          "description": "Tyhjennä tallennettu edistyminen ja tuo historia uudelleen tyhjästä."
+          "description": "Unohda tallennettu edistyminen ja tuo koko jakso uudelleen. Olemassa olevat tilastot korvataan, ei poisteta."
         },
         "max_history_retrieval": {
-          "name": "Enintään historian päiviä",
-          "description": "Haettavien päivien lukumäärä. Ohittaa vain tälle tuonnille määritetyn oletusarvon."
+          "name": "Historian enimmäispäivät",
+          "description": "Kuinka monta päivää taaksepäin tuodaan (1–3650, oletus 7). Jos olet jo tuonut vähemmän päiviä, haetaan vain vanhemmat päivät."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Radiotallennus",
+      "description": "Kerää jonkin aikaa jokaisen radiokehyksen, jonka yhdyskäytävä tai nanoCUL kuulee, ja tallentaa ne JSON-tiedostoksi Home Assistantin asetuskansioon. Ei koskaan lähetä mitään. Tavallisessa radiomerkinnässä lämmittimien komennot odottavat, kunnes tallennus päättyy.",
+      "fields": {
+        "entry_id": {
+          "name": "Asetusmerkinnän tunnus",
+          "description": "Käytettävä radioyhdyskäytävän tai nanoCUL:n asetusmerkintä, yleensä pelkän kuuntelun merkintä.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Kesto",
+          "description": "Kuinka kauan tallennetaan, 10–1800 sekuntia."
+        },
+        "redact": {
+          "name": "Piilota yksityiset tiedot",
+          "description": "Korvaa tiedostossa verkkotunnisteet ja lämmittimien sarjanumerot. Ilman tätä tiedosto sisältää verkkosi tunnisteen: jaa se vain yksityisesti."
+        },
+        "note": {
+          "name": "Huomautus",
+          "description": "Valinnainen tiedostoon tallennettava teksti, esimerkiksi mitä lämmitintä käytit.",
+          "example": "olohuoneen lämmitintä nostettu"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Radiokartoitus",
+      "description": "Kuuntelee jonkin aikaa kaikkea lämmittimien taajuusalueen radioliikennettä, myös sellaista, jota tämä integraatio ei ymmärrä, ja tallentaa raporttitiedoston Home Assistantin asetuskansioon. Liitä tiedosto GitHub-ongelmailmoitukseen, jos haluat pyytää tukea uudenlaiselle lämmittimelle.",
+      "fields": {
+        "entry_id": {
+          "name": "Asetusmerkinnän tunnus",
+          "description": "Käytettävä radioyhdyskäytävän tai nanoCUL:n asetusmerkintä.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Kesto",
+          "description": "Kuinka kauan kuunnellaan. Lämmittimet lähettävät eniten, kun ne alkavat tai lopettavat lämmittämisen."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Radion tehdasasetusten palautus",
+      "description": "PERUUTTAMATON. Palauttaa yhden radiolämmittimen tehdasasetuksiin. Lämmitin menettää kaikki asetuksensa, kellonsa, viikko-ohjelmansa ja radiopariliitoksensa eikä enää viesti Home Assistantin kanssa. Sen viimeisimmät tunnetut asetukset tallennetaan ensin. Jos haluat käyttää lämmitintä uudelleen, paina yhdyskäytävälaitteessa ”Muodosta pariliitos uusiin lämmittimiin” ja aseta lämmitin pariliitostilaan. Tallennetut asetukset palautuvat, kun lämmitin tunnistetaan. Joitakin vanhempia lämmittimiä ei voi nollata radion kautta: nollaa ne käsin (katso lämmittimen käyttöohje).",
+      "fields": {
+        "entry_id": {
+          "name": "Asetusmerkinnän tunnus",
+          "description": "Käytettävä radioyhdyskäytävän tai nanoCUL:n asetusmerkintä.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Lämmittimen numero",
+          "description": "Lämmittimen radionumero (numero nimessä ”Lämmitin 6”)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radio: siirrä lämmittimet omaan verkkoon",
+      "description": "Siirtää radiomerkinnän kaikki lämmittimet tämän asennuksen omaan radioverkkoon. Jokainen lämmitin nollataan ensin (sen asetukset tallennetaan), minkä jälkeen asetat lämmittimet pariliitostilaan yksi kerrallaan. Lämmittimet saavat uudet numerot 2:sta alkaen, ja niiden asetukset palautetaan. Joitakin vanhempia lämmittimiä ei voi nollata radion kautta, joten niitä ei voi siirtää tällä tavalla. Lämmittimien ohjaus on keskeytetty tämän ajan.",
+      "fields": {
+        "entry_id": {
+          "name": "Asetusmerkinnän tunnus",
+          "description": "Käytettävä radioyhdyskäytävän tai nanoCUL:n asetusmerkintä.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Odotusaika",
+          "description": "Kuinka kauan odotetaan lämmittimien pariliitospainikkeiden painamista."
         }
       }
     }

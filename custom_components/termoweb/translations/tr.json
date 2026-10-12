@@ -1,163 +1,302 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Isıtıcılarınız nasıl bağlanıyor?",
+        "description": "TermoWeb, Ducaheat veya Tevolve uygulamasını kullanıyorsanız bulut hesabını seçin. Isıtıcıları bulut olmadan yerel olarak kontrol etmenin en kolay yolu, bu Home Assistant bilgisayarına takılı bir nanoCUL USB çubuktur (lehim gerekmez). ESP32 radyo ağ geçidi ileri düzey kullanıcılar içindir: kendiniz kurup lehimlemeniz gerekir.",
+        "menu_options": {
+          "cloud": "Bulut hesabı (TermoWeb, Ducaheat veya Tevolve uygulaması)",
+          "nanocul": "Yerel radyo: nanoCUL USB çubuk (en kolayı, lehim gerekmez)",
+          "radio": "Yerel radyo ağ geçidi: ESP32 + CC1101 (ileri düzey, lehim gerekir)"
+        }
+      },
       "cloud": {
-        "title": "TermoWeb aile ısıtıcılarına bağlanın",
-        "description": "Versiyon: {version}\n\nTermoWeb veya Ducaheat markanızı seçin ve hesap kimlik bilgilerinizi girin.",
+        "title": "TermoWeb ailesi ısıtıcılara bağlan",
+        "description": "Sürüm: {version}\n\nTermoWeb, Ducaheat veya Tevolve markanızı seçin ve hesap bilgilerinizi girin. Tevolve, Ducaheat sunucusunu kullanır.",
         "data": {
           "brand": "Marka",
           "username": "E-posta",
-          "password": "Şifre"
+          "password": "Parola"
+        }
+      },
+      "radio": {
+        "title": "Radyo ağ geçidine bağlan",
+        "description": "Home Assistant, ESP32 radyo ağ geçidini normalde kendisi bulur: Cihazlar ve Hizmetler sayfasında **Keşfedildi** bölümüne bakın. Bu formu yalnızca ağ geçidi orada görünmüyorsa kullanın. Ağ geçidinizin IP adresini girin. Sonraki adımda seçim yaparsınız: ağ geçidini ekleyip ısıtıcılarınızı bulmasına izin vermek veya yeni ısıtıcıları eşleştirmek.",
+        "data": {
+          "host": "Ağ geçidi IP adresi"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Gelişmiş ayarlar",
+            "description": "Ağ geçidinin ürün yazılımını değiştirmediyseniz bunları olduğu gibi bırakın.",
+            "data": {
+              "port": "Port"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Radyo ağ geçidi bulundu",
+        "description": "{host} adresinde bir TermoWeb radyo ağ geçidi bulundu. Kurulsun mu?\n\nSonraki adımda seçim yaparsınız: ağ geçidini eklemek (ısıtıcılarınızı bulur ve eşleştirir) veya yalnızca dinlemek."
+      },
+      "radio_method": {
+        "title": "Ağ geçidinizi ekleyin",
+        "description": "Isıtıcılarınızı kontrol etmek için \"Ağ geçidini ekle\"yi seçin. Kurulum hemen tamamlanır. Ardından:\n\n- Zaten bir TermoWeb ağ geçidi veya uygulamasıyla çalışan ısıtıcılar, genellikle birkaç dakika içinde kendiliğinden bulunur. Isıtıcılar ısıtmaya başladıklarında sinyal gönderir, bu yüzden bir ısıtıcının sıcaklığını yükseltmek yardımcı olur.\n- Yeni veya sıfırlanmış ısıtıcılar: her ısıtıcıyı 30 dakika içinde eşleştirme moduna alın. Hangi düğmelere basılacağı ısıtıcının kılavuzunda yazar. Her seferinde tek bir ısıtıcı. Daha sonra önce ağ geçidi cihazındaki **Yeni ısıtıcıları eşleştir** düğmesine basın.\n\nEklenen her ısıtıcı için bir bildirim alırsınız.\n\nHâlâ çalışan bir TermoWeb ağ geçidinin yanında test amacıyla radyo trafiğini kaydetmek için \"Yalnızca dinle\"yi seçin. Entegrasyon bu modda asla yayın yapmaz ve ısıtıcı eklemez.",
+        "menu_options": {
+          "radio_discover": "Ağ geçidini ekle",
+          "radio_monitor": "Yalnızca dinle (radyo trafiğini kaydet, asla yayın yapma)"
+        }
+      },
+      "radio_rescan": { "title": "Isıtıcılarınız aranıyor" },
+      "reconfigure_radio": {
+        "title": "Radyo ağ geçidini değiştir",
+        "description": "Ağ geçidinin adresini değiştirin. Bir ısıtıcı eklediyseniz veya kaldırdıysanız \"Isıtıcıları yeniden ara\" seçeneğini işaretleyin.",
+        "data": {
+          "host": "Ağ geçidi IP adresi",
+          "port": "Port",
+          "rescan": "Isıtıcıları yeniden ara"
+        }
+      },
+      "nanocul": {
+        "title": "nanoCUL USB çubuğa bağlan",
+        "description": "nanoCUL çubuğunuzun portunu seçin. Home Assistant çubuğu tanıdıysa port zaten seçilidir: yalnızca Gönder'e basın. Sonraki adımda seçim yaparsınız: ağ geçidini ekleyip ısıtıcılarınızı bulmasına izin vermek veya yeni ısıtıcıları eşleştirmek.",
+        "data": {
+          "device": "USB portu"
+        }
+      },
+      "nanocul_manual": {
+        "title": "nanoCUL portunu girin",
+        "description": "Port yolunu yazın, örneğin /dev/serial/by-id/usb-..., ya da ağ üzerinden paylaşılan bir çubuk için socket://192.0.2.10:2323 gibi bir ağ adresi.",
+        "data": {
+          "device": "Port yolu veya URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "nanoCUL portunu değiştir",
+        "description": "Çubuğun port yolunu veya URL'sini değiştirin. Bir ısıtıcı eklediyseniz veya kaldırdıysanız \"Isıtıcıları yeniden ara\" seçeneğini işaretleyin.",
+        "data": {
+          "device": "Port yolu veya URL",
+          "rescan": "Isıtıcıları yeniden ara"
+        }
+      },
+      "reconfigure": {
+        "title": "Hesap ayarlarını değiştir",
+        "description": "Sürüm: {version}\n\nBu hesabın yeni parolasını girin. Burada başka bir hesaba geçemezsiniz: bunun için yeni bir giriş ekleyin.",
+        "data": {
+          "brand": "Marka",
+          "username": "E-posta",
+          "password": "Parola"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Yeniden oturum açın",
+        "description": "{brand}, {username} için kayıtlı parolayı kabul etmedi. Geçerli parolayı girin.",
+        "data": {
+          "password": "Parola"
         }
       }
     },
     "error": {
       "invalid_auth": "Geçersiz kullanıcı adı veya parola (veya istemci anahtarı).",
-      "cannot_connect": "TermoWeb'e bağlanılamıyor - ağ/DNS/SSL hatası.",
-      "rate_limited": "API tarafından geçici olarak sınırlandırılmıştır. Daha sonra tekrar deneyin.",
-      "unknown": "Bilinmeyen hata"
+      "cannot_connect": "TermoWeb'e bağlanılamıyor — ağ/DNS/SSL hatası.",
+      "rate_limited": "API geçici olarak istek sınırı uyguluyor. Daha sonra tekrar deneyin.",
+      "unknown": "Bilinmeyen hata",
+      "cannot_connect_radio": "Radyo ağ geçidine bağlanılamıyor. IP adresini ve portu kontrol edin, ağ geçidinin açık olduğundan emin olun.",
+      "no_gateway_mac": "Radyo ağ geçidi MAC adresini bildirmedi. Ağ geçidinin ürün yazılımını güncelleyin.",
+      "no_heaters": "Hiçbir ısıtıcı yanıt vermedi. Ağ geçidini ısıtıcılara yaklaştırın ve tekrar deneyin.",
+      "cannot_connect_nanocul": "nanoCUL çubuk açılamıyor. Takılı olduğunu, portun doğru olduğunu ve termoweb_rx ürün yazılımını çalıştırdığını kontrol edin.",
+      "nanocul_radio_missing": "Çubuk yanıt veriyor, ancak radyo modülü bağlı değil. Kablolamayı kontrol edin.",
+      "gateway_radio_missing": "Ağ geçidi yanıt veriyor, ancak radyo modülü bağlı değil. Kablolamayı kontrol edin."
+    },
+    "abort": {
+      "already_configured": "Bu ağ geçidi zaten kurulu.",
+      "reconfigure_successful": "Ayarlar kaydedildi.",
+      "monitor_reconfigure": "Yalnızca dinleme girişi değiştirilemez. Silin ve yeniden ekleyin.",
+      "unique_id_mismatch": "Bu farklı bir hesap veya cihaz. Kullanmak için bunun yerine yeni bir giriş ekleyin.",
+      "reauth_successful": "Yeni parola kaydedildi.",
+      "cannot_connect_radio": "Radyo ağ geçidine bağlanılamıyor. Ağ geçidinin açık ve ağınıza bağlı olduğunu kontrol edin.",
+      "no_gateway_mac": "Radyo ağ geçidi MAC adresini bildirmedi. Ağ geçidinin ürün yazılımını güncelleyin.",
+      "gateway_radio_missing": "Ağ geçidi yanıt veriyor, ancak radyo modülü bağlı değil. Kablolamayı kontrol edin.",
+      "not_ipv4_address": "Radyo ağ geçidi yalnızca bir IPv6 adresi bildirdi. IPv4 adresiyle elle ekleyin.",
+      "nanocul_firmware_too_old": "Bu nanoCUL çubuktaki ürün yazılımı çok eski. Çubuğa en yeni termoweb_rx ürün yazılımını yükleyin (nanoCUL kılavuzuna bakın) ve tekrar deneyin."
+    },
+    "progress": {
+      "radio_rescan": "Radyo ağınızdaki her ısıtıcı kontrol ediliyor. Bu en fazla bir dakika sürer."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "TermoWeb Seçenekleri"
+      "rehome": {
+        "title": "Isıtıcıları bu kurulumun kendi ağına taşı",
+        "description": "Isıtıcılarınız hâlâ eski bir TermoWeb ağ geçidinin radyo ağını kullanıyorsa bunu kullanın. Isıtıcılar: {heaters}.\n\nNe olur:\n1. Her ısıtıcı fabrika ayarlarına sıfırlanır. Home Assistant önce ayarlarını kaydeder.\n2. Isıtıcıları tek tek eşleştirme moduna alırsınız. Hangi düğmelere basılacağı ısıtıcının kılavuzunda yazar. Isıtıcılar arasında yaklaşık 10 saniye bekleyin. 5 dakikanız var.\n3. Isıtıcılar 2'den başlayarak yeni numaralar alır. Varlık kimlikleri değişir. Home Assistant ısıtıcıyı tanıdığında ısıtıcı adları aynı kalır.\n4. Home Assistant her ısıtıcıya ayarlarını geri verir: mod, ön ayar sıcaklıkları, manuel sıcaklık ve haftalık program.\n\nBu işlem sürerken ısıtıcı kontrolü duraklatılır. Bazı eski ısıtıcılar radyo üzerinden sıfırlanamaz, bu yüzden bu şekilde taşınamazlar. Başlatmak için **Gönder**'e basın, ardından yaklaşık 10 saniye sonra ilk ısıtıcıyı eşleştirme moduna alın."
+      },
+      "rehome_run": { "title": "Isıtıcılarınız taşınıyor" },
+      "rehome_done": {
+        "title": "Taşıma tamamlandı",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Entegrasyon çalışmıyor. Önce başlatın, ardından tekrar deneyin."
+    },
+    "progress": {
+      "rehome": "Isıtıcılar sıfırlanıyor, ardından eşleştirme modundaki ısıtıcılar bekleniyor. Şimdi bir ısıtıcıyı eşleştirme moduna alın, sonra bir sonrakini. Bu işlem son ısıtıcı eşleştirildikten 1 dakika sonra veya 5 dakika sonra durur."
     }
   },
   "device": {
     "heater": {
       "name": "Isıtıcı {addr}"
     },
+    "accumulator": {
+      "name": "Akümülatör {addr}"
+    },
     "thermostat": {
       "name": "Termostat {addr}"
+    },
+    "power_monitor": {
+      "name": "Güç Ölçer {addr}"
     },
     "node": {
       "name": "Düğüm {addr}"
     },
-    "power_monitor": {
-      "name": "Güç izleyicisi {addr}"
+    "site": {
+      "name": "Ev"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Çevrimiçi Ağ Geçidi"
+      "gateway_online": { "name": "Ağ geçidi çevrimiçi" },
+      "pairing_open": {
+        "name": "Eşleştirme açık",
+        "state_attributes": { "ends_at": { "name": "Bitiş zamanı" } }
       },
-      "boost_active": {
-        "name": "Etkinliği artırın"
-      }
+      "boost_active": { "name": "Takviye etkin" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Yenilemeye zorla"
-      },
-      "accumulator_boost_start": {
-        "name": "Güçlendirmeyi başlat"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Destek iptal"
-      }
+      "force_refresh": { "name": "Yenilemeye zorla" },
+      "pair_new_heaters": { "name": "Yeni ısıtıcıları eşleştir" },
+      "accumulator_boost_start": { "name": "Takviyeyi başlat" },
+      "accumulator_boost_cancel": { "name": "Takviyeyi iptal et" },
+      "flash_display": { "name": "Ekranı yanıp söndür" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Güçlendirme süresi"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Sıcaklık artışı"
-      }
+      "accumulator_boost_duration": { "name": "Takviye süresi" },
+      "accumulator_boost_temperature": { "name": "Takviye sıcaklığı" },
+      "heater_priority": { "name": "Öncelik" },
+      "installation_power_limit": { "name": "Güç sınırı" },
+      "temperature_offset": { "name": "Sıcaklık sapması" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Sıcaklık"
+      "heater_temperature": { "name": "Sıcaklık" },
+      "heater_energy_total": { "name": "Enerji" },
+      "heater_power": { "name": "Güç" },
+      "radio_address": { "name": "Radyo adresi" },
+      "power_monitor_energy": { "name": "Enerji" },
+      "power_monitor_power": { "name": "Güç" },
+      "installation_total_energy": { "name": "Toplam enerji" },
+      "frames_heard": { "name": "Alınan çerçeveler" },
+      "boost_minutes_remaining": { "name": "Kalan takviye dakikası" },
+      "boost_end": { "name": "Takviye bitişi" },
+      "accumulator_charging": { "name": "Şarj oluyor" },
+      "accumulator_current_charge": { "name": "Mevcut şarj" },
+      "accumulator_target_charge": { "name": "Hedef şarj" },
+      "installation_info": { "name": "Konum" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Yok",
+              "temporary_override": "Geçici değişiklik",
+              "boost": "Takviye"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Çocuk kilidi" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "EASY modu" },
+      "open_window_detection": { "name": "Açık pencere algılama" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Kontrol modu",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Histerezis 0,25 °C",
+          "hysteresis_0_35": "Histerezis 0,35 °C",
+          "hysteresis_0_5": "Histerezis 0,5 °C",
+          "hysteresis_0_75": "Histerezis 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Enerji"
-      },
-      "heater_power": {
-        "name": "Güç"
-      },
-      "power_monitor_energy": {
-        "name": "Enerji"
-      },
-      "power_monitor_power": {
-        "name": "Güç"
-      },
-      "installation_total_energy": {
-        "name": "Toplam enerji"
-      },
-      "boost_minutes_remaining": {
-        "name": "Son dakikalar kaldı"
-      },
-      "boost_end": {
-        "name": "Yükseltme sonu"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Panel sıcaklık birimi",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Akümülatör takviye ön ayarını yapılandırma",
-      "description": "Bir TermoWeb akümülatörü için varsayılan takviye süresini ve/veya sıcaklığını güncelleyin. Dakikalar 60 dakikalık artışlarla 60 ile 600 arasında olmalıdır; mevcut değeri korumak için bir alanı atlayın.",
+      "name": "Akümülatör takviye ön ayarını yapılandır",
+      "description": "Bir TermoWeb akümülatörünün varsayılan takviye süresini ve/veya sıcaklığını günceller. Dakika 60 ile 600 arasında, 60 dakikalık adımlarla olmalıdır; mevcut değeri korumak için alanı boş bırakın.",
       "fields": {
         "minutes": {
           "name": "Varsayılan takviye süresi",
-          "description": "Geçersiz kılma sağlanmadığında takviyenin çalışması gereken dakika sayısı (60-600, adım 60).",
+          "description": "Başka bir süre verilmediğinde takviyenin kaç dakika süreceği (60–600, adım 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Sıcaklık artışı",
-          "description": "Takviye seansı sırasında uygulanacak isteğe bağlı takviye ayar noktası (°C veya °F).",
+          "name": "Takviye sıcaklığı",
+          "description": "Takviye sırasında uygulanacak isteğe bağlı hedef sıcaklık (°C veya °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Akümülatör takviyesini başlat",
-      "description": "Bir TermoWeb akümülatöründe ani bir artışı tetikleyin. Varsayılanı geçersiz kılmak için bir süre girin (60 dakikalık artışlarla 60-600 dakika) veya kayıtlı ön ayarı kullanmak için bunu atlayın.",
+      "name": "Takviyeyi başlat",
+      "description": "Bir TermoWeb akümülatöründe veya takviye özelliği olan bir radyo ısıtıcısında takviyeyi hemen başlatır. Akümülatör: bir süre girin (60–600 dakika, 60'lık adımlarla) veya kayıtlı ön ayarı kullanmak için boş bırakın. Radyo ısıtıcısı: süreyi boş bırakın; ısıtıcı kendi takviye süresi boyunca çalışır.",
       "fields": {
         "minutes": {
-          "name": "Güçlendirme süresi",
-          "description": "Güçlendirme oturumunun dakika cinsinden süresi (60-600, adım 60). İsteğe bağlı.",
+          "name": "Takviye süresi",
+          "description": "Takviyenin dakika cinsinden süresi (60–600, adım 60). İsteğe bağlı.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Akümülatör takviyesini iptal et",
-      "description": "Bir TermoWeb akümülatöründeki aktif takviye oturumunu iptal edin."
+      "name": "Takviyeyi iptal et",
+      "description": "Bir TermoWeb akümülatöründe veya radyo ısıtıcısında takviyeyi durdurur."
     },
     "set_schedule": {
-      "name": "Haftalık programı ayarlayın",
-      "description": "Bir TermoWeb ısıtıcı için 7×24 haftalık programı ayarlayın. Program, her bir değerin Pazartesi 00:00'dan başlayarak haftanın bir saatine karşılık geldiği 168 tamsayıdan oluşan bir listedir. Soğuk ön ayarı için 0, gece ön ayarı için 1 ve gündüz ön ayarı için 2 kullanın.",
+      "name": "Haftalık programı ayarla",
+      "description": "Bir TermoWeb ısıtıcısı için 7×24 haftalık programı ayarlar. Program 168 tam sayıdan oluşan bir listedir; her değer, Pazartesi 00:00'dan başlayarak haftanın bir saatine karşılık gelir. Soğuk ön ayarı için 0, gece ön ayarı için 1 ve gündüz ön ayarı için 2 kullanın.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "Isıtıcının haftalık programını temsil eden 168 tamsayıdan (0, 1 veya 2) oluşan bir liste. Dizin 0 Pazartesi 00:00, dizin 1 Pazartesi 01:00 ve bu şekilde devam eder.",
+          "description": "Isıtıcının haftalık programını temsil eden 168 tam sayılık (0, 1 veya 2) liste. İndeks 0 Pazartesi 00:00, indeks 1 Pazartesi 01:00'dır ve bu şekilde devam eder.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Önceden ayarlanmış sıcaklıkları ayarlama",
-      "description": "TermoWeb ısıtıcı için soğuk, gece ve gündüz ön ayar sıcaklıklarını ayarlayın. Her üç sıcaklığı da tek bir liste olarak sağlayabilirsiniz (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Ön ayar sıcaklıklarını ayarla",
+      "description": "Bir TermoWeb ısıtıcısı için soğuk, gece ve gündüz ön ayar sıcaklıklarını ayarlar. Üç sıcaklığın tamamını tek bir liste olarak (``ptemp``) verebilir ya da her birini ayrı ayrı (``cold``, ``night`` ve ``day``) belirtebilirsiniz. Boş bıraktığınız ön ayarlar mevcut değerlerini korur.",
       "fields": {
         "ptemp": {
-          "name": "Önceden ayarlanmış sıcaklıklar",
-          "description": "Isıtıcı ile aynı birimlerde (°C veya °F) üç sıcaklık [soğuk, gece, gündüz] listesi. Eğer sağlanmışsa, bu ayrı ayrı soğuk, gece ve gündüz değerlerini geçersiz kılacaktır.",
+          "name": "Ön ayar sıcaklıkları",
+          "description": "Isıtıcıyla aynı birimde (°C veya °F) üç sıcaklıktan oluşan liste [soğuk, gece, gündüz]. Verilirse ayrı ayrı girilen soğuk, gece ve gündüz değerlerinin yerine geçer.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Soğuk ön ayar",
-          "description": "Soğuk ön ayar için sıcaklık (°C veya °F).",
+          "name": "Soğuk ön ayarı",
+          "description": "Soğuk ön ayarı için sıcaklık (°C veya °F).",
           "example": "10.0"
         },
         "night": {
@@ -166,23 +305,92 @@
           "example": "16.0"
         },
         "day": {
-          "name": "Gün ön ayarı",
-          "description": "Gün için önceden ayarlanmış sıcaklık (°C veya °F).",
+          "name": "Gündüz ön ayarı",
+          "description": "Gündüz ön ayarı için sıcaklık (°C veya °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "İthalat enerji geçmişi",
-      "description": "TermoWeb ısıtıcıları için bir yıl öncesine kadar olan geçmiş saatlik enerji sayaçlarını yapılandırılan her ısıtıcı için Home Assistant istatistiklerine aktarın.",
+      "name": "Enerji geçmişini içe aktar",
+      "description": "Her ısıtıcının ve güç ölçerin geçmiş saatlik enerji kullanımını Home Assistant istatistiklerine (Enerji panosu) aktarır. İlerleme kaydedilir: içe aktarma durursa devam etmek için yeniden çalıştırın.",
       "fields": {
         "reset_progress": {
           "name": "İlerlemeyi sıfırla",
-          "description": "Saklanan ilerlemeyi temizleyin ve geçmişi sıfırdan yeniden içe aktarın."
+          "description": "Kayıtlı ilerlemeyi unutur ve tüm dönemi yeniden içe aktarır. Mevcut istatistiklerin üzerine yazılır, silinmez."
         },
         "max_history_retrieval": {
-          "name": "Maksimum tarih günleri",
-          "description": "Alınacak geçmiş gün sayısı. Yalnızca bu içe aktarma için yapılandırılmış varsayılanı geçersiz kılar."
+          "name": "En fazla geçmiş günü",
+          "description": "Kaç gün geriye gidilerek içe aktarılacağı (1 ile 3650 arası, varsayılan 7). Daha önce daha az gün içe aktardıysanız yalnızca daha eski günler alınır."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Radyo kaydı",
+      "description": "Ağ geçidinin veya nanoCUL'un duyduğu her radyo çerçevesini bir süre kaydeder ve Home Assistant yapılandırma klasörüne JSON dosyası olarak kaydeder. Asla yayın yapmaz. Normal bir radyo girişinde ısıtıcı komutları kayıt bitene kadar bekler.",
+      "fields": {
+        "entry_id": {
+          "name": "Yapılandırma girişi kimliği",
+          "description": "Kullanılacak radyo ağ geçidi veya nanoCUL yapılandırma girişi; normalde yalnızca dinleme girişi.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Süre",
+          "description": "Ne kadar süre kaydedileceği, 10 ile 1800 saniye arası."
+        },
+        "redact": {
+          "name": "Özel verileri gizle",
+          "description": "Dosyadaki ağ kimliklerini ve ısıtıcı seri numaralarını değiştirir. Bu seçenek olmadan dosya ağ kimliğinizi içerir: yalnızca özel olarak paylaşın."
+        },
+        "note": {
+          "name": "Not",
+          "description": "Dosyaya kaydedilen isteğe bağlı metin, örneğin hangi ısıtıcıyı kullandığınız.",
+          "example": "oturma odası ısıtıcısının sıcaklığı yükseltildi"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Radyo taraması",
+      "description": "Isıtıcı frekans bandındaki tüm radyo trafiğini, bu entegrasyonun anlamadığı trafik dahil, bir süre dinler ve Home Assistant yapılandırma klasörüne bir rapor dosyası kaydeder. Yeni bir ısıtıcı türü için destek istemek üzere dosyayı bir GitHub issue'suna ekleyin.",
+      "fields": {
+        "entry_id": {
+          "name": "Yapılandırma girişi kimliği",
+          "description": "Kullanılacak radyo ağ geçidi veya nanoCUL yapılandırma girişi.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Süre",
+          "description": "Ne kadar süre dinleneceği. Isıtıcılar en çok ısıtmaya başlarken veya dururken sinyal gönderir."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Radyo ile fabrika ayarlarına sıfırla",
+      "description": "GERİ ALINAMAZ. Bir radyo ısıtıcısını fabrika ayarlarına sıfırlar. Isıtıcı tüm ayarlarını, saatini, haftalık programını ve radyo eşleştirmesini kaybeder ve Home Assistant ile iletişimi keser. Bilinen son ayarları önce kaydedilir. Isıtıcıyı yeniden kullanmak için ağ geçidi cihazında \"Yeni ısıtıcıları eşleştir\" düğmesine basın ve ısıtıcıyı eşleştirme moduna alın. Kayıtlı ayarları, ısıtıcı tanındığında geri gelir. Bazı eski ısıtıcılar radyo üzerinden sıfırlanamaz: bunları elle sıfırlayın (ısıtıcının kılavuzuna bakın).",
+      "fields": {
+        "entry_id": {
+          "name": "Yapılandırma girişi kimliği",
+          "description": "Kullanılacak radyo ağ geçidi veya nanoCUL yapılandırma girişi.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Isıtıcı numarası",
+          "description": "Isıtıcının radyo numarası (\"Isıtıcı 6\" içindeki numara)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radyo: ısıtıcıları kendi ağına taşı",
+      "description": "Bir radyo girişindeki tüm ısıtıcıları bu kurulumun kendi radyo ağına taşır. Her ısıtıcı önce sıfırlanır (ayarları kaydedilir), ardından ısıtıcıları tek tek eşleştirme moduna alırsınız. Isıtıcılar 2'den başlayarak yeni numaralar alır ve ayarları geri yüklenir. Bazı eski ısıtıcılar radyo üzerinden sıfırlanamaz, bu yüzden bu şekilde taşınamazlar. Bu işlem sürerken ısıtıcı kontrolü duraklatılır.",
+      "fields": {
+        "entry_id": {
+          "name": "Yapılandırma girişi kimliği",
+          "description": "Kullanılacak radyo ağ geçidi veya nanoCUL yapılandırma girişi.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Bekleme süresi",
+          "description": "Isıtıcıların eşleştirme düğmelerine basılması için ne kadar bekleneceği."
         }
       }
     }

@@ -1,174 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Kā tiek pievienoti jūsu sildītāji?",
+        "description": "Izvēlieties mākoņa kontu, ja izmantojat TermoWeb, Ducaheat vai Tevolve lietotni. Lai sildītājus vadītu lokāli bez mākoņa, vienkāršākais veids ir nanoCUL USB adapteris, kas iesprausts šajā Home Assistant datorā (bez lodēšanas). ESP32 radio vārteja ir pieredzējušiem lietotājiem: tā ir jāsamontē un jāielodē.",
+        "menu_options": {
+          "cloud": "Mākoņa konts (TermoWeb, Ducaheat vai Tevolve lietotne)",
+          "nanocul": "Lokālais radio: nanoCUL USB adapteris (vienkāršākais, bez lodēšanas)",
+          "radio": "Lokālā radio vārteja: ESP32 + CC1101 (pieredzējušiem, nepieciešama lodēšana)"
+        }
+      },
       "cloud": {
-        "title": "Savienot ar TermoWeb ģimenes sildītājiem",
-        "description": "Versija: {version}\n\nIzvēlieties savu TermoWeb vai Ducaheat zīmolu un ievadiet konta akreditācijas datus.",
+        "title": "Savienojums ar TermoWeb saimes sildītājiem",
+        "description": "Versija: {version}\n\nIzvēlieties TermoWeb, Ducaheat vai Tevolve zīmolu un ievadiet sava konta pieteikšanās datus. Tevolve izmanto Ducaheat serveri.",
         "data": {
           "brand": "Zīmols",
           "username": "E-pasts",
+          "password": "Parole"
+        }
+      },
+      "radio": {
+        "title": "Savienojums ar radio vārteju",
+        "description": "Home Assistant parasti pats atrod ESP32 radio vārteju: meklējiet to sadaļā **Atklātās** lapā “Ierīces un pakalpojumi”. Izmantojiet šo veidlapu tikai tad, ja tā tur neparādās. Ievadiet vārtejas IP adresi. Nākamajā solī izvēlēsieties: pievienot vārteju un ļaut tai atrast sildītājus vai sapārot jaunus sildītājus.",
+        "data": {
+          "host": "Vārtejas IP adrese"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Papildu iestatījumi",
+            "description": "Nemainiet šos iestatījumus, ja vien neesat mainījis vārtejas programmaparatūru.",
+            "data": {
+              "port": "Ports"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Atrasta radio vārteja",
+        "description": "Atrasta TermoWeb radio vārteja adresē {host}. Vai iestatīt to?\n\nNākamajā solī izvēlēsieties: pievienot vārteju (tā atradīs un sapāros jūsu sildītājus) vai tikai klausīties."
+      },
+      "radio_method": {
+        "title": "Vārtejas pievienošana",
+        "description": "Izvēlieties “Pievienot vārteju”, lai vadītu sildītājus. Iestatīšana beidzas uzreiz. Pēc tam:\n\n- Sildītāji, kas jau darbojas ar TermoWeb vārteju vai lietotni, tiek atrasti automātiski, parasti dažu minūšu laikā. Sildītāji raida signālu, kad sāk sildīt, tāpēc palīdz paaugstināt viena sildītāja temperatūru.\n- Jauni vai atiestatīti sildītāji: 30 minūšu laikā pārslēdziet katru sildītāju pārošanas režīmā. Sildītāja rokasgrāmatā ir norādīts, kuras pogas jānospiež. Pārojiet pa vienam sildītājam. Vēlāk vispirms nospiediet **Sapārot jaunus sildītājus** vārtejas ierīcē.\n\nPar katru pievienoto sildītāju saņemsiet paziņojumu.\n\nIzvēlieties “Tikai klausīties”, lai testam ierakstītu radio datplūsmu blakus TermoWeb vārtejai, kas joprojām darbojas. Šajā režīmā integrācija nekad neraida un nepievieno sildītājus.",
+        "menu_options": {
+          "radio_discover": "Pievienot vārteju",
+          "radio_monitor": "Tikai klausīties (ierakstīt radio datplūsmu, nekad neraidīt)"
+        }
+      },
+      "radio_rescan": { "title": "Notiek sildītāju meklēšana" },
+      "reconfigure_radio": {
+        "title": "Radio vārtejas maiņa",
+        "description": "Mainiet vārtejas adresi. Atzīmējiet “Meklēt sildītājus vēlreiz”, ja esat pievienojis vai noņēmis sildītāju.",
+        "data": {
+          "host": "Vārtejas IP adrese",
+          "port": "Ports",
+          "rescan": "Meklēt sildītājus vēlreiz"
+        }
+      },
+      "nanocul": {
+        "title": "Savienojums ar nanoCUL USB adapteri",
+        "description": "Izvēlieties nanoCUL adaptera portu. Ja Home Assistant atpazina adapteri, tas jau ir atlasīts: vienkārši nospiediet “Iesniegt”. Nākamajā solī izvēlēsieties: pievienot vārteju un ļaut tai atrast sildītājus vai sapārot jaunus sildītājus.",
+        "data": {
+          "device": "USB ports"
+        }
+      },
+      "nanocul_manual": {
+        "title": "nanoCUL porta ievade",
+        "description": "Ierakstiet porta ceļu, piemēram, /dev/serial/by-id/usb-..., vai tīkla adresi, piemēram, socket://192.0.2.10:2323, ja adapteris ir koplietots tīklā.",
+        "data": {
+          "device": "Porta ceļš vai URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "nanoCUL porta maiņa",
+        "description": "Mainiet adaptera porta ceļu vai URL. Atzīmējiet “Meklēt sildītājus vēlreiz”, ja esat pievienojis vai noņēmis sildītāju.",
+        "data": {
+          "device": "Porta ceļš vai URL",
+          "rescan": "Meklēt sildītājus vēlreiz"
+        }
+      },
+      "reconfigure": {
+        "title": "Konta iestatījumu maiņa",
+        "description": "Versija: {version}\n\nIevadiet šī konta jauno paroli. Šeit nevar pārslēgties uz citu kontu: lai to izdarītu, pievienojiet jaunu ierakstu.",
+        "data": {
+          "brand": "Zīmols",
+          "username": "E-pasts",
+          "password": "Parole"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Piesakieties vēlreiz",
+        "description": "{brand} nepieņēma saglabāto paroli lietotājam {username}. Ievadiet pašreizējo paroli.",
+        "data": {
           "password": "Parole"
         }
       }
     },
     "error": {
       "invalid_auth": "Nederīgs lietotājvārds vai parole (vai klienta atslēga).",
-      "cannot_connect": "Nevar izveidot savienojumu ar TermoWeb - tīkla/DNS/SSL kļūda.",
-      "rate_limited": "API uz laiku ierobežo ātrumu. Mēģiniet vēlreiz vēlāk.",
-      "unknown": "Nezināma kļūda"
+      "cannot_connect": "Nevar izveidot savienojumu ar TermoWeb – tīkla/DNS/SSL kļūda.",
+      "rate_limited": "API īslaicīgi ierobežoja pieprasījumu skaitu. Mēģiniet vēlāk vēlreiz.",
+      "unknown": "Nezināma kļūda",
+      "cannot_connect_radio": "Nevar izveidot savienojumu ar radio vārteju. Pārbaudiet IP adresi un portu, kā arī to, vai vārteja ir ieslēgta.",
+      "no_gateway_mac": "Radio vārteja nepaziņoja savu MAC adresi. Atjauniniet vārtejas programmaparatūru.",
+      "no_heaters": "Neatbildēja neviens sildītājs. Novietojiet vārteju tuvāk sildītājiem un mēģiniet vēlreiz.",
+      "cannot_connect_nanocul": "Nevar atvērt nanoCUL adapteri. Pārbaudiet, vai tas ir iesprausts, vai ports ir pareizs un vai tajā darbojas termoweb_rx programmaparatūra.",
+      "nanocul_radio_missing": "Adapteris atbild, bet tā radio modulis nav pievienots. Pārbaudiet vadu savienojumus.",
+      "gateway_radio_missing": "Vārteja atbild, bet tās radio modulis nav pievienots. Pārbaudiet vadu savienojumus."
+    },
+    "abort": {
+      "already_configured": "Šī vārteja jau ir iestatīta.",
+      "reconfigure_successful": "Iestatījumi ir saglabāti.",
+      "monitor_reconfigure": "Tikai klausīšanās ierakstu nevar mainīt. Izdzēsiet to un pievienojiet vēlreiz.",
+      "unique_id_mismatch": "Šis ir cits konts vai ierīce. Lai to izmantotu, pievienojiet jaunu ierakstu.",
+      "reauth_successful": "Jaunā parole ir saglabāta.",
+      "cannot_connect_radio": "Nevar izveidot savienojumu ar radio vārteju. Pārbaudiet, vai vārteja ir ieslēgta un pieslēgta jūsu tīklam.",
+      "no_gateway_mac": "Radio vārteja nepaziņoja savu MAC adresi. Atjauniniet vārtejas programmaparatūru.",
+      "gateway_radio_missing": "Vārteja atbild, bet tās radio modulis nav pievienots. Pārbaudiet vadu savienojumus.",
+      "not_ipv4_address": "Radio vārteja paziņoja tikai IPv6 adresi. Pievienojiet to manuāli, izmantojot tās IPv4 adresi.",
+      "nanocul_firmware_too_old": "Šī nanoCUL adaptera programmaparatūra ir pārāk veca. Ierakstiet adapterī jaunāko termoweb_rx programmaparatūru (skatiet nanoCUL rokasgrāmatu) un mēģiniet vēlreiz."
+    },
+    "progress": {
+      "radio_rescan": "Tiek pārbaudīti visi jūsu radio tīkla sildītāji. Tas aizņem līdz vienai minūtei."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "TermoWeb opcijas"
+      "rehome": {
+        "title": "Sildītāju pārcelšana uz šīs sistēmas tīklu",
+        "description": "Izmantojiet šo, ja jūsu sildītāji joprojām izmanto vecas TermoWeb vārtejas radio tīklu. Sildītāji: {heaters}.\n\nKas notiek:\n1. Katram sildītājam tiek atjaunoti rūpnīcas iestatījumi. Home Assistant vispirms saglabā tā iestatījumus.\n2. Jūs pa vienam pārslēdzat sildītājus pārošanas režīmā. Sildītāja rokasgrāmatā ir norādīts, kuras pogas jānospiež. Starp sildītājiem pagaidiet apmēram 10 sekundes. Jums ir 5 minūtes.\n3. Sildītāji saņem jaunus numurus, sākot no 2. To vienību ID mainās. Sildītāju nosaukumi paliek tādi paši, ja Home Assistant atpazīst sildītāju.\n4. Home Assistant atgriež katram sildītājam tā iestatījumus: režīmu, priekšiestatījumu temperatūras, manuālo temperatūru un nedēļas programmu.\n\nKamēr tas notiek, sildītāju vadība ir apturēta. Dažus vecākus sildītājus nevar atiestatīt pa radio, tāpēc tos šādā veidā nevar pārcelt. Nospiediet **Iesniegt**, lai sāktu, un pēc apmēram 10 sekundēm pārslēdziet pirmo sildītāju pārošanas režīmā."
+      },
+      "rehome_run": { "title": "Notiek sildītāju pārcelšana" },
+      "rehome_done": {
+        "title": "Pārcelšana pabeigta",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Integrācija nedarbojas. Vispirms palaidiet to un mēģiniet vēlreiz."
+    },
+    "progress": {
+      "rehome": "Tiek atiestatīti sildītāji, pēc tam tiek gaidīti sildītāji pārošanas režīmā. Tagad pārslēdziet vienu sildītāju pārošanas režīmā, tad nākamo. Process apstājas 1 minūti pēc pēdējā sildītāja sapārošanas vai pēc 5 minūtēm."
+    }
+  },
+  "device": {
+    "heater": {
+      "name": "Sildītājs {addr}"
+    },
+    "accumulator": {
+      "name": "Akumulācijas sildītājs {addr}"
+    },
+    "thermostat": {
+      "name": "Termostats {addr}"
+    },
+    "power_monitor": {
+      "name": "Jaudas mērītājs {addr}"
+    },
+    "node": {
+      "name": "Mezgls {addr}"
+    },
+    "site": {
+      "name": "Mājas"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway tiešsaistē"
+      "gateway_online": { "name": "Vārteja tiešsaistē" },
+      "pairing_open": {
+        "name": "Pārošana atvērta",
+        "state_attributes": { "ends_at": { "name": "Beidzas" } }
       },
-      "boost_active": {
-        "name": "Palielināt aktīvo"
-      }
+      "boost_active": { "name": "Pastiprinātā sildīšana aktīva" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Atsvaidzināšana piespiedu kārtā"
-      },
-      "accumulator_boost_start": {
-        "name": "Sākuma palielinājums"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Atcelt palielināt"
-      }
+      "force_refresh": { "name": "Piespiedu atsvaidzināšana" },
+      "pair_new_heaters": { "name": "Sapārot jaunus sildītājus" },
+      "accumulator_boost_start": { "name": "Sākt pastiprināto sildīšanu" },
+      "accumulator_boost_cancel": { "name": "Atcelt pastiprināto sildīšanu" },
+      "flash_display": { "name": "Mirgot displejam" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Pastiprināšanas ilgums"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Paaugstināt temperatūru"
-      }
+      "accumulator_boost_duration": { "name": "Pastiprinātās sildīšanas ilgums" },
+      "accumulator_boost_temperature": { "name": "Pastiprinātās sildīšanas temperatūra" },
+      "heater_priority": { "name": "Prioritāte" },
+      "installation_power_limit": { "name": "Jaudas ierobežojums" },
+      "temperature_offset": { "name": "Temperatūras korekcija" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatūra"
+      "heater_temperature": { "name": "Temperatūra" },
+      "heater_energy_total": { "name": "Enerģija" },
+      "heater_power": { "name": "Jauda" },
+      "radio_address": { "name": "Radio adrese" },
+      "power_monitor_energy": { "name": "Enerģija" },
+      "power_monitor_power": { "name": "Jauda" },
+      "installation_total_energy": { "name": "Kopējā enerģija" },
+      "frames_heard": { "name": "Uztvertie kadri" },
+      "boost_minutes_remaining": { "name": "Atlikušās pastiprinātās sildīšanas minūtes" },
+      "boost_end": { "name": "Pastiprinātās sildīšanas beigas" },
+      "accumulator_charging": { "name": "Uzlāde" },
+      "accumulator_current_charge": { "name": "Pašreizējā uzlāde" },
+      "accumulator_target_charge": { "name": "Mērķa uzlāde" },
+      "installation_info": { "name": "Atrašanās vieta" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Nav",
+              "temporary_override": "Īslaicīga ignorēšana",
+              "boost": "Pastiprināts"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Bērnu slēdzene" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "EASY režīms" },
+      "open_window_detection": { "name": "Atvērta loga noteikšana" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Vadības režīms",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Histerēze 0,25 °C",
+          "hysteresis_0_35": "Histerēze 0,35 °C",
+          "hysteresis_0_5": "Histerēze 0,5 °C",
+          "hysteresis_0_75": "Histerēze 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Enerģija"
-      },
-      "heater_power": {
-        "name": "Power"
-      },
-      "power_monitor_energy": {
-        "name": "Enerģija"
-      },
-      "power_monitor_power": {
-        "name": "Power"
-      },
-      "installation_total_energy": {
-        "name": "Kopējā enerģija"
-      },
-      "boost_minutes_remaining": {
-        "name": "Palielināt atlikušās minūtes"
-      },
-      "boost_end": {
-        "name": "Paaugstināšanas beigas"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Displeja temperatūras mērvienība",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Konfigurēt akumulatora palielinājuma iepriekš iestatījumu",
-      "description": "Atjauniniet TermoWeb akumulatora standartpievienošanas ilgumu un/vai temperatūru. Minūtēm jābūt no 60 līdz 600 ar 60 minūšu soli; lai saglabātu esošo vērtību, lauku izlaidiet.",
+      "name": "Akumulācijas sildītāja pastiprinātās sildīšanas priekšiestatījums",
+      "description": "Atjaunina TermoWeb akumulācijas sildītāja noklusējuma pastiprinātās sildīšanas ilgumu un/vai temperatūru. Minūtēm jābūt no 60 līdz 600 ar 60 minūšu soli; lai saglabātu esošo vērtību, atstājiet lauku tukšu.",
       "fields": {
         "minutes": {
-          "name": "Noklusējuma palielināšanas ilgums",
-          "description": "Minūšu skaits, cik minūšu jāstrādā pastiprinātājs, ja nav nodrošināta pārslēgšana (60-600, 60. solis).",
+          "name": "Noklusējuma pastiprinātās sildīšanas ilgums",
+          "description": "Cik minūtes ilgst pastiprinātā sildīšana, ja nav norādīta cita vērtība (60–600, solis 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Paaugstināt temperatūru",
-          "description": "Neobligātā paaugstināšanas iestatītā vērtība, kas jāpiemēro paaugstināšanas sesijas laikā (°C vai °F).",
+          "name": "Pastiprinātās sildīšanas temperatūra",
+          "description": "Neobligāta iestatītā temperatūra pastiprinātās sildīšanas laikā (°C vai °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Sākt akumulatora palielināšanu",
-      "description": "Tūlītēja TermoWeb akumulatora palielinājuma iedarbināšana. Norādiet ilgumu, lai aizstātu noklusējuma iestatījumu (60-600 minūtes ar 60 minūšu soli), vai nenorādiet to, lai izmantotu saglabāto iepriekš iestatīto.",
+      "name": "Sākt pastiprināto sildīšanu",
+      "description": "Nekavējoties sāk pastiprināto sildīšanu TermoWeb akumulācijas sildītājā vai radio sildītājā, kas to atbalsta. Akumulācijas sildītājs: norādiet ilgumu (60–600 minūtes ar 60 minūšu soli) vai atstājiet tukšu, lai izmantotu saglabāto priekšiestatījumu. Radio sildītājs: ilgumu atstājiet tukšu; sildītājs izmanto savu pastiprinātās sildīšanas laiku.",
       "fields": {
         "minutes": {
-          "name": "Pastiprināšanas ilgums",
-          "description": "Pastiprināšanas sesijas ilgums minūtēs (60-600, solis 60). Pēc izvēles.",
+          "name": "Pastiprinātās sildīšanas ilgums",
+          "description": "Pastiprinātās sildīšanas ilgums minūtēs (60–600, solis 60). Neobligāts.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Atcelt akumulatora palielinājumu",
-      "description": "Atcelt TermoWeb akumulatora aktīvo palielināšanas sesiju."
+      "name": "Atcelt pastiprināto sildīšanu",
+      "description": "Aptur pastiprināto sildīšanu TermoWeb akumulācijas sildītājā vai radio sildītājā."
     },
     "set_schedule": {
-      "name": "Iestatiet nedēļas grafiku",
-      "description": "Iestatiet iknedēļas programmu 7×24 TermoWeb sildītājam. Programma ir 168 veselu skaitļu saraksts, kur katra vērtība atbilst vienai nedēļas stundai, sākot no pirmdienas 00:00. Izmantojiet 0 aukstajam iestatījumam, 1 - nakts iestatījumam un 2 - dienas iestatījumam.",
+      "name": "Iestatīt nedēļas programmu",
+      "description": "Iestata TermoWeb sildītāja 7×24 nedēļas programmu. Programma ir 168 veselu skaitļu saraksts, kur katra vērtība atbilst vienai nedēļas stundai, sākot ar pirmdienu plkst. 00:00. Izmantojiet 0 aukstajam, 1 nakts un 2 dienas priekšiestatījumam.",
       "fields": {
         "prog": {
           "name": "Programma",
-          "description": "168 veselu skaitļu (0, 1 vai 2) saraksts, kas attēlo sildītāja nedēļas grafiku. Indekss 0 ir pirmdiena 00:00, indekss 1 ir pirmdiena 01:00 utt.",
+          "description": "168 veselu skaitļu (0, 1 vai 2) saraksts, kas apraksta sildītāja nedēļas programmu. Indekss 0 ir pirmdiena 00:00, indekss 1 ir pirmdiena 01:00 un tā tālāk.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Iepriekš iestatītas temperatūras iestatīšana",
-      "description": "Iestatiet TermoWeb sildītāja aukstuma, nakts un dienas iepriekš iestatītās temperatūras. Jūs varat norādīt visas trīs temperatūras kā vienu sarakstu (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Iestatīt priekšiestatījumu temperatūras",
+      "description": "Iestata TermoWeb sildītāja aukstā, nakts un dienas priekšiestatījuma temperatūras. Varat norādīt visas trīs temperatūras vienā sarakstā (``ptemp``) vai katru atsevišķi (``cold``, ``night`` un ``day``). Nenorādītie priekšiestatījumi saglabā pašreizējo vērtību.",
       "fields": {
         "ptemp": {
-          "name": "Iepriekš iestatītās temperatūras",
-          "description": "Trīs temperatūru saraksts [aukstums, nakts, diena] tajās pašās vienībās, kurās ir sildītājs (°C vai °F). Ja tas ir norādīts, tas aizstās individuālās aukstuma, nakts un dienas vērtības.",
+          "name": "Priekšiestatījumu temperatūras",
+          "description": "Trīs temperatūru saraksts [aukstais, nakts, diena] tajās pašās mērvienībās kā sildītājam (°C vai °F). Ja norādīts, tas aizstāj atsevišķās aukstā, nakts un dienas vērtības.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Iepriekš iestatīts aukstais iestatījums",
-          "description": "Aukstuma iepriekš iestatītā temperatūra (°C vai °F).",
+          "name": "Aukstais priekšiestatījums",
+          "description": "Aukstā priekšiestatījuma temperatūra (°C vai °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Nakts iestatījums",
-          "description": "Temperatūra nakts iestatījumam (°C vai °F).",
+          "name": "Nakts priekšiestatījums",
+          "description": "Nakts priekšiestatījuma temperatūra (°C vai °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Dienas iepriekš iestatījums",
-          "description": "Dienas iepriekš iestatītā temperatūra (°C vai °F).",
+          "name": "Dienas priekšiestatījums",
+          "description": "Dienas priekšiestatījuma temperatūra (°C vai °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Enerģijas importa vēsture",
-      "description": "Importējiet vēsturiskos TermoWeb sildītāju stundu enerģijas skaitītājus par katru konfigurēto sildītāju līdz pat vienam gadam atpakaļ Home Assistant statistikā.",
+      "name": "Importēt enerģijas vēsturi",
+      "description": "Importē katra sildītāja un jaudas mērītāja iepriekšējo stundas enerģijas patēriņu Home Assistant statistikā (enerģijas informācijas panelī). Progress tiek saglabāts: ja importēšana apstājas, palaidiet to vēlreiz, lai turpinātu.",
       "fields": {
         "reset_progress": {
           "name": "Atiestatīt progresu",
-          "description": "Notīriet saglabāto progresu un importējiet vēsturi no jauna."
+          "description": "Aizmirst saglabāto progresu un importē visu periodu no jauna. Esošā statistika tiek pārrakstīta, nevis dzēsta."
         },
         "max_history_retrieval": {
-          "name": "Maksimālais vēstures dienu skaits",
-          "description": "Atgūstamo vēstures dienu skaits. Aizstāj konfigurēto noklusējuma iestatījumu tikai šim importam."
+          "name": "Maks. vēstures dienas",
+          "description": "Cik dienas atpakaļ importēt (no 1 līdz 3650, noklusējums 7). Ja jau esat importējis mazāk dienu, tiek ielādētas tikai vecākās dienas."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Radio ierakstīšana",
+      "description": "Kādu laiku ieraksta katru radio kadru, ko uztver vārteja vai nanoCUL, un saglabā to kā JSON failu Home Assistant konfigurācijas mapē. Nekad neraida. Parastā radio ierakstā sildītāju komandas gaida, līdz ierakstīšana beidzas.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurācijas ieraksta ID",
+          "description": "Izmantojamais radio vārtejas vai nanoCUL konfigurācijas ieraksts, parasti tikai klausīšanās ieraksts.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Ilgums",
+          "description": "Cik ilgi ierakstīt, no 10 līdz 1800 sekundēm."
+        },
+        "redact": {
+          "name": "Slēpt privātos datus",
+          "description": "Aizstāj failā tīkla ID un sildītāju sērijas numurus. Bez šīs opcijas fails satur jūsu tīkla ID: kopīgojiet to tikai privāti."
+        },
+        "note": {
+          "name": "Piezīme",
+          "description": "Neobligāts teksts, kas tiek saglabāts failā, piemēram, kuru sildītāju izmantojāt.",
+          "example": "paaugstināta viesistabas sildītāja temperatūra"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Radio apsekošana",
+      "description": "Kādu laiku klausās visu radio datplūsmu sildītāju frekvenču joslā, arī to, ko šī integrācija nesaprot, un saglabā atskaites failu Home Assistant konfigurācijas mapē. Pievienojiet failu GitHub problēmas pieteikumam (issue), lai lūgtu atbalstu jaunam sildītāju veidam.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurācijas ieraksta ID",
+          "description": "Izmantojamais radio vārtejas vai nanoCUL konfigurācijas ieraksts.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Ilgums",
+          "description": "Cik ilgi klausīties. Sildītāji raida visvairāk, kad sāk vai beidz sildīt."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Rūpnīcas iestatījumu atjaunošana pa radio",
+      "description": "NEATGRIEZENISKI. Atjauno viena radio sildītāja rūpnīcas iestatījumus. Sildītājs zaudē visus iestatījumus, pulksteni, nedēļas programmu un radio pārojumu, un pārtrauc sazināties ar Home Assistant. Vispirms tiek saglabāti tā pēdējie zināmie iestatījumi. Lai sildītāju izmantotu atkal, vārtejas ierīcē nospiediet “Sapārot jaunus sildītājus” un pārslēdziet sildītāju pārošanas režīmā. Saglabātie iestatījumi tiek atjaunoti, kad sildītājs tiek atpazīts. Dažus vecākus sildītājus nevar atiestatīt pa radio: atiestatiet tos manuāli (skatiet sildītāja rokasgrāmatu).",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurācijas ieraksta ID",
+          "description": "Izmantojamais radio vārtejas vai nanoCUL konfigurācijas ieraksts.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Sildītāja numurs",
+          "description": "Sildītāja radio numurs (skaitlis nosaukumā “Sildītājs 6”)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radio: pārcelt sildītājus uz savu tīklu",
+      "description": "Pārceļ visus radio ieraksta sildītājus uz šīs sistēmas radio tīklu. Vispirms katrs sildītājs tiek atiestatīts (tā iestatījumi tiek saglabāti), pēc tam jūs pa vienam pārslēdzat sildītājus pārošanas režīmā. Sildītāji saņem jaunus numurus, sākot no 2, un to iestatījumi tiek atjaunoti. Dažus vecākus sildītājus nevar atiestatīt pa radio, tāpēc tos šādā veidā nevar pārcelt. Kamēr tas notiek, sildītāju vadība ir apturēta.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurācijas ieraksta ID",
+          "description": "Izmantojamais radio vārtejas vai nanoCUL konfigurācijas ieraksts.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Gaidīšanas laiks",
+          "description": "Cik ilgi gaidīt, līdz tiek nospiestas sildītāju pārošanas pogas."
         }
       }
     }

@@ -1,188 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Come si collegano i tuoi radiatori?",
+        "description": "Scegli l'account cloud se usi l'app TermoWeb, Ducaheat o Tevolve. Per controllare i radiatori in locale senza cloud, il modo più semplice è una chiavetta USB nanoCUL inserita in questo computer Home Assistant (senza saldature). Il gateway radio ESP32 è per utenti esperti: va assemblato e saldato.",
+        "menu_options": {
+          "cloud": "Account cloud (app TermoWeb, Ducaheat o Tevolve)",
+          "nanocul": "Radio locale: chiavetta USB nanoCUL (la più semplice, senza saldature)",
+          "radio": "Gateway radio locale: ESP32 + CC1101 (per esperti, richiede saldature)"
+        }
+      },
       "cloud": {
-        "title": "Collegarsi ai riscaldatori della famiglia TermoWeb",
-        "description": "Versione: {version}\n\nScegliere il marchio TermoWeb o Ducaheat e inserire le credenziali dell'account.",
+        "title": "Connetti i radiatori della famiglia TermoWeb",
+        "description": "Versione: {version}\n\nScegli il marchio TermoWeb, Ducaheat o Tevolve e inserisci le credenziali del tuo account. Tevolve usa il server Ducaheat.",
         "data": {
           "brand": "Marchio",
           "username": "Email",
+          "password": "Password"
+        }
+      },
+      "radio": {
+        "title": "Connetti il gateway radio",
+        "description": "Di solito Home Assistant trova da solo il gateway radio ESP32: cercalo tra i **Rilevati** nella pagina Dispositivi e servizi. Usa questo modulo solo se non compare lì. Inserisci l'indirizzo IP del gateway. Nel passaggio successivo scegli: aggiungere il gateway e lasciargli trovare i radiatori, oppure associare nuovi radiatori.",
+        "data": {
+          "host": "Indirizzo IP del gateway"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Impostazioni avanzate",
+            "description": "Lascia questi valori invariati, a meno che tu non abbia modificato il firmware del gateway.",
+            "data": {
+              "port": "Porta"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Gateway radio trovato",
+        "description": "Trovato un gateway radio TermoWeb su {host}. Vuoi configurarlo?\n\nNel passaggio successivo scegli: aggiungere il gateway (trova e associa i tuoi radiatori) oppure solo ascoltare."
+      },
+      "radio_method": {
+        "title": "Aggiungi il gateway",
+        "description": "Scegli \"Aggiungi il gateway\" per controllare i radiatori. La configurazione termina subito. Poi:\n\n- I radiatori che funzionano già con un gateway o un'app TermoWeb vengono trovati da soli, di solito entro pochi minuti. I radiatori trasmettono quando iniziano a scaldare, quindi alzare la temperatura di un radiatore aiuta.\n- Radiatori nuovi o ripristinati: metti ogni radiatore in modalità di associazione entro 30 minuti. Il manuale del radiatore indica quali tasti premere. Un radiatore alla volta. In seguito, premi prima **Associa nuovi radiatori** sul dispositivo gateway.\n\nRiceverai una notifica per ogni radiatore aggiunto.\n\nScegli \"Solo ascolto\" per registrare il traffico radio per un test, accanto a un gateway TermoWeb ancora in funzione. In questa modalità l'integrazione non trasmette mai e non aggiunge radiatori.",
+        "menu_options": {
+          "radio_discover": "Aggiungi il gateway",
+          "radio_monitor": "Solo ascolto (registra il traffico radio, non trasmette mai)"
+        }
+      },
+      "radio_rescan": { "title": "Ricerca dei radiatori in corso" },
+      "reconfigure_radio": {
+        "title": "Modifica il gateway radio",
+        "description": "Modifica l'indirizzo del gateway. Spunta \"Cerca di nuovo i radiatori\" se hai aggiunto o rimosso un radiatore.",
+        "data": {
+          "host": "Indirizzo IP del gateway",
+          "port": "Porta",
+          "rescan": "Cerca di nuovo i radiatori"
+        }
+      },
+      "nanocul": {
+        "title": "Connetti la chiavetta USB nanoCUL",
+        "description": "Scegli la porta della chiavetta nanoCUL. Se Home Assistant ha riconosciuto la chiavetta, è già selezionata: premi semplicemente Invia. Nel passaggio successivo scegli: aggiungere il gateway e lasciargli trovare i radiatori, oppure associare nuovi radiatori.",
+        "data": {
+          "device": "Porta USB"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Inserisci la porta del nanoCUL",
+        "description": "Digita il percorso della porta, ad esempio /dev/serial/by-id/usb-..., oppure un indirizzo di rete come socket://192.0.2.10:2323 per una chiavetta condivisa in rete.",
+        "data": {
+          "device": "Percorso della porta o URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Modifica la porta del nanoCUL",
+        "description": "Modifica il percorso della porta o l'URL della chiavetta. Spunta \"Cerca di nuovo i radiatori\" se hai aggiunto o rimosso un radiatore.",
+        "data": {
+          "device": "Percorso della porta o URL",
+          "rescan": "Cerca di nuovo i radiatori"
+        }
+      },
+      "reconfigure": {
+        "title": "Modifica le impostazioni dell'account",
+        "description": "Versione: {version}\n\nInserisci la nuova password per questo account. Qui non puoi passare a un altro account: per farlo aggiungi una nuova voce.",
+        "data": {
+          "brand": "Marchio",
+          "username": "Email",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Accedi di nuovo",
+        "description": "{brand} non ha accettato la password salvata per {username}. Inserisci la password attuale.",
+        "data": {
           "password": "Password"
         }
       }
     },
     "error": {
       "invalid_auth": "Nome utente o password (o chiave client) non validi.",
-      "cannot_connect": "Impossibile connettersi a TermoWeb - errore di rete/DNS/SSL.",
-      "rate_limited": "Velocità temporaneamente limitata da API. Riprovare più tardi.",
-      "unknown": "Errore sconosciuto"
+      "cannot_connect": "Impossibile connettersi a TermoWeb: errore di rete/DNS/SSL.",
+      "rate_limited": "Troppe richieste all'API, limite temporaneo raggiunto. Riprova più tardi.",
+      "unknown": "Errore sconosciuto",
+      "cannot_connect_radio": "Impossibile connettersi al gateway radio. Controlla l'indirizzo IP e la porta, e che il gateway sia acceso.",
+      "no_gateway_mac": "Il gateway radio non ha comunicato il suo indirizzo MAC. Aggiorna il firmware del gateway.",
+      "no_heaters": "Nessun radiatore ha risposto. Avvicina il gateway ai radiatori e riprova.",
+      "cannot_connect_nanocul": "Impossibile aprire la chiavetta nanoCUL. Controlla che sia inserita, che la porta sia corretta e che usi il firmware termoweb_rx.",
+      "nanocul_radio_missing": "La chiavetta risponde, ma il suo modulo radio non è collegato. Controlla i collegamenti.",
+      "gateway_radio_missing": "Il gateway risponde, ma il suo modulo radio non è collegato. Controlla i collegamenti."
+    },
+    "abort": {
+      "already_configured": "Questo gateway è già configurato.",
+      "reconfigure_successful": "Le impostazioni sono state salvate.",
+      "monitor_reconfigure": "Una voce di solo ascolto non può essere modificata. Eliminala e aggiungila di nuovo.",
+      "unique_id_mismatch": "Questo è un altro account o dispositivo. Per usarlo, aggiungi invece una nuova voce.",
+      "reauth_successful": "La nuova password è stata salvata.",
+      "cannot_connect_radio": "Impossibile connettersi al gateway radio. Controlla che il gateway sia acceso e collegato alla tua rete.",
+      "no_gateway_mac": "Il gateway radio non ha comunicato il suo indirizzo MAC. Aggiorna il firmware del gateway.",
+      "gateway_radio_missing": "Il gateway risponde, ma il suo modulo radio non è collegato. Controlla i collegamenti.",
+      "not_ipv4_address": "Il gateway radio ha annunciato solo un indirizzo IPv6. Aggiungilo a mano con il suo indirizzo IPv4.",
+      "nanocul_firmware_too_old": "Il firmware di questa chiavetta nanoCUL è troppo vecchio. Installa sulla chiavetta il firmware termoweb_rx più recente (vedi la guida nanoCUL), poi riprova."
+    },
+    "progress": {
+      "radio_rescan": "Controllo di tutti i radiatori della rete radio. Può richiedere fino a un minuto."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Opzioni TermoWeb"
+      "rehome": {
+        "title": "Sposta i radiatori sulla rete di questa installazione",
+        "description": "Usa questa funzione quando i radiatori usano ancora la rete radio di un vecchio gateway TermoWeb. Radiatori: {heaters}.\n\nCosa succede:\n1. Ogni radiatore viene riportato alle impostazioni di fabbrica. Prima Home Assistant salva le sue impostazioni.\n2. Metti i radiatori in modalità di associazione, uno alla volta. Il manuale del radiatore indica quali tasti premere. Attendi circa 10 secondi tra un radiatore e l'altro. Hai 5 minuti.\n3. I radiatori ricevono nuovi numeri, da 2 in su. I loro ID entità cambiano. I nomi dei radiatori restano uguali quando Home Assistant riconosce il radiatore.\n4. Home Assistant restituisce a ogni radiatore le sue impostazioni: modalità, temperature preimpostate, temperatura manuale e programma settimanale.\n\nDurante l'operazione il controllo dei radiatori è sospeso. Alcuni radiatori più vecchi non possono essere ripristinati via radio, quindi non possono essere spostati in questo modo. Premi **Invia** per iniziare, poi metti il primo radiatore in modalità di associazione dopo circa 10 secondi."
+      },
+      "rehome_run": { "title": "Spostamento dei radiatori in corso" },
+      "rehome_done": {
+        "title": "Spostamento completato",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "L'integrazione non è in esecuzione. Avviala prima, poi riprova."
+    },
+    "progress": {
+      "rehome": "Ripristino dei radiatori, poi attesa dei radiatori in modalità di associazione. Metti ora un radiatore in modalità di associazione, poi il successivo. L'operazione termina 1 minuto dopo l'associazione dell'ultimo radiatore, oppure dopo 5 minuti."
     }
   },
   "device": {
     "heater": {
-      "name": "Riscaldatore {addr}"
+      "name": "Radiatore {addr}"
+    },
+    "accumulator": {
+      "name": "Accumulatore {addr}"
     },
     "thermostat": {
       "name": "Termostato {addr}"
     },
+    "power_monitor": {
+      "name": "Misuratore di potenza {addr}"
+    },
     "node": {
       "name": "Nodo {addr}"
     },
-    "power_monitor": {
-      "name": "Monitor di potenza {addr}"
+    "site": {
+      "name": "Casa"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway online"
+      "gateway_online": { "name": "Gateway online" },
+      "pairing_open": {
+        "name": "Associazione aperta",
+        "state_attributes": { "ends_at": { "name": "Termina alle" } }
       },
-      "boost_active": {
-        "name": "Potenziamento attivo"
-      }
+      "boost_active": { "name": "Boost attivo" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Aggiornamenti forzati"
-      },
-      "accumulator_boost_start": {
-        "name": "Avvio della spinta"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Annullamento della spinta"
-      }
+      "force_refresh": { "name": "Forza aggiornamento" },
+      "pair_new_heaters": { "name": "Associa nuovi radiatori" },
+      "accumulator_boost_start": { "name": "Avvia boost" },
+      "accumulator_boost_cancel": { "name": "Annulla boost" },
+      "flash_display": { "name": "Fai lampeggiare il display" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Durata della spinta"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Temperatura di sovralimentazione"
-      }
+      "accumulator_boost_duration": { "name": "Durata boost" },
+      "accumulator_boost_temperature": { "name": "Temperatura boost" },
+      "heater_priority": { "name": "Priorità" },
+      "installation_power_limit": { "name": "Limite di potenza" },
+      "temperature_offset": { "name": "Correzione temperatura" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatura"
+      "heater_temperature": { "name": "Temperatura" },
+      "heater_energy_total": { "name": "Energia" },
+      "heater_power": { "name": "Potenza" },
+      "radio_address": { "name": "Indirizzo radio" },
+      "power_monitor_energy": { "name": "Energia" },
+      "power_monitor_power": { "name": "Potenza" },
+      "installation_total_energy": { "name": "Energia totale" },
+      "frames_heard": { "name": "Frame ricevuti" },
+      "boost_minutes_remaining": { "name": "Minuti di boost rimanenti" },
+      "boost_end": { "name": "Fine boost" },
+      "accumulator_charging": { "name": "In carica" },
+      "accumulator_current_charge": { "name": "Carica attuale" },
+      "accumulator_target_charge": { "name": "Carica obiettivo" },
+      "installation_info": { "name": "Posizione" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Nessuno",
+              "temporary_override": "Modifica temporanea",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Blocco bambini" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "Modalità EASY" },
+      "open_window_detection": { "name": "Rilevamento finestra aperta" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Modalità di regolazione",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Isteresi 0,25 °C",
+          "hysteresis_0_35": "Isteresi 0,35 °C",
+          "hysteresis_0_5": "Isteresi 0,5 °C",
+          "hysteresis_0_75": "Isteresi 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energia"
-      },
-      "heater_power": {
-        "name": "Potenza"
-      },
-      "power_monitor_energy": {
-        "name": "Energia"
-      },
-      "power_monitor_power": {
-        "name": "Potenza"
-      },
-      "installation_total_energy": {
-        "name": "Energia totale"
-      },
-      "boost_minutes_remaining": {
-        "name": "Mancano pochi minuti all'inizio"
-      },
-      "boost_end": {
-        "name": "Fine della spinta"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Unità di temperatura del pannello",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Configurazione della preimpostazione dell'accumulatore",
-      "description": "Aggiorna la durata e/o la temperatura di boost predefinita per un accumulatore TermoWeb. I minuti devono essere compresi tra 60 e 600 con incrementi di 60 minuti; omettere un campo per mantenere il valore esistente.",
+      "name": "Configura il preset di boost dell'accumulatore",
+      "description": "Aggiorna la durata e/o la temperatura di boost predefinite di un accumulatore TermoWeb. I minuti devono essere tra 60 e 600, a passi di 60 minuti; ometti un campo per mantenere il valore attuale.",
       "fields": {
         "minutes": {
-          "name": "Durata predefinita del boost",
-          "description": "Numero di minuti in cui il boost deve funzionare quando non è previsto l'override (60-600, passo 60).",
+          "name": "Durata boost predefinita",
+          "description": "Per quanti minuti dura il boost quando non viene indicato un altro valore (60–600, passo 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Temperatura di sovralimentazione",
-          "description": "Setpoint boost opzionale da applicare durante la sessione boost (°C o °F).",
+          "name": "Temperatura boost",
+          "description": "Temperatura impostata facoltativa da usare durante il boost (°C o °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Avvio della spinta dell'accumulatore",
-      "description": "Attiva una spinta immediata su un accumulatore TermoWeb. Indicare una durata per sovrascrivere l'impostazione predefinita (60-600 minuti con incrementi di 60 minuti), oppure ometterla per utilizzare la preimpostazione memorizzata.",
+      "name": "Avvia boost",
+      "description": "Avvia subito un boost su un accumulatore TermoWeb o su un radiatore radio che supporta il boost. Accumulatore: indica una durata (60–600 minuti, a passi di 60) oppure lasciala vuota per usare il preset salvato. Radiatore radio: lascia vuota la durata; il radiatore usa la propria durata di boost.",
       "fields": {
         "minutes": {
-          "name": "Durata della spinta",
-          "description": "Durata della sessione di boost in minuti (60-600, passo 60). Opzionale.",
+          "name": "Durata boost",
+          "description": "Durata del boost in minuti (60–600, passo 60). Facoltativo.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Annullamento della spinta dell'accumulatore",
-      "description": "Annulla la sessione di boost attiva su un accumulatore TermoWeb."
+      "name": "Annulla boost",
+      "description": "Interrompe il boost su un accumulatore TermoWeb o su un radiatore radio."
     },
     "set_schedule": {
-      "name": "Impostare il programma settimanale",
-      "description": "Impostare il programma settimanale 7×24 per un riscaldatore TermoWeb. Il programma è un elenco di 168 numeri interi, dove ogni valore corrisponde a un'ora della settimana a partire dalle 00:00 di lunedì. Utilizzare 0 per la preimpostazione del freddo, 1 per la preimpostazione della notte e 2 per la preimpostazione del giorno.",
+      "name": "Imposta programma settimanale",
+      "description": "Imposta il programma settimanale 7×24 di un radiatore TermoWeb. Il programma è un elenco di 168 numeri interi, in cui ogni valore corrisponde a un'ora della settimana a partire da lunedì alle 00:00. Usa 0 per il preset freddo, 1 per il preset notte e 2 per il preset giorno.",
       "fields": {
         "prog": {
           "name": "Programma",
-          "description": "Un elenco di 168 numeri interi (0, 1 o 2) che rappresentano la programmazione settimanale del riscaldatore. L'indice 0 corrisponde a lunedì 00:00, l'indice 1 a lunedì 01:00 e così via.",
+          "description": "Un elenco di 168 numeri interi (0, 1 o 2) che rappresenta il programma settimanale del radiatore. L'indice 0 è lunedì 00:00, l'indice 1 è lunedì 01:00 e così via.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Impostazione delle temperature preimpostate",
-      "description": "Impostare le temperature preimpostate per il freddo, la notte e il giorno per un riscaldatore TermoWeb. È possibile fornire tutte e tre le temperature come un unico elenco (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Imposta temperature preimpostate",
+      "description": "Imposta le temperature preimpostate freddo, notte e giorno di un radiatore TermoWeb. Puoi indicare tutte e tre le temperature in un unico elenco (``ptemp``) oppure ciascuna separatamente (``cold``, ``night`` e ``day``). I preset non indicati mantengono il valore attuale.",
       "fields": {
         "ptemp": {
           "name": "Temperature preimpostate",
-          "description": "Un elenco di tre temperature [freddo, notte, giorno] nelle stesse unità del riscaldatore (°C o °F). Se fornito, questo elenco sostituisce i singoli valori di freddo, notte e giorno.",
+          "description": "Un elenco di tre temperature [freddo, notte, giorno] nella stessa unità del radiatore (°C o °F). Se indicato, sostituisce i singoli valori freddo, notte e giorno.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Preimpostazione a freddo",
-          "description": "Temperatura per la preimpostazione del freddo (°C o °F).",
+          "name": "Preset freddo",
+          "description": "Temperatura del preset freddo (°C o °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Predisposizione per la notte",
-          "description": "Temperatura per la preselezione notturna (°C o °F).",
+          "name": "Preset notte",
+          "description": "Temperatura del preset notte (°C o °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Preimpostazione del giorno",
-          "description": "Temperatura del giorno preimpostata (°C o °F).",
+          "name": "Preset giorno",
+          "description": "Temperatura del preset giorno (°C o °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Storia dell'energia importata",
-      "description": "Importazione dei contatori energetici orari storici dei riscaldatori TermoWeb fino a un anno fa nelle statistiche dell'Assistente Casa per ogni riscaldatore configurato.",
+      "name": "Importa storico energia",
+      "description": "Importa il consumo energetico orario passato di ogni radiatore e misuratore di potenza nelle statistiche di Home Assistant (la dashboard Energia). L'avanzamento viene salvato: se l'importazione si interrompe, eseguila di nuovo per continuare.",
       "fields": {
         "reset_progress": {
-          "name": "Azzeramento dei progressi",
-          "description": "Cancellare i progressi memorizzati e reimportare la cronologia da zero."
+          "name": "Azzera avanzamento",
+          "description": "Dimentica l'avanzamento salvato e importa di nuovo l'intero periodo. Le statistiche esistenti vengono sovrascritte, non eliminate."
         },
         "max_history_retrieval": {
-          "name": "Giorni massimi di storia",
-          "description": "Numero di giorni di cronologia da recuperare. Sovrascrive il valore predefinito configurato solo per questa importazione."
+          "name": "Giorni massimi di storico",
+          "description": "Quanti giorni indietro importare (da 1 a 3650, predefinito 7). Se hai già importato meno giorni, vengono scaricati solo i giorni più vecchi."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Registrazione radio",
+      "description": "Registra per un certo tempo ogni frame radio ricevuto dal gateway o dal nanoCUL e lo salva come file JSON nella cartella di configurazione di Home Assistant. Non trasmette mai. Su una voce radio normale, i comandi ai radiatori attendono la fine della registrazione.",
+      "fields": {
+        "entry_id": {
+          "name": "ID voce di configurazione",
+          "description": "La voce di configurazione del gateway radio o del nanoCUL da usare, di solito quella di solo ascolto.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Durata",
+          "description": "Quanto registrare, da 10 a 1800 secondi."
+        },
+        "redact": {
+          "name": "Nascondi dati privati",
+          "description": "Sostituisce nel file gli ID di rete e i numeri di serie dei radiatori. Senza questa opzione il file contiene l'ID della tua rete: condividilo solo in privato."
+        },
+        "note": {
+          "name": "Nota",
+          "description": "Testo facoltativo salvato nel file, ad esempio quale radiatore hai usato.",
+          "example": "alzata la temperatura del radiatore del soggiorno"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Analisi radio",
+      "description": "Ascolta per un certo tempo tutto il traffico radio sulla banda dei radiatori, anche quello che questa integrazione non comprende, e salva un file di report nella cartella di configurazione di Home Assistant. Allega il file a una issue su GitHub per chiedere il supporto di un nuovo tipo di radiatore.",
+      "fields": {
+        "entry_id": {
+          "name": "ID voce di configurazione",
+          "description": "La voce di configurazione del gateway radio o del nanoCUL da usare.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Durata",
+          "description": "Quanto ascoltare. I radiatori trasmettono di più quando iniziano o smettono di scaldare."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Ripristino di fabbrica via radio",
+      "description": "DISTRUTTIVO. Riporta un radiatore radio alle impostazioni di fabbrica. Il radiatore perde tutte le impostazioni, l'orologio, il programma settimanale e l'associazione radio, e smette di comunicare con Home Assistant. Le ultime impostazioni note vengono salvate prima. Per usare di nuovo il radiatore, premi \"Associa nuovi radiatori\" sul dispositivo gateway e metti il radiatore in modalità di associazione. Le impostazioni salvate vengono ripristinate quando il radiatore viene riconosciuto. Alcuni radiatori più vecchi non possono essere ripristinati via radio: ripristinali a mano (vedi il manuale del radiatore).",
+      "fields": {
+        "entry_id": {
+          "name": "ID voce di configurazione",
+          "description": "La voce di configurazione del gateway radio o del nanoCUL da usare.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Numero del radiatore",
+          "description": "Il numero radio del radiatore (il numero in \"Radiatore 6\")."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radio: sposta i radiatori sulla propria rete",
+      "description": "Sposta tutti i radiatori di una voce radio sulla rete radio di questa installazione. Ogni radiatore viene prima ripristinato (le sue impostazioni vengono salvate), poi metti i radiatori in modalità di associazione uno alla volta. I radiatori ricevono nuovi numeri da 2 in su e le loro impostazioni vengono ripristinate. Alcuni radiatori più vecchi non possono essere ripristinati via radio, quindi non possono essere spostati in questo modo. Durante l'operazione il controllo dei radiatori è sospeso.",
+      "fields": {
+        "entry_id": {
+          "name": "ID voce di configurazione",
+          "description": "La voce di configurazione del gateway radio o del nanoCUL da usare.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Tempo di attesa",
+          "description": "Quanto attendere la pressione dei tasti di associazione dei radiatori."
         }
       }
     }

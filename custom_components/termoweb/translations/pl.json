@@ -1,188 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Jak połączone są Twoje grzejniki?",
+        "description": "Wybierz konto w chmurze, jeśli używasz aplikacji TermoWeb, Ducaheat lub Tevolve. Aby sterować grzejnikami lokalnie, bez chmury, najprościej użyć pendrive'a radiowego nanoCUL podłączonego do komputera z Home Assistant (bez lutowania). Bramka radiowa ESP32 jest dla zaawansowanych użytkowników: trzeba ją samodzielnie zbudować i polutować.",
+        "menu_options": {
+          "cloud": "Konto w chmurze (aplikacja TermoWeb, Ducaheat lub Tevolve)",
+          "nanocul": "Lokalne radio: pendrive USB nanoCUL (najprościej, bez lutowania)",
+          "radio": "Lokalna bramka radiowa: ESP32 + CC1101 (zaawansowane, wymaga lutowania)"
+        }
+      },
       "cloud": {
-        "title": "Połącz się z grzejnikami rodzinnymi TermoWeb",
-        "description": "Wersja: {version}\n\nWybierz markę TermoWeb lub Ducaheat i wprowadź dane logowania do konta.",
+        "title": "Połącz z grzejnikami z rodziny TermoWeb",
+        "description": "Wersja: {version}\n\nWybierz markę (TermoWeb, Ducaheat lub Tevolve) i wprowadź dane logowania do konta. Tevolve korzysta z serwera Ducaheat.",
         "data": {
           "brand": "Marka",
-          "username": "E-mail",
+          "username": "Adres e-mail",
+          "password": "Hasło"
+        }
+      },
+      "radio": {
+        "title": "Połącz z bramką radiową",
+        "description": "Home Assistant zwykle sam znajduje bramkę radiową ESP32: szukaj jej w sekcji **Wykryte** na stronie Urządzenia oraz usługi. Użyj tego formularza tylko wtedy, gdy się tam nie pojawia. Wprowadź adres IP bramki. W następnym kroku wybierzesz: dodać bramkę i pozwolić jej znaleźć grzejniki albo sparować nowe grzejniki.",
+        "data": {
+          "host": "Adres IP bramki"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Ustawienia zaawansowane",
+            "description": "Nie zmieniaj tych ustawień, chyba że zmieniono oprogramowanie bramki.",
+            "data": {
+              "port": "Port"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Znaleziono bramkę radiową",
+        "description": "Znaleziono bramkę radiową TermoWeb pod adresem {host}. Skonfigurować ją?\n\nW następnym kroku wybierzesz: dodać bramkę (sama znajdzie i sparuje grzejniki) albo tylko nasłuchiwać."
+      },
+      "radio_method": {
+        "title": "Dodaj bramkę",
+        "description": "Wybierz „Dodaj bramkę”, aby sterować grzejnikami. Konfiguracja kończy się od razu. Następnie:\n\n- Grzejniki, które już działają z bramką lub aplikacją TermoWeb, zostaną znalezione automatycznie, zwykle w ciągu kilku minut. Grzejniki nadają, gdy zaczynają grzać, więc pomaga podniesienie temperatury na jednym z nich.\n- Nowe lub zresetowane grzejniki: w ciągu 30 minut przełącz każdy grzejnik w tryb parowania. Instrukcja grzejnika podaje, które przyciski nacisnąć. Paruj jeden grzejnik naraz. Później najpierw naciśnij **Sparuj nowe grzejniki** na urządzeniu bramki.\n\nDla każdego dodanego grzejnika otrzymasz powiadomienie.\n\nWybierz „Tylko nasłuch”, aby nagrać ruch radiowy do testów obok wciąż działającej bramki TermoWeb. W tym trybie integracja nigdy nie nadaje i nie dodaje grzejników.",
+        "menu_options": {
+          "radio_discover": "Dodaj bramkę",
+          "radio_monitor": "Tylko nasłuch (nagrywa ruch radiowy, nigdy nie nadaje)"
+        }
+      },
+      "radio_rescan": { "title": "Wyszukiwanie grzejników" },
+      "reconfigure_radio": {
+        "title": "Zmień bramkę radiową",
+        "description": "Zmień adres bramki. Zaznacz „Wyszukaj grzejniki ponownie”, jeśli dodano lub usunięto grzejnik.",
+        "data": {
+          "host": "Adres IP bramki",
+          "port": "Port",
+          "rescan": "Wyszukaj grzejniki ponownie"
+        }
+      },
+      "nanocul": {
+        "title": "Połącz z pendrive'em USB nanoCUL",
+        "description": "Wybierz port pendrive'a nanoCUL. Jeśli Home Assistant rozpoznał urządzenie, jest ono już wybrane: wystarczy nacisnąć Zatwierdź. W następnym kroku wybierzesz: dodać bramkę i pozwolić jej znaleźć grzejniki albo sparować nowe grzejniki.",
+        "data": {
+          "device": "Port USB"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Wprowadź port nanoCUL",
+        "description": "Wpisz ścieżkę portu, na przykład /dev/serial/by-id/usb-..., albo adres sieciowy, taki jak socket://192.0.2.10:2323, dla pendrive'a udostępnionego przez sieć.",
+        "data": {
+          "device": "Ścieżka portu lub URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Zmień port nanoCUL",
+        "description": "Zmień ścieżkę portu lub URL pendrive'a. Zaznacz „Wyszukaj grzejniki ponownie”, jeśli dodano lub usunięto grzejnik.",
+        "data": {
+          "device": "Ścieżka portu lub URL",
+          "rescan": "Wyszukaj grzejniki ponownie"
+        }
+      },
+      "reconfigure": {
+        "title": "Zmień ustawienia konta",
+        "description": "Wersja: {version}\n\nWprowadź nowe hasło do tego konta. Nie można tu przełączyć się na inne konto: w tym celu dodaj nowy wpis.",
+        "data": {
+          "brand": "Marka",
+          "username": "Adres e-mail",
+          "password": "Hasło"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Zaloguj się ponownie",
+        "description": "{brand} nie zaakceptował zapisanego hasła dla {username}. Wprowadź aktualne hasło.",
+        "data": {
           "password": "Hasło"
         }
       }
     },
     "error": {
-      "invalid_auth": "Nieprawidłowa nazwa użytkownika lub hasło (lub klucz klienta).",
-      "cannot_connect": "Nie można połączyć się z TermoWeb - błąd sieci/DNS/SSL.",
-      "rate_limited": "Tymczasowe ograniczenie szybkości przez API. Spróbuj ponownie później.",
-      "unknown": "Nieznany błąd"
+      "invalid_auth": "Nieprawidłowa nazwa użytkownika lub hasło (albo klucz klienta).",
+      "cannot_connect": "Nie można połączyć się z TermoWeb — błąd sieci, DNS lub SSL.",
+      "rate_limited": "Tymczasowo przekroczono limit zapytań do API. Spróbuj ponownie później.",
+      "unknown": "Nieznany błąd",
+      "cannot_connect_radio": "Nie można połączyć się z bramką radiową. Sprawdź adres IP i port oraz czy bramka jest włączona.",
+      "no_gateway_mac": "Bramka radiowa nie podała swojego adresu MAC. Zaktualizuj oprogramowanie bramki.",
+      "no_heaters": "Żaden grzejnik nie odpowiedział. Przenieś bramkę bliżej grzejników i spróbuj ponownie.",
+      "cannot_connect_nanocul": "Nie można otworzyć pendrive'a nanoCUL. Sprawdź, czy jest podłączony, czy port jest prawidłowy i czy ma wgrane oprogramowanie termoweb_rx.",
+      "nanocul_radio_missing": "Pendrive odpowiada, ale jego moduł radiowy nie jest podłączony. Sprawdź okablowanie.",
+      "gateway_radio_missing": "Bramka odpowiada, ale jej moduł radiowy nie jest podłączony. Sprawdź okablowanie."
+    },
+    "abort": {
+      "already_configured": "Ta bramka jest już skonfigurowana.",
+      "reconfigure_successful": "Ustawienia zostały zapisane.",
+      "monitor_reconfigure": "Wpisu „tylko nasłuch” nie można zmienić. Usuń go i dodaj ponownie.",
+      "unique_id_mismatch": "To jest inne konto lub urządzenie. Aby z niego korzystać, dodaj nowy wpis.",
+      "reauth_successful": "Nowe hasło zostało zapisane.",
+      "cannot_connect_radio": "Nie można połączyć się z bramką radiową. Sprawdź, czy bramka jest włączona i podłączona do Twojej sieci.",
+      "no_gateway_mac": "Bramka radiowa nie podała swojego adresu MAC. Zaktualizuj oprogramowanie bramki.",
+      "gateway_radio_missing": "Bramka odpowiada, ale jej moduł radiowy nie jest podłączony. Sprawdź okablowanie.",
+      "not_ipv4_address": "Bramka radiowa ogłosiła tylko adres IPv6. Dodaj ją ręcznie, podając jej adres IPv4.",
+      "nanocul_firmware_too_old": "Oprogramowanie na tym pendrivie nanoCUL jest za stare. Wgraj najnowsze oprogramowanie termoweb_rx (zobacz poradnik nanoCUL), a następnie spróbuj ponownie."
+    },
+    "progress": {
+      "radio_rescan": "Sprawdzanie każdego grzejnika w sieci radiowej. Może to potrwać do minuty."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Opcje TermoWeb"
+      "rehome": {
+        "title": "Przenieś grzejniki do własnej sieci tej instalacji",
+        "description": "Użyj tej opcji, jeśli Twoje grzejniki nadal korzystają z sieci radiowej starej bramki TermoWeb. Grzejniki: {heaters}.\n\nCo się stanie:\n1. Każdy grzejnik zostanie przywrócony do ustawień fabrycznych. Home Assistant najpierw zapisze jego ustawienia.\n2. Przełączasz grzejniki w tryb parowania, po jednym. Instrukcja grzejnika podaje, które przyciski nacisnąć. Między grzejnikami odczekaj około 10 sekund. Masz na to 5 minut.\n3. Grzejniki otrzymają nowe numery, od 2 w górę. Zmienią się ich identyfikatory encji. Nazwy grzejników pozostaną takie same, jeśli Home Assistant rozpozna grzejnik.\n4. Home Assistant przywróci ustawienia każdego grzejnika: tryb, temperatury ustawień wstępnych, temperaturę ręczną i program tygodniowy.\n\nW tym czasie sterowanie grzejnikami jest wstrzymane. Niektórych starszych grzejników nie da się zresetować przez radio, więc nie można ich przenieść w ten sposób. Naciśnij **Zatwierdź**, aby rozpocząć, a po około 10 sekundach przełącz pierwszy grzejnik w tryb parowania."
+      },
+      "rehome_run": { "title": "Przenoszenie grzejników" },
+      "rehome_done": {
+        "title": "Przenoszenie zakończone",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Integracja nie jest uruchomiona. Najpierw ją uruchom, a następnie spróbuj ponownie."
+    },
+    "progress": {
+      "rehome": "Resetowanie grzejników, a następnie oczekiwanie na grzejniki w trybie parowania. Przełącz teraz jeden grzejnik w tryb parowania, potem następny. Proces kończy się 1 minutę po sparowaniu ostatniego grzejnika lub po 5 minutach."
     }
   },
   "device": {
     "heater": {
       "name": "Grzejnik {addr}"
     },
+    "accumulator": {
+      "name": "Piec akumulacyjny {addr}"
+    },
     "thermostat": {
       "name": "Termostat {addr}"
+    },
+    "power_monitor": {
+      "name": "Miernik mocy {addr}"
     },
     "node": {
       "name": "Węzeł {addr}"
     },
-    "power_monitor": {
-      "name": "Monitor mocy {addr}"
+    "site": {
+      "name": "Dom"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Bramka online"
+      "gateway_online": { "name": "Bramka online" },
+      "pairing_open": {
+        "name": "Parowanie otwarte",
+        "state_attributes": { "ends_at": { "name": "Kończy się o" } }
       },
-      "boost_active": {
-        "name": "Aktywne wzmocnienie"
-      }
+      "boost_active": { "name": "Turbo aktywne" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Wymuś odświeżanie"
-      },
-      "accumulator_boost_start": {
-        "name": "Rozpoczęcie doładowania"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Anuluj doładowanie"
-      }
+      "force_refresh": { "name": "Wymuś odświeżenie" },
+      "pair_new_heaters": { "name": "Sparuj nowe grzejniki" },
+      "accumulator_boost_start": { "name": "Uruchom turbo" },
+      "accumulator_boost_cancel": { "name": "Anuluj turbo" },
+      "flash_display": { "name": "Mignij wyświetlaczem" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Czas trwania doładowania"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Podwyższona temperatura"
-      }
+      "accumulator_boost_duration": { "name": "Czas trwania turbo" },
+      "accumulator_boost_temperature": { "name": "Temperatura turbo" },
+      "heater_priority": { "name": "Priorytet" },
+      "installation_power_limit": { "name": "Limit mocy" },
+      "temperature_offset": { "name": "Korekta temperatury" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatura"
+      "heater_temperature": { "name": "Temperatura" },
+      "heater_energy_total": { "name": "Energia" },
+      "heater_power": { "name": "Moc" },
+      "radio_address": { "name": "Adres radiowy" },
+      "power_monitor_energy": { "name": "Energia" },
+      "power_monitor_power": { "name": "Moc" },
+      "installation_total_energy": { "name": "Energia całkowita" },
+      "frames_heard": { "name": "Odebrane ramki" },
+      "boost_minutes_remaining": { "name": "Pozostałe minuty turbo" },
+      "boost_end": { "name": "Koniec turbo" },
+      "accumulator_charging": { "name": "Ładowanie" },
+      "accumulator_current_charge": { "name": "Bieżące naładowanie" },
+      "accumulator_target_charge": { "name": "Docelowe naładowanie" },
+      "installation_info": { "name": "Lokalizacja" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Brak",
+              "temporary_override": "Tymczasowa zmiana",
+              "boost": "Turbo"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Blokada rodzicielska" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "Tryb EASY" },
+      "open_window_detection": { "name": "Wykrywanie otwartego okna" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Tryb regulacji",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Histereza 0,25 °C",
+          "hysteresis_0_35": "Histereza 0,35 °C",
+          "hysteresis_0_5": "Histereza 0,5 °C",
+          "hysteresis_0_75": "Histereza 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energia"
-      },
-      "heater_power": {
-        "name": "Moc"
-      },
-      "power_monitor_energy": {
-        "name": "Energia"
-      },
-      "power_monitor_power": {
-        "name": "Moc"
-      },
-      "installation_total_energy": {
-        "name": "Całkowita energia"
-      },
-      "boost_minutes_remaining": {
-        "name": "Boost minutes remaining"
-      },
-      "boost_end": {
-        "name": "Koniec doładowania"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Jednostka temperatury na panelu",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Konfiguracja wstępnego ustawienia doładowania akumulatora",
-      "description": "Aktualizacja domyślnego czasu trwania doładowania i/lub temperatury dla akumulatora TermoWeb. Minuty muszą zawierać się w przedziale od 60 do 600 w 60-minutowych przyrostach; pomiń pole, aby zachować istniejącą wartość.",
+      "name": "Skonfiguruj ustawienie turbo pieca akumulacyjnego",
+      "description": "Zmień domyślny czas trwania i/lub temperaturę turbo dla pieca akumulacyjnego TermoWeb. Liczba minut musi mieścić się w zakresie od 60 do 600, w krokach co 60 minut; pomiń pole, aby zachować obecną wartość.",
       "fields": {
         "minutes": {
-          "name": "Domyślny czas trwania doładowania",
-          "description": "Liczba minut, przez które powinno działać doładowanie, gdy nie jest dostępne żadne wymuszenie (60-600, krok 60).",
+          "name": "Domyślny czas trwania turbo",
+          "description": "Liczba minut działania turbo, gdy nie podano innego czasu (60–600, krok 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Podwyższona temperatura",
-          "description": "Opcjonalna wartość zadana doładowania stosowana podczas sesji doładowania (°C lub °F).",
+          "name": "Temperatura turbo",
+          "description": "Opcjonalna temperatura zadana stosowana podczas turbo (°C lub °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Uruchomienie doładowania akumulatora",
-      "description": "Wyzwala natychmiastowe doładowanie akumulatora TermoWeb. Podaj czas trwania, aby zastąpić ustawienie domyślne (60-600 minut w 60-minutowych odstępach) lub pomiń je, aby użyć zapisanego ustawienia wstępnego.",
+      "name": "Uruchom turbo",
+      "description": "Uruchom teraz turbo na piecu akumulacyjnym TermoWeb lub na grzejniku radiowym, który ma funkcję turbo. Piec akumulacyjny: podaj czas trwania (60–600 minut, w krokach co 60) albo pomiń go, aby użyć zapisanego ustawienia. Grzejnik radiowy: pomiń czas trwania; grzejnik użyje własnego czasu turbo.",
       "fields": {
         "minutes": {
-          "name": "Czas trwania doładowania",
-          "description": "Czas trwania sesji doładowania w minutach (60-600, krok 60). Opcjonalnie.",
+          "name": "Czas trwania turbo",
+          "description": "Czas trwania turbo w minutach (60–600, krok 60). Opcjonalnie.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Anulowanie doładowania akumulatora",
-      "description": "Anulowanie aktywnej sesji doładowania na akumulatorze TermoWeb."
+      "name": "Anuluj turbo",
+      "description": "Zatrzymaj turbo na piecu akumulacyjnym TermoWeb lub grzejniku radiowym."
     },
     "set_schedule": {
       "name": "Ustaw harmonogram tygodniowy",
-      "description": "Ustaw program tygodniowy 7×24 dla grzejnika TermoWeb. Program jest listą 168 liczb całkowitych, gdzie każda wartość odpowiada jednej godzinie w tygodniu, począwszy od poniedziałku 00:00. Użyj 0 dla nastawy zimna, 1 dla nastawy nocnej i 2 dla nastawy dziennej.",
+      "description": "Ustaw program tygodniowy 7×24 dla grzejnika TermoWeb. Program to lista 168 liczb całkowitych, w której każda wartość odpowiada jednej godzinie tygodnia, począwszy od poniedziałku 00:00. Użyj 0 dla ustawienia „zimno”, 1 dla ustawienia „noc” i 2 dla ustawienia „dzień”.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "Lista 168 liczb całkowitych (0, 1 lub 2) reprezentujących tygodniowy harmonogram grzejnika. Indeks 0 to poniedziałek 00:00, indeks 1 to poniedziałek 01:00 itd.",
+          "description": "Lista 168 liczb całkowitych (0, 1 lub 2) opisująca harmonogram tygodniowy grzejnika. Indeks 0 to poniedziałek 00:00, indeks 1 to poniedziałek 01:00 i tak dalej.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Ustawianie zaprogramowanych temperatur",
-      "description": "Ustawienie temperatury zimnej, nocnej i dziennej dla grzejnika TermoWeb. Można podać wszystkie trzy temperatury jako jedną listę (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Ustaw temperatury ustawień wstępnych",
+      "description": "Ustaw temperatury ustawień „zimno”, „noc” i „dzień” dla grzejnika TermoWeb. Możesz podać wszystkie trzy temperatury jako jedną listę (``ptemp``) albo każdą osobno (``cold``, ``night`` i ``day``). Pominięte ustawienia zachowują obecną wartość.",
       "fields": {
         "ptemp": {
-          "name": "Wstępnie ustawione temperatury",
-          "description": "Lista trzech temperatur [zimna, nocna, dzienna] w tych samych jednostkach co grzejnik (°C lub °F). Jeśli zostanie podana, zastąpi indywidualne wartości zimna, nocy i dnia.",
+          "name": "Temperatury ustawień wstępnych",
+          "description": "Lista trzech temperatur [zimno, noc, dzień] w tych samych jednostkach co grzejnik (°C lub °F). Jeśli zostanie podana, zastępuje osobne wartości dla zimna, nocy i dnia.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Ustawienie wstępne zimna",
-          "description": "Temperatura dla zimnego ustawienia wstępnego (°C lub °F).",
+          "name": "Ustawienie „zimno”",
+          "description": "Temperatura dla ustawienia „zimno” (°C lub °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Ustawienie wstępne noc",
-          "description": "Temperatura dla nastawy nocnej (°C lub °F).",
+          "name": "Ustawienie „noc”",
+          "description": "Temperatura dla ustawienia „noc” (°C lub °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Ustawienie wstępne dnia",
-          "description": "Ustawiona temperatura dla danego dnia (°C lub °F).",
+          "name": "Ustawienie „dzień”",
+          "description": "Temperatura dla ustawienia „dzień” (°C lub °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Historia importu energii",
-      "description": "Importowanie historycznych godzinowych liczników energii dla grzejników TermoWeb sprzed roku do statystyk Home Assistant dla każdego skonfigurowanego grzejnika.",
+      "name": "Importuj historię energii",
+      "description": "Importuj dawne godzinowe zużycie energii każdego grzejnika i miernika mocy do statystyk Home Assistant (panel Energia). Postęp jest zapisywany: jeśli import się zatrzyma, uruchom go ponownie, aby kontynuować.",
       "fields": {
         "reset_progress": {
-          "name": "Resetowanie postępu",
-          "description": "Wyczyść zapisany postęp i ponownie zaimportuj historię od zera."
+          "name": "Resetuj postęp",
+          "description": "Zapomnij zapisany postęp i zaimportuj cały okres od nowa. Istniejące statystyki zostaną nadpisane, a nie usunięte."
         },
         "max_history_retrieval": {
-          "name": "Maksymalna liczba dni historii",
-          "description": "Liczba dni historii do pobrania. Zastępuje skonfigurowane ustawienia domyślne tylko dla tego importu."
+          "name": "Maks. liczba dni historii",
+          "description": "Ile dni wstecz zaimportować (od 1 do 3650, domyślnie 7). Jeśli zaimportowano już mniej dni, pobierane są tylko starsze dni."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Nagrywanie radia",
+      "description": "Nagrywaj przez pewien czas każdą ramkę radiową odebraną przez bramkę lub nanoCUL i zapisz ją jako plik JSON w folderze konfiguracji Home Assistant. Nigdy nie nadaje. Przy zwykłym wpisie radiowym polecenia dla grzejników czekają, aż nagrywanie się zakończy.",
+      "fields": {
+        "entry_id": {
+          "name": "Identyfikator wpisu konfiguracji",
+          "description": "Wpis konfiguracji bramki radiowej lub nanoCUL, którego należy użyć, zwykle wpis „tylko nasłuch”.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Czas trwania",
+          "description": "Jak długo nagrywać, od 10 do 1800 sekund."
+        },
+        "redact": {
+          "name": "Ukryj dane prywatne",
+          "description": "Zastąp w pliku identyfikatory sieci i numery seryjne grzejników. Bez tej opcji plik zawiera identyfikator Twojej sieci: udostępniaj go tylko prywatnie."
+        },
+        "note": {
+          "name": "Notatka",
+          "description": "Opcjonalny tekst zapisywany w pliku, na przykład którego grzejnika użyto.",
+          "example": "podniesiona temperatura grzejnika w salonie"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Przegląd radiowy",
+      "description": "Nasłuchuj przez pewien czas całego ruchu radiowego w paśmie grzejników, także ruchu, którego ta integracja nie rozumie, i zapisz plik raportu w folderze konfiguracji Home Assistant. Dołącz plik do zgłoszenia w serwisie GitHub, aby poprosić o obsługę nowego rodzaju grzejnika.",
+      "fields": {
+        "entry_id": {
+          "name": "Identyfikator wpisu konfiguracji",
+          "description": "Wpis konfiguracji bramki radiowej lub nanoCUL, którego należy użyć.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Czas trwania",
+          "description": "Jak długo nasłuchiwać. Grzejniki nadają najwięcej, gdy zaczynają lub przestają grzać."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Reset fabryczny przez radio",
+      "description": "NIEODWRACALNE. Przywraca ustawienia fabryczne jednego grzejnika radiowego. Grzejnik traci wszystkie ustawienia, zegar, program tygodniowy i sparowanie radiowe, i przestaje komunikować się z Home Assistant. Jego ostatnie znane ustawienia są najpierw zapisywane. Aby znów używać grzejnika, naciśnij „Sparuj nowe grzejniki” na urządzeniu bramki i przełącz grzejnik w tryb parowania. Zapisane ustawienia wrócą, gdy grzejnik zostanie rozpoznany. Niektórych starszych grzejników nie da się zresetować przez radio: zresetuj je ręcznie (zobacz instrukcję grzejnika).",
+      "fields": {
+        "entry_id": {
+          "name": "Identyfikator wpisu konfiguracji",
+          "description": "Wpis konfiguracji bramki radiowej lub nanoCUL, którego należy użyć.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Numer grzejnika",
+          "description": "Numer radiowy grzejnika (liczba w nazwie „Grzejnik 6”)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radio: przenieś grzejniki do własnej sieci",
+      "description": "Przenieś wszystkie grzejniki wpisu radiowego do własnej sieci radiowej tej instalacji. Każdy grzejnik jest najpierw resetowany (jego ustawienia są zapisywane), a potem przełączasz grzejniki w tryb parowania, po jednym. Grzejniki otrzymują nowe numery od 2 w górę, a ich ustawienia są przywracane. Niektórych starszych grzejników nie da się zresetować przez radio, więc nie można ich przenieść w ten sposób. W tym czasie sterowanie grzejnikami jest wstrzymane.",
+      "fields": {
+        "entry_id": {
+          "name": "Identyfikator wpisu konfiguracji",
+          "description": "Wpis konfiguracji bramki radiowej lub nanoCUL, którego należy użyć.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Czas oczekiwania",
+          "description": "Jak długo czekać na naciśnięcie przycisków parowania grzejników."
         }
       }
     }

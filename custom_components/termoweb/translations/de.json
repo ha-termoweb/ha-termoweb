@@ -1,188 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Wie sind deine Heizgeräte verbunden?",
+        "description": "Wähle das Cloud-Konto, wenn du die TermoWeb-, Ducaheat- oder Tevolve-App nutzt. Um die Heizgeräte lokal ohne Cloud zu steuern, ist ein nanoCUL-USB-Stick am einfachsten, der in diesen Home Assistant-Computer gesteckt wird (kein Löten). Das ESP32-Funk-Gateway ist für fortgeschrittene Benutzer: Es muss selbst gebaut und gelötet werden.",
+        "menu_options": {
+          "cloud": "Cloud-Konto (TermoWeb-, Ducaheat- oder Tevolve-App)",
+          "nanocul": "Lokaler Funk: nanoCUL-USB-Stick (am einfachsten, kein Löten)",
+          "radio": "Lokales Funk-Gateway: ESP32 + CC1101 (fortgeschritten, Löten nötig)"
+        }
+      },
       "cloud": {
-        "title": "Anschluss an TermoWeb Familienheizungen",
-        "description": "Version: {version}\n\nWählen Sie Ihre TermoWeb- oder Ducaheat-Marke und geben Sie Ihre Kontodaten ein.",
+        "title": "Mit Heizgeräten der TermoWeb-Familie verbinden",
+        "description": "Version: {version}\n\nWähle deine Marke (TermoWeb, Ducaheat oder Tevolve) und gib deine Kontodaten ein. Tevolve nutzt das Ducaheat-Backend.",
         "data": {
           "brand": "Marke",
           "username": "E-Mail",
           "password": "Passwort"
         }
+      },
+      "radio": {
+        "title": "Mit dem Funk-Gateway verbinden",
+        "description": "Home Assistant findet das ESP32-Funk-Gateway normalerweise von selbst: Suche es unter **Entdeckt** auf der Seite Geräte & Dienste. Nutze dieses Formular nur, wenn es dort nicht erscheint. Gib die IP-Adresse deines Gateways ein. Im nächsten Schritt wählst du: das Gateway hinzufügen und deine Heizgeräte suchen lassen, oder neue Heizgeräte koppeln.",
+        "data": {
+          "host": "IP-Adresse des Gateways"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Erweiterte Einstellungen",
+            "description": "Lass diese Werte unverändert, außer du hast die Gateway-Firmware geändert.",
+            "data": {
+              "port": "Port"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Funk-Gateway gefunden",
+        "description": "TermoWeb-Funk-Gateway unter {host} gefunden. Einrichten?\n\nIm nächsten Schritt wählst du: das Gateway hinzufügen (es findet und koppelt deine Heizgeräte) oder nur mithören."
+      },
+      "radio_method": {
+        "title": "Gateway hinzufügen",
+        "description": "Wähle \"Gateway hinzufügen\", um deine Heizgeräte zu steuern. Die Einrichtung ist sofort abgeschlossen. Danach:\n\n- Heizgeräte, die bereits mit einem TermoWeb-Gateway oder der App funktionieren, werden von selbst gefunden, meist innerhalb weniger Minuten. Heizgeräte funken, wenn sie zu heizen beginnen. Es hilft also, die Temperatur eines Heizgeräts höher zu stellen.\n- Neue oder zurückgesetzte Heizgeräte: Versetze jedes Heizgerät innerhalb von 30 Minuten in den Kopplungsmodus. Welche Tasten du drücken musst, steht in der Anleitung des Heizgeräts. Immer nur ein Heizgerät auf einmal. Drücke später zuerst **Neue Heizgeräte koppeln** am Gateway-Gerät.\n\nFür jedes hinzugefügte Heizgerät erhältst du eine Benachrichtigung.\n\nWähle \"Nur mithören\", um für einen Test den Funkverkehr aufzuzeichnen, neben einem TermoWeb-Gateway, das noch läuft. Die Integration sendet in diesem Modus nie und fügt keine Heizgeräte hinzu.",
+        "menu_options": {
+          "radio_discover": "Gateway hinzufügen",
+          "radio_monitor": "Nur mithören (Funkverkehr aufzeichnen, nie senden)"
+        }
+      },
+      "radio_rescan": { "title": "Suche nach deinen Heizgeräten" },
+      "reconfigure_radio": {
+        "title": "Funk-Gateway ändern",
+        "description": "Ändere die Adresse des Gateways. Aktiviere \"Erneut nach Heizgeräten suchen\", wenn du ein Heizgerät hinzugefügt oder entfernt hast.",
+        "data": {
+          "host": "IP-Adresse des Gateways",
+          "port": "Port",
+          "rescan": "Erneut nach Heizgeräten suchen"
+        }
+      },
+      "nanocul": {
+        "title": "Mit dem nanoCUL-USB-Stick verbinden",
+        "description": "Wähle den Port deines nanoCUL-Sticks. Wenn Home Assistant den Stick erkannt hat, ist er bereits ausgewählt: Drücke einfach auf Absenden. Im nächsten Schritt wählst du: das Gateway hinzufügen und deine Heizgeräte suchen lassen, oder neue Heizgeräte koppeln.",
+        "data": {
+          "device": "USB-Port"
+        }
+      },
+      "nanocul_manual": {
+        "title": "nanoCUL-Port eingeben",
+        "description": "Gib den Port-Pfad ein, zum Beispiel /dev/serial/by-id/usb-..., oder eine Netzwerkadresse wie socket://192.0.2.10:2323 für einen Stick, der über das Netzwerk freigegeben ist.",
+        "data": {
+          "device": "Port-Pfad oder URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "nanoCUL-Port ändern",
+        "description": "Ändere den Port-Pfad oder die URL des Sticks. Aktiviere \"Erneut nach Heizgeräten suchen\", wenn du ein Heizgerät hinzugefügt oder entfernt hast.",
+        "data": {
+          "device": "Port-Pfad oder URL",
+          "rescan": "Erneut nach Heizgeräten suchen"
+        }
+      },
+      "reconfigure": {
+        "title": "Kontoeinstellungen ändern",
+        "description": "Version: {version}\n\nGib das neue Passwort für dieses Konto ein. Zu einem anderen Konto kannst du hier nicht wechseln: Füge dafür einen neuen Eintrag hinzu.",
+        "data": {
+          "brand": "Marke",
+          "username": "E-Mail",
+          "password": "Passwort"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Erneut anmelden",
+        "description": "{brand} hat das gespeicherte Passwort für {username} nicht akzeptiert. Gib das aktuelle Passwort ein.",
+        "data": {
+          "password": "Passwort"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Ungültiger Benutzername oder Passwort (oder Client-Schlüssel).",
-      "cannot_connect": "Kann keine Verbindung zu TermoWeb herstellen - Netzwerk/DNS/SSL-Fehler.",
-      "rate_limited": "Vorübergehend ratenbeschränkt durch API. Versuchen Sie es später noch einmal.",
-      "unknown": "Unbekannter Fehler"
+      "invalid_auth": "Ungültiger Benutzername oder ungültiges Passwort (oder Client-Schlüssel).",
+      "cannot_connect": "Keine Verbindung zu TermoWeb möglich – Netzwerk-, DNS- oder SSL-Fehler.",
+      "rate_limited": "Vorübergehend von der API begrenzt (zu viele Anfragen). Versuche es später erneut.",
+      "unknown": "Unbekannter Fehler",
+      "cannot_connect_radio": "Keine Verbindung zum Funk-Gateway möglich. Prüfe IP-Adresse und Port und ob das Gateway eingeschaltet ist.",
+      "no_gateway_mac": "Das Funk-Gateway hat seine MAC-Adresse nicht gemeldet. Aktualisiere die Gateway-Firmware.",
+      "no_heaters": "Kein Heizgerät hat geantwortet. Stelle das Gateway näher an die Heizgeräte und versuche es erneut.",
+      "cannot_connect_nanocul": "Der nanoCUL-Stick kann nicht geöffnet werden. Prüfe, ob er eingesteckt ist, ob der Port stimmt und ob die Firmware termoweb_rx darauf läuft.",
+      "nanocul_radio_missing": "Der Stick antwortet, aber sein Funkmodul ist nicht angeschlossen. Prüfe die Verkabelung.",
+      "gateway_radio_missing": "Das Gateway antwortet, aber sein Funkmodul ist nicht angeschlossen. Prüfe die Verkabelung."
+    },
+    "abort": {
+      "already_configured": "Dieses Gateway ist bereits eingerichtet.",
+      "reconfigure_successful": "Die Einstellungen wurden gespeichert.",
+      "monitor_reconfigure": "Ein Nur-Mithören-Eintrag kann nicht geändert werden. Lösche ihn und füge ihn erneut hinzu.",
+      "unique_id_mismatch": "Das ist ein anderes Konto oder Gerät. Um es zu nutzen, füge stattdessen einen neuen Eintrag hinzu.",
+      "reauth_successful": "Das neue Passwort wurde gespeichert.",
+      "cannot_connect_radio": "Keine Verbindung zum Funk-Gateway möglich. Prüfe, ob das Gateway eingeschaltet und in deinem Netzwerk ist.",
+      "no_gateway_mac": "Das Funk-Gateway hat seine MAC-Adresse nicht gemeldet. Aktualisiere die Gateway-Firmware.",
+      "gateway_radio_missing": "Das Gateway antwortet, aber sein Funkmodul ist nicht angeschlossen. Prüfe die Verkabelung.",
+      "not_ipv4_address": "Das Funk-Gateway hat nur eine IPv6-Adresse gemeldet. Füge es manuell mit seiner IPv4-Adresse hinzu.",
+      "nanocul_firmware_too_old": "Die Firmware auf diesem nanoCUL-Stick ist zu alt. Spiele die neueste termoweb_rx-Firmware auf den Stick (siehe nanoCUL-Anleitung) und versuche es dann erneut."
+    },
+    "progress": {
+      "radio_rescan": "Jedes Heizgerät in deinem Funknetz wird geprüft. Das dauert bis zu einer Minute."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "TermoWeb Optionen"
+      "rehome": {
+        "title": "Heizgeräte in das eigene Funknetz dieser Installation umziehen",
+        "description": "Nutze dies, wenn deine Heizgeräte noch das Funknetz eines alten TermoWeb-Gateways verwenden. Heizgeräte: {heaters}.\n\nSo läuft es ab:\n1. Jedes Heizgerät wird auf Werkseinstellungen zurückgesetzt. Home Assistant speichert vorher seine Einstellungen.\n2. Du versetzt die Heizgeräte nacheinander in den Kopplungsmodus. Welche Tasten du drücken musst, steht in der Anleitung des Heizgeräts. Warte etwa 10 Sekunden zwischen zwei Heizgeräten. Du hast 5 Minuten Zeit.\n3. Die Heizgeräte bekommen neue Nummern, ab 2 aufwärts. Ihre Entitäts-IDs ändern sich. Die Namen der Heizgeräte bleiben gleich, wenn Home Assistant das Heizgerät wiedererkennt.\n4. Home Assistant gibt jedem Heizgerät seine Einstellungen zurück: Modus, Voreinstellungstemperaturen, manuelle Temperatur und Wochenprogramm.\n\nWährend des Vorgangs ist die Steuerung der Heizgeräte pausiert. Manche älteren Heizgeräte lassen sich nicht per Funk zurücksetzen und können daher nicht auf diese Weise umgezogen werden. Drücke **Absenden**, um zu starten, und versetze nach etwa 10 Sekunden das erste Heizgerät in den Kopplungsmodus."
+      },
+      "rehome_run": { "title": "Deine Heizgeräte werden umgezogen" },
+      "rehome_done": {
+        "title": "Umzug abgeschlossen",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Die Integration läuft nicht. Starte sie zuerst und versuche es dann erneut."
+    },
+    "progress": {
+      "rehome": "Die Heizgeräte werden zurückgesetzt, danach wird auf Heizgeräte im Kopplungsmodus gewartet. Versetze jetzt ein Heizgerät in den Kopplungsmodus, dann das nächste. Der Vorgang endet 1 Minute nach dem letzten gekoppelten Heizgerät oder nach 5 Minuten."
     }
   },
   "device": {
     "heater": {
       "name": "Heizgerät {addr}"
     },
+    "accumulator": {
+      "name": "Speicherheizung {addr}"
+    },
     "thermostat": {
       "name": "Thermostat {addr}"
+    },
+    "power_monitor": {
+      "name": "Leistungsmonitor {addr}"
     },
     "node": {
       "name": "Knoten {addr}"
     },
-    "power_monitor": {
-      "name": "Leistungsmonitor {addr}"
+    "site": {
+      "name": "Zuhause"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Gateway online"
+      "gateway_online": { "name": "Gateway online" },
+      "pairing_open": {
+        "name": "Kopplung offen",
+        "state_attributes": { "ends_at": { "name": "Endet um" } }
       },
-      "boost_active": {
-        "name": "Boost aktiv"
-      }
+      "boost_active": { "name": "Boost aktiv" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Aktualisierung erzwingen"
-      },
-      "accumulator_boost_start": {
-        "name": "Starthilfe"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Boost abbrechen"
-      }
+      "force_refresh": { "name": "Aktualisierung erzwingen" },
+      "pair_new_heaters": { "name": "Neue Heizgeräte koppeln" },
+      "accumulator_boost_start": { "name": "Boost starten" },
+      "accumulator_boost_cancel": { "name": "Boost abbrechen" },
+      "flash_display": { "name": "Anzeige blinken lassen" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Dauer der Aufladung"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Temperatur erhöhen"
-      }
+      "accumulator_boost_duration": { "name": "Boost-Dauer" },
+      "accumulator_boost_temperature": { "name": "Boost-Temperatur" },
+      "heater_priority": { "name": "Priorität" },
+      "installation_power_limit": { "name": "Leistungsgrenze" },
+      "temperature_offset": { "name": "Temperaturversatz" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatur"
+      "heater_temperature": { "name": "Temperatur" },
+      "heater_energy_total": { "name": "Energie" },
+      "heater_power": { "name": "Leistung" },
+      "radio_address": { "name": "Funkadresse" },
+      "power_monitor_energy": { "name": "Energie" },
+      "power_monitor_power": { "name": "Leistung" },
+      "installation_total_energy": { "name": "Gesamtenergie" },
+      "frames_heard": { "name": "Empfangene Funkpakete" },
+      "boost_minutes_remaining": { "name": "Verbleibende Boost-Minuten" },
+      "boost_end": { "name": "Boost-Ende" },
+      "accumulator_charging": { "name": "Ladevorgang" },
+      "accumulator_current_charge": { "name": "Aktuelle Ladung" },
+      "accumulator_target_charge": { "name": "Ziel-Ladung" },
+      "installation_info": { "name": "Standort" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Keine",
+              "temporary_override": "Vorübergehende Übersteuerung",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Kindersicherung" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "EASY-Modus" },
+      "open_window_detection": { "name": "Fenster-offen-Erkennung" },
+      "true_radiant": { "name": "True Radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Regelmodus",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Hysterese 0,25 °C",
+          "hysteresis_0_35": "Hysterese 0,35 °C",
+          "hysteresis_0_5": "Hysterese 0,5 °C",
+          "hysteresis_0_75": "Hysterese 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energie"
-      },
-      "heater_power": {
-        "name": "Strom"
-      },
-      "power_monitor_energy": {
-        "name": "Energie"
-      },
-      "power_monitor_power": {
-        "name": "Strom"
-      },
-      "installation_total_energy": {
-        "name": "Energie insgesamt"
-      },
-      "boost_minutes_remaining": {
-        "name": "Verbleibende Minuten verstärken"
-      },
-      "boost_end": {
-        "name": "Boost Ende"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Temperatureinheit am Bedienfeld",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Voreinstellung der Akkumulatorenverstärkung konfigurieren",
-      "description": "Aktualisieren Sie die Standard-Boostdauer und/oder -temperatur für einen TermoWeb-Akkumulator. Die Minuten müssen zwischen 60 und 600 in 60-Minuten-Schritten liegen; lassen Sie ein Feld aus, um den bestehenden Wert beizubehalten.",
+      "name": "Boost-Voreinstellung der Speicherheizung festlegen",
+      "description": "Ändert die Standard-Boost-Dauer und/oder -Temperatur einer TermoWeb-Speicherheizung. Die Minuten müssen zwischen 60 und 600 liegen, in Schritten von 60 Minuten. Lass ein Feld leer, um den bisherigen Wert zu behalten.",
       "fields": {
         "minutes": {
           "name": "Standard-Boost-Dauer",
-          "description": "Anzahl der Minuten, die der Boost laufen soll, wenn keine Übersteuerung vorgesehen ist (60-600, Schritt 60).",
+          "description": "Wie viele Minuten der Boost läuft, wenn keine andere Dauer angegeben wird (60–600, Schritt 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Temperatur erhöhen",
-          "description": "Optionaler Boost-Sollwert, der während des Boost-Vorgangs gelten soll (°C oder °F).",
+          "name": "Boost-Temperatur",
+          "description": "Optionale Solltemperatur während des Boosts (°C oder °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Start Akkumulator-Boost",
-      "description": "Lösen Sie eine sofortige Erhöhung eines TermoWeb-Akkumulators aus. Geben Sie eine Dauer an, um die Standardeinstellung zu überschreiben (60-600 Minuten in 60-Minuten-Schritten), oder lassen Sie sie weg, um die gespeicherte Voreinstellung zu verwenden.",
+      "name": "Boost starten",
+      "description": "Startet jetzt einen Boost an einer TermoWeb-Speicherheizung oder an einem Funk-Heizgerät mit Boost-Funktion. Speicherheizung: Gib eine Dauer an (60–600 Minuten, in Schritten von 60) oder lass sie weg, um die gespeicherte Voreinstellung zu nutzen. Funk-Heizgerät: Lass die Dauer weg; das Heizgerät boostet für seine eigene Boost-Zeit.",
       "fields": {
         "minutes": {
-          "name": "Dauer der Aufladung",
-          "description": "Dauer der Boost-Sitzung in Minuten (60-600, Stufe 60). Optional.",
+          "name": "Boost-Dauer",
+          "description": "Dauer des Boosts in Minuten (60–600, Schritt 60). Optional.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Aufhebung der Akkumulatorenanhebung",
-      "description": "Abbrechen der aktiven Boost-Sitzung auf einem TermoWeb-Akkumulator."
+      "name": "Boost abbrechen",
+      "description": "Beendet den Boost an einer TermoWeb-Speicherheizung oder einem Funk-Heizgerät."
     },
     "set_schedule": {
       "name": "Wochenplan festlegen",
-      "description": "Stellen Sie das 7×24-Wochenprogramm für eine TermoWeb-Heizung ein. Das Programm ist eine Liste von 168 Ganzzahlen, wobei jeder Wert einer Stunde der Woche ab Montag 00:00 Uhr entspricht. Verwenden Sie 0 für die Kaltvoreinstellung, 1 für die Nachtvoreinstellung und 2 für die Tagesvoreinstellung.",
+      "description": "Legt das 7×24-Wochenprogramm für ein TermoWeb-Heizgerät fest. Das Programm ist eine Liste von 168 ganzen Zahlen; jeder Wert steht für eine Stunde der Woche, beginnend Montag 00:00. Verwende 0 für die Voreinstellung Kalt, 1 für Nacht und 2 für Tag.",
       "fields": {
         "prog": {
           "name": "Programm",
-          "description": "Eine Liste von 168 ganzen Zahlen (0, 1 oder 2), die den Wochenplan des Heizgeräts darstellen. Index 0 ist Montag 00:00, Index 1 ist Montag 01:00, usw.",
+          "description": "Eine Liste von 168 ganzen Zahlen (0, 1 oder 2), die den Wochenplan des Heizgeräts darstellt. Index 0 ist Montag 00:00, Index 1 ist Montag 01:00 und so weiter.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Voreingestellte Temperaturen einstellen",
-      "description": "Legen Sie die voreingestellten Temperaturen für Kälte, Nacht und Tag für eine TermoWeb-Heizung fest. Sie können entweder alle drei Temperaturen als eine einzige Liste angeben (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Voreinstellungstemperaturen festlegen",
+      "description": "Legt die Temperaturen der Voreinstellungen Kalt, Nacht und Tag für ein TermoWeb-Heizgerät fest. Du kannst alle drei Temperaturen als eine Liste angeben (``ptemp``) oder jede einzeln (``cold``, ``night`` und ``day``). Nicht angegebene Voreinstellungen behalten ihren aktuellen Wert.",
       "fields": {
         "ptemp": {
-          "name": "Voreingestellte Temperaturen",
-          "description": "Eine Liste von drei Temperaturen [Kälte, Nacht, Tag] in denselben Einheiten wie das Heizgerät (°C oder °F). Falls angegeben, hat dies Vorrang vor den einzelnen Werten für Kälte, Nacht und Tag.",
+          "name": "Voreinstellungstemperaturen",
+          "description": "Eine Liste von drei Temperaturen [Kalt, Nacht, Tag] in derselben Einheit wie das Heizgerät (°C oder °F). Wenn angegeben, ersetzt sie die einzelnen Werte für Kalt, Nacht und Tag.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Kalt voreingestellt",
-          "description": "Temperatur für die Kaltvoreinstellung (°C oder °F).",
+          "name": "Voreinstellung Kalt",
+          "description": "Temperatur für die Voreinstellung Kalt (°C oder °F).",
           "example": "10.0"
         },
         "night": {
           "name": "Voreinstellung Nacht",
-          "description": "Temperatur für die Nachtvorwahl (°C oder °F).",
+          "description": "Temperatur für die Voreinstellung Nacht (°C oder °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Tag voreingestellt",
-          "description": "Vorgegebene Temperatur für den Tag (°C oder °F).",
+          "name": "Voreinstellung Tag",
+          "description": "Temperatur für die Voreinstellung Tag (°C oder °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Energiegeschichte importieren",
-      "description": "Importieren Sie die stündlichen Zählerstände der TermoWeb-Heizungen bis zu einem Jahr zurück in die Statistiken des Home Assistant für jede konfigurierte Heizung.",
+      "name": "Energieverlauf importieren",
+      "description": "Importiert den bisherigen stündlichen Energieverbrauch aller Heizgeräte und Leistungsmonitore in die Home Assistant-Statistiken (das Energie-Dashboard). Der Fortschritt wird gespeichert: Wenn der Import abbricht, führe ihn erneut aus, um fortzufahren.",
       "fields": {
         "reset_progress": {
           "name": "Fortschritt zurücksetzen",
-          "description": "Löschen Sie den gespeicherten Fortschritt und importieren Sie den Verlauf von Grund auf neu."
+          "description": "Gespeicherten Fortschritt verwerfen und den gesamten Zeitraum neu importieren. Vorhandene Statistiken werden überschrieben, nicht gelöscht."
         },
         "max_history_retrieval": {
-          "name": "Max Geschichte Tage",
-          "description": "Anzahl der Tage des abzurufenden Verlaufs. Setzt die konfigurierte Vorgabe nur für diesen Import außer Kraft."
+          "name": "Maximale Verlaufstage",
+          "description": "Wie viele Tage zurück importiert wird (1 bis 3650, Standard 7). Wenn du schon weniger Tage importiert hast, werden nur die älteren Tage abgerufen."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Funkmitschnitt",
+      "description": "Zeichnet eine Zeit lang jedes Funkpaket auf, das das Gateway oder der nanoCUL empfängt, und speichert es als JSON-Datei im Home Assistant-Konfigurationsordner. Es wird nie gesendet. Bei einem normalen Funk-Eintrag warten Befehle an die Heizgeräte, bis der Mitschnitt endet.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurationseintrags-ID",
+          "description": "Der zu verwendende Konfigurationseintrag des Funk-Gateways oder nanoCUL, normalerweise der Nur-Mithören-Eintrag.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Dauer",
+          "description": "Wie lange aufgezeichnet wird, 10 bis 1800 Sekunden."
+        },
+        "redact": {
+          "name": "Private Daten verbergen",
+          "description": "Ersetzt Netzwerk-IDs und Seriennummern der Heizgeräte in der Datei. Ohne diese Option enthält die Datei deine Netzwerk-ID: Teile sie nur privat."
+        },
+        "note": {
+          "name": "Notiz",
+          "description": "Optionaler Text, der in der Datei gespeichert wird, zum Beispiel welches Heizgerät du verwendet hast.",
+          "example": "Heizung im Wohnzimmer höher gestellt"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Funk-Erkundung",
+      "description": "Hört eine Zeit lang den gesamten Funkverkehr im Frequenzband der Heizgeräte ab, auch Verkehr, den diese Integration nicht versteht, und speichert eine Berichtsdatei im Home Assistant-Konfigurationsordner. Hänge die Datei an ein GitHub-Issue an, um Unterstützung für eine neue Art von Heizgerät anzufragen.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurationseintrags-ID",
+          "description": "Der zu verwendende Konfigurationseintrag des Funk-Gateways oder nanoCUL.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Dauer",
+          "description": "Wie lange mitgehört wird. Heizgeräte senden am meisten, wenn sie zu heizen beginnen oder aufhören."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Funk-Werksreset",
+      "description": "DESTRUKTIV. Setzt ein Funk-Heizgerät auf Werkseinstellungen zurück. Das Heizgerät verliert alle Einstellungen, seine Uhrzeit, sein Wochenprogramm und seine Funkkopplung und kommuniziert nicht mehr mit Home Assistant. Seine zuletzt bekannten Einstellungen werden vorher gespeichert. Um das Heizgerät wieder zu nutzen, drücke \"Neue Heizgeräte koppeln\" am Gateway-Gerät und versetze das Heizgerät in den Kopplungsmodus. Die gespeicherten Einstellungen kommen zurück, sobald es wiedererkannt wird. Manche älteren Heizgeräte lassen sich nicht per Funk zurücksetzen: Setze sie von Hand zurück (siehe Anleitung des Heizgeräts).",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurationseintrags-ID",
+          "description": "Der zu verwendende Konfigurationseintrag des Funk-Gateways oder nanoCUL.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Heizgerätnummer",
+          "description": "Die Funknummer des Heizgeräts (die Zahl in \"Heizgerät 6\")."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Funk: Heizgeräte ins eigene Netz umziehen",
+      "description": "Zieht alle Heizgeräte eines Funk-Eintrags in das eigene Funknetz dieser Installation um. Jedes Heizgerät wird zuerst zurückgesetzt (seine Einstellungen werden gespeichert), dann versetzt du die Heizgeräte nacheinander in den Kopplungsmodus. Die Heizgeräte bekommen neue Nummern ab 2 aufwärts, und ihre Einstellungen werden wiederhergestellt. Manche älteren Heizgeräte lassen sich nicht per Funk zurücksetzen und können daher nicht auf diese Weise umgezogen werden. Während des Vorgangs ist die Steuerung der Heizgeräte pausiert.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurationseintrags-ID",
+          "description": "Der zu verwendende Konfigurationseintrag des Funk-Gateways oder nanoCUL.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Wartezeit",
+          "description": "Wie lange auf das Drücken der Kopplungstasten der Heizgeräte gewartet wird."
         }
       }
     }

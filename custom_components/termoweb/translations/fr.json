@@ -1,188 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Comment vos radiateurs sont-ils connectés ?",
+        "description": "Choisissez le compte cloud si vous utilisez l’application TermoWeb, Ducaheat ou Tevolve. Pour piloter les radiateurs en local, sans le cloud, le plus simple est une clé USB nanoCUL branchée sur cet ordinateur Home Assistant (sans soudure). La passerelle radio ESP32 est destinée aux utilisateurs avancés : elle doit être assemblée et soudée.",
+        "menu_options": {
+          "cloud": "Compte cloud (application TermoWeb, Ducaheat ou Tevolve)",
+          "nanocul": "Radio locale : clé USB nanoCUL (le plus simple, sans soudure)",
+          "radio": "Passerelle radio locale : ESP32 + CC1101 (avancé, soudure nécessaire)"
+        }
+      },
       "cloud": {
-        "title": "Se connecter aux chauffages de la famille TermoWeb",
-        "description": "Version : {version}\n\nChoisissez votre marque TermoWeb ou Ducaheat et entrez vos identifiants de compte.",
+        "title": "Se connecter aux radiateurs de la famille TermoWeb",
+        "description": "Version : {version}\n\nChoisissez votre marque TermoWeb, Ducaheat ou Tevolve et saisissez les identifiants de votre compte. Tevolve utilise le serveur Ducaheat.",
         "data": {
           "brand": "Marque",
-          "username": "Courriel",
+          "username": "E-mail",
+          "password": "Mot de passe"
+        }
+      },
+      "radio": {
+        "title": "Se connecter à la passerelle radio",
+        "description": "Home Assistant trouve normalement la passerelle radio ESP32 tout seul : cherchez-la sous **Découvert** sur la page Appareils et services. N’utilisez ce formulaire que si elle n’y apparaît pas. Saisissez l’adresse IP de votre passerelle. À l’étape suivante, vous choisissez : ajouter la passerelle et la laisser trouver vos radiateurs, ou appairer de nouveaux radiateurs.",
+        "data": {
+          "host": "Adresse IP de la passerelle"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Paramètres avancés",
+            "description": "Ne modifiez pas ces valeurs, sauf si vous avez changé le firmware de la passerelle.",
+            "data": {
+              "port": "Port"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Passerelle radio trouvée",
+        "description": "Une passerelle radio TermoWeb a été trouvée à l’adresse {host}. La configurer ?\n\nÀ l’étape suivante, vous choisissez : ajouter la passerelle (elle trouve et appaire vos radiateurs) ou seulement écouter."
+      },
+      "radio_method": {
+        "title": "Ajouter votre passerelle",
+        "description": "Choisissez « Ajouter la passerelle » pour piloter vos radiateurs. La configuration se termine aussitôt. Ensuite :\n\n- Les radiateurs qui fonctionnent déjà avec une passerelle ou l’application TermoWeb sont trouvés automatiquement, généralement en quelques minutes. Les radiateurs émettent quand ils commencent à chauffer : augmenter la température d’un radiateur aide donc.\n- Radiateurs neufs ou réinitialisés : mettez chaque radiateur en mode appairage dans les 30 minutes. La notice du radiateur indique sur quels boutons appuyer. Un radiateur à la fois. Plus tard, appuyez d’abord sur **Appairer de nouveaux radiateurs** sur l’appareil de la passerelle.\n\nVous recevez une notification pour chaque radiateur ajouté.\n\nChoisissez « Écoute seule » pour enregistrer le trafic radio à titre de test, à côté d’une passerelle TermoWeb toujours en service. Dans ce mode, l’intégration n’émet jamais et n’ajoute aucun radiateur.",
+        "menu_options": {
+          "radio_discover": "Ajouter la passerelle",
+          "radio_monitor": "Écoute seule (enregistre le trafic radio, n’émet jamais)"
+        }
+      },
+      "radio_rescan": { "title": "Recherche de vos radiateurs" },
+      "reconfigure_radio": {
+        "title": "Modifier la passerelle radio",
+        "description": "Modifiez l’adresse de la passerelle. Cochez « Rechercher à nouveau les radiateurs » si vous avez ajouté ou retiré un radiateur.",
+        "data": {
+          "host": "Adresse IP de la passerelle",
+          "port": "Port",
+          "rescan": "Rechercher à nouveau les radiateurs"
+        }
+      },
+      "nanocul": {
+        "title": "Se connecter à la clé USB nanoCUL",
+        "description": "Choisissez le port de votre clé nanoCUL. Si Home Assistant a reconnu la clé, elle est déjà sélectionnée : appuyez simplement sur Valider. À l’étape suivante, vous choisissez : ajouter la passerelle et la laisser trouver vos radiateurs, ou appairer de nouveaux radiateurs.",
+        "data": {
+          "device": "Port USB"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Saisir le port du nanoCUL",
+        "description": "Saisissez le chemin du port, par exemple /dev/serial/by-id/usb-..., ou une adresse réseau comme socket://192.0.2.10:2323 pour une clé partagée sur le réseau.",
+        "data": {
+          "device": "Chemin du port ou URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Modifier le port du nanoCUL",
+        "description": "Modifiez le chemin du port ou l’URL de la clé. Cochez « Rechercher à nouveau les radiateurs » si vous avez ajouté ou retiré un radiateur.",
+        "data": {
+          "device": "Chemin du port ou URL",
+          "rescan": "Rechercher à nouveau les radiateurs"
+        }
+      },
+      "reconfigure": {
+        "title": "Modifier les paramètres du compte",
+        "description": "Version : {version}\n\nSaisissez le nouveau mot de passe de ce compte. Vous ne pouvez pas passer à un autre compte ici : ajoutez plutôt une nouvelle entrée.",
+        "data": {
+          "brand": "Marque",
+          "username": "E-mail",
+          "password": "Mot de passe"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Se reconnecter",
+        "description": "{brand} n’a pas accepté le mot de passe enregistré pour {username}. Saisissez le mot de passe actuel.",
+        "data": {
           "password": "Mot de passe"
         }
       }
     },
     "error": {
-      "invalid_auth": "Nom d'utilisateur ou mot de passe (ou clé client) invalide.",
-      "cannot_connect": "Impossible de se connecter à TermoWeb - erreur de réseau/DNS/SSL.",
-      "rate_limited": "Taux temporairement limité par l'API. Réessayez plus tard.",
-      "unknown": "Erreur inconnue"
+      "invalid_auth": "Nom d’utilisateur ou mot de passe (ou clé client) incorrect.",
+      "cannot_connect": "Impossible de se connecter à TermoWeb : erreur réseau/DNS/SSL.",
+      "rate_limited": "Trop de requêtes : l’API limite temporairement l’accès. Réessayez plus tard.",
+      "unknown": "Erreur inconnue",
+      "cannot_connect_radio": "Impossible de se connecter à la passerelle radio. Vérifiez l’adresse IP et le port, et que la passerelle est allumée.",
+      "no_gateway_mac": "La passerelle radio n’a pas indiqué son adresse MAC. Mettez à jour le firmware de la passerelle.",
+      "no_heaters": "Aucun radiateur n’a répondu. Rapprochez la passerelle des radiateurs et réessayez.",
+      "cannot_connect_nanocul": "Impossible d’ouvrir la clé nanoCUL. Vérifiez qu’elle est branchée, que le port est le bon et qu’elle utilise le firmware termoweb_rx.",
+      "nanocul_radio_missing": "La clé répond, mais son module radio n’est pas connecté. Vérifiez le câblage.",
+      "gateway_radio_missing": "La passerelle répond, mais son module radio n’est pas connecté. Vérifiez le câblage."
+    },
+    "abort": {
+      "already_configured": "Cette passerelle est déjà configurée.",
+      "reconfigure_successful": "Les paramètres ont été enregistrés.",
+      "monitor_reconfigure": "Une entrée en écoute seule ne peut pas être modifiée. Supprimez-la et ajoutez-la de nouveau.",
+      "unique_id_mismatch": "Il s’agit d’un autre compte ou d’un autre appareil. Pour l’utiliser, ajoutez plutôt une nouvelle entrée.",
+      "reauth_successful": "Le nouveau mot de passe a été enregistré.",
+      "cannot_connect_radio": "Impossible de se connecter à la passerelle radio. Vérifiez que la passerelle est allumée et connectée à votre réseau.",
+      "no_gateway_mac": "La passerelle radio n’a pas indiqué son adresse MAC. Mettez à jour le firmware de la passerelle.",
+      "gateway_radio_missing": "La passerelle répond, mais son module radio n’est pas connecté. Vérifiez le câblage.",
+      "not_ipv4_address": "La passerelle radio n’a annoncé qu’une adresse IPv6. Ajoutez-la manuellement avec son adresse IPv4.",
+      "nanocul_firmware_too_old": "Le firmware de cette clé nanoCUL est trop ancien. Installez le firmware termoweb_rx le plus récent sur la clé (voir le guide nanoCUL), puis réessayez."
+    },
+    "progress": {
+      "radio_rescan": "Vérification de chaque radiateur de votre réseau radio. Cela prend jusqu’à une minute."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Options de TermoWeb"
+      "rehome": {
+        "title": "Déplacer les radiateurs vers le réseau propre à cette installation",
+        "description": "Utilisez cette option si vos radiateurs utilisent encore le réseau radio d’une ancienne passerelle TermoWeb. Radiateurs : {heaters}.\n\nCe qui se passe :\n1. Chaque radiateur est réinitialisé aux paramètres d’usine. Home Assistant enregistre d’abord ses paramètres.\n2. Vous mettez les radiateurs en mode appairage, un par un. La notice du radiateur indique sur quels boutons appuyer. Attendez environ 10 secondes entre deux radiateurs. Vous avez 5 minutes.\n3. Les radiateurs reçoivent de nouveaux numéros, à partir de 2. Leurs ID d’entité changent. Les noms des radiateurs restent les mêmes lorsque Home Assistant reconnaît le radiateur.\n4. Home Assistant rend à chaque radiateur ses paramètres : mode, températures des préréglages, température manuelle et programme hebdomadaire.\n\nLe pilotage des radiateurs est suspendu pendant l’opération. Certains radiateurs anciens ne peuvent pas être réinitialisés par radio et ne peuvent donc pas être déplacés de cette façon. Appuyez sur **Valider** pour commencer, puis mettez le premier radiateur en mode appairage environ 10 secondes plus tard."
+      },
+      "rehome_run": { "title": "Déplacement de vos radiateurs" },
+      "rehome_done": {
+        "title": "Déplacement terminé",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "L’intégration n’est pas en cours d’exécution. Démarrez-la d’abord, puis réessayez."
+    },
+    "progress": {
+      "rehome": "Réinitialisation des radiateurs, puis attente des radiateurs en mode appairage. Mettez maintenant un radiateur en mode appairage, puis le suivant. L’opération s’arrête 1 minute après l’appairage du dernier radiateur, ou au bout de 5 minutes."
     }
   },
   "device": {
     "heater": {
       "name": "Radiateur {addr}"
     },
+    "accumulator": {
+      "name": "Accumulateur {addr}"
+    },
     "thermostat": {
       "name": "Thermostat {addr}"
+    },
+    "power_monitor": {
+      "name": "Compteur d’énergie {addr}"
     },
     "node": {
       "name": "Nœud {addr}"
     },
-    "power_monitor": {
-      "name": "Surveillance d’énergie {addr}"
+    "site": {
+      "name": "Maison"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Passerelle en ligne"
+      "gateway_online": { "name": "Passerelle en ligne" },
+      "pairing_open": {
+        "name": "Appairage ouvert",
+        "state_attributes": { "ends_at": { "name": "Se termine à" } }
       },
-      "boost_active": {
-        "name": "Boost actif"
-      }
+      "boost_active": { "name": "Boost actif" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Forcer le rafraîchissement"
-      },
-      "accumulator_boost_start": {
-        "name": "Démarrer l'impulsion"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Annuler le coup de pouce"
-      }
+      "force_refresh": { "name": "Forcer l’actualisation" },
+      "pair_new_heaters": { "name": "Appairer de nouveaux radiateurs" },
+      "accumulator_boost_start": { "name": "Démarrer le boost" },
+      "accumulator_boost_cancel": { "name": "Annuler le boost" },
+      "flash_display": { "name": "Faire clignoter l’écran" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Durée du boost"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Température de suralimentation"
-      }
+      "accumulator_boost_duration": { "name": "Durée du boost" },
+      "accumulator_boost_temperature": { "name": "Température du boost" },
+      "heater_priority": { "name": "Priorité" },
+      "installation_power_limit": { "name": "Limite de puissance" },
+      "temperature_offset": { "name": "Décalage de température" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Température"
+      "heater_temperature": { "name": "Température" },
+      "heater_energy_total": { "name": "Énergie" },
+      "heater_power": { "name": "Puissance" },
+      "radio_address": { "name": "Adresse radio" },
+      "power_monitor_energy": { "name": "Énergie" },
+      "power_monitor_power": { "name": "Puissance" },
+      "installation_total_energy": { "name": "Énergie totale" },
+      "frames_heard": { "name": "Trames reçues" },
+      "boost_minutes_remaining": { "name": "Minutes de boost restantes" },
+      "boost_end": { "name": "Fin du boost" },
+      "accumulator_charging": { "name": "En charge" },
+      "accumulator_current_charge": { "name": "Charge actuelle" },
+      "accumulator_target_charge": { "name": "Charge cible" },
+      "installation_info": { "name": "Emplacement" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Aucun",
+              "temporary_override": "Dérogation temporaire",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Sécurité enfants" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "Mode EASY" },
+      "open_window_detection": { "name": "Détection de fenêtre ouverte" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Mode de régulation",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Hystérésis 0,25 °C",
+          "hysteresis_0_35": "Hystérésis 0,35 °C",
+          "hysteresis_0_5": "Hystérésis 0,5 °C",
+          "hysteresis_0_75": "Hystérésis 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "L'énergie"
-      },
-      "heater_power": {
-        "name": "Puissance"
-      },
-      "power_monitor_energy": {
-        "name": "L'énergie"
-      },
-      "power_monitor_power": {
-        "name": "Puissance"
-      },
-      "installation_total_energy": {
-        "name": "Énergie totale"
-      },
-      "boost_minutes_remaining": {
-        "name": "Boost minutes restantes"
-      },
-      "boost_end": {
-        "name": "Fin de course"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Unité de température du panneau",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Configurer le préréglage de l'augmentation de l'accumulateur",
-      "description": "Mise à jour de la durée et/ou de la température de boost par défaut pour un accumulateur TermoWeb. Les minutes doivent être comprises entre 60 et 600 par incréments de 60 minutes ; omettre un champ pour conserver la valeur existante.",
+      "name": "Configurer le boost par défaut de l’accumulateur",
+      "description": "Modifie la durée et/ou la température de boost par défaut d’un accumulateur TermoWeb. Les minutes doivent être comprises entre 60 et 600, par paliers de 60 minutes ; laissez un champ vide pour conserver la valeur actuelle.",
       "fields": {
         "minutes": {
-          "name": "Durée de l'impulsion par défaut",
-          "description": "Nombre de minutes pendant lesquelles l'impulsion doit fonctionner lorsqu'il n'y a pas de commande prioritaire (60-600, étape 60).",
+          "name": "Durée de boost par défaut",
+          "description": "Nombre de minutes de boost quand aucune autre durée n’est indiquée (60–600, par paliers de 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Température de suralimentation",
-          "description": "Point de consigne de suralimentation optionnel à appliquer pendant la session de suralimentation (°C ou °F).",
+          "name": "Température du boost",
+          "description": "Consigne facultative appliquée pendant le boost (°C ou °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Démarrage de l'augmentation de l'accumulateur",
-      "description": "Déclenche un boost immédiat sur un accumulateur TermoWeb. Indiquez une durée pour remplacer la valeur par défaut (60-600 minutes par incréments de 60 minutes), ou ne l'indiquez pas pour utiliser le préréglage stocké.",
+      "name": "Démarrer le boost",
+      "description": "Démarre immédiatement un boost sur un accumulateur TermoWeb, ou sur un radiateur radio qui dispose du boost. Accumulateur : indiquez une durée (60–600 minutes, par paliers de 60), ou laissez-la vide pour utiliser la valeur par défaut enregistrée. Radiateur radio : laissez la durée vide ; le radiateur utilise sa propre durée de boost.",
       "fields": {
         "minutes": {
           "name": "Durée du boost",
-          "description": "Durée de la session de stimulation en minutes (60-600, étape 60). En option.",
+          "description": "Durée du boost en minutes (60–600, par paliers de 60). Facultatif.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Annuler le renforcement de l'accumulateur",
-      "description": "Annuler la session de boost active sur un accumulateur TermoWeb."
+      "name": "Annuler le boost",
+      "description": "Arrête le boost d’un accumulateur TermoWeb ou d’un radiateur radio."
     },
     "set_schedule": {
-      "name": "Établir un programme hebdomadaire",
-      "description": "Définir le programme hebdomadaire 7×24 d'un chauffage TermoWeb. Le programme est une liste de 168 entiers, où chaque valeur correspond à une heure de la semaine à partir du lundi 00:00. Utilisez 0 pour le préréglage froid, 1 pour le préréglage nuit et 2 pour le préréglage jour.",
+      "name": "Définir le programme hebdomadaire",
+      "description": "Définit le programme hebdomadaire 7×24 d’un radiateur TermoWeb. Le programme est une liste de 168 entiers, chaque valeur correspondant à une heure de la semaine à partir du lundi 00:00. Utilisez 0 pour le préréglage froid, 1 pour le préréglage nuit et 2 pour le préréglage jour.",
       "fields": {
         "prog": {
           "name": "Programme",
-          "description": "Une liste de 168 entiers (0, 1 ou 2) représentant l'horaire hebdomadaire de l'appareil de chauffage. L'indice 0 correspond au lundi 00:00, l'indice 1 au lundi 01:00, et ainsi de suite.",
+          "description": "Une liste de 168 entiers (0, 1 ou 2) représentant le programme hebdomadaire du radiateur. L’indice 0 correspond au lundi 00:00, l’indice 1 au lundi 01:00, et ainsi de suite.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Régler les températures préréglées",
-      "description": "Définir les températures de consigne du froid, de la nuit et du jour pour un appareil de chauffage TermoWeb. Vous pouvez soit fournir les trois températures sous forme de liste unique (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Définir les températures des préréglages",
+      "description": "Définit les températures des préréglages froid, nuit et jour d’un radiateur TermoWeb. Vous pouvez soit indiquer les trois températures dans une seule liste (``ptemp``), soit les indiquer séparément (``cold``, ``night`` et ``day``). Les préréglages laissés vides conservent leur valeur actuelle.",
       "fields": {
         "ptemp": {
-          "name": "Températures préréglées",
-          "description": "Une liste de trois températures [froid, nuit, jour] dans les mêmes unités que le chauffage (°C ou °F). Si elle est fournie, cette liste prévaut sur les valeurs individuelles de froid, de nuit et de jour.",
+          "name": "Températures des préréglages",
+          "description": "Une liste de trois températures [froid, nuit, jour] dans la même unité que le radiateur (°C ou °F). Si elle est indiquée, elle remplace les valeurs individuelles froid, nuit et jour.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Préréglage du froid",
-          "description": "Température de la présélection froide (°C ou °F).",
+          "name": "Préréglage froid",
+          "description": "Température du préréglage froid (°C ou °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Préréglage de nuit",
-          "description": "Température de la présélection de nuit (°C ou °F).",
+          "name": "Préréglage nuit",
+          "description": "Température du préréglage nuit (°C ou °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Préréglage du jour",
-          "description": "Température du jour préréglée (°C ou °F).",
+          "name": "Préréglage jour",
+          "description": "Température du préréglage jour (°C ou °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Historique des importations d'énergie",
-      "description": "Importer les compteurs d'énergie horaires des chauffages TermoWeb jusqu'à un an auparavant dans les statistiques de Home Assistant pour chaque chauffage configuré.",
+      "name": "Importer l’historique d’énergie",
+      "description": "Importe la consommation d’énergie horaire passée de chaque radiateur et compteur d’énergie dans les statistiques de Home Assistant (le tableau de bord Énergie). La progression est enregistrée : si l’import s’arrête, relancez-le pour continuer.",
       "fields": {
         "reset_progress": {
           "name": "Réinitialiser la progression",
-          "description": "Effacer les progrès enregistrés et réimporter l'historique à partir de zéro."
+          "description": "Oublie la progression enregistrée et importe de nouveau toute la période. Les statistiques existantes sont écrasées, pas supprimées."
         },
         "max_history_retrieval": {
-          "name": "Nombre maximal de jours d'antériorité",
-          "description": "Nombre de jours d'historique à récupérer. Remplace la valeur par défaut configurée pour cette importation uniquement."
+          "name": "Nombre maximal de jours d’historique",
+          "description": "Nombre de jours à importer en remontant dans le temps (1 à 3650, 7 par défaut). Si vous avez déjà importé moins de jours, seuls les jours plus anciens sont récupérés."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Capture radio",
+      "description": "Enregistre pendant un certain temps chaque trame radio captée par la passerelle ou le nanoCUL et la sauvegarde dans un fichier JSON dans le dossier de configuration de Home Assistant. N’émet jamais. Sur une entrée radio normale, les commandes des radiateurs attendent la fin de la capture.",
+      "fields": {
+        "entry_id": {
+          "name": "ID de l’entrée de configuration",
+          "description": "L’entrée de configuration de la passerelle radio ou du nanoCUL à utiliser, normalement celle en écoute seule.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Durée",
+          "description": "Durée de l’enregistrement, de 10 à 1800 secondes."
+        },
+        "redact": {
+          "name": "Masquer les données privées",
+          "description": "Remplace les ID de réseau et les numéros de série des radiateurs dans le fichier. Sans cette option, le fichier contient l’ID de votre réseau : ne le partagez qu’en privé."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Texte facultatif enregistré dans le fichier, par exemple le radiateur utilisé.",
+          "example": "radiateur du salon augmenté"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Relevé radio",
+      "description": "Écoute pendant un certain temps tout le trafic radio sur la bande des radiateurs, y compris celui que cette intégration ne comprend pas, et enregistre un fichier de rapport dans le dossier de configuration de Home Assistant. Joignez ce fichier à un ticket GitHub pour demander la prise en charge d’un nouveau type de radiateur.",
+      "fields": {
+        "entry_id": {
+          "name": "ID de l’entrée de configuration",
+          "description": "L’entrée de configuration de la passerelle radio ou du nanoCUL à utiliser.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Durée",
+          "description": "Durée d’écoute. Les radiateurs émettent surtout quand ils commencent ou arrêtent de chauffer."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Réinitialisation d’usine par radio",
+      "description": "DESTRUCTIF. Réinitialise un radiateur radio à ses paramètres d’usine. Le radiateur perd tous ses paramètres, son horloge, son programme hebdomadaire et son appairage radio, et ne communique plus avec Home Assistant. Ses derniers paramètres connus sont d’abord enregistrés. Pour réutiliser le radiateur, appuyez sur « Appairer de nouveaux radiateurs » sur l’appareil de la passerelle et mettez le radiateur en mode appairage. Ses paramètres enregistrés reviennent lorsqu’il est reconnu. Certains radiateurs anciens ne peuvent pas être réinitialisés par radio : réinitialisez-les à la main (voir la notice du radiateur).",
+      "fields": {
+        "entry_id": {
+          "name": "ID de l’entrée de configuration",
+          "description": "L’entrée de configuration de la passerelle radio ou du nanoCUL à utiliser.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Numéro du radiateur",
+          "description": "Le numéro radio du radiateur (le numéro dans « Radiateur 6 »)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radio : déplacer les radiateurs vers le réseau propre",
+      "description": "Déplace tous les radiateurs d’une entrée radio vers le réseau radio propre à cette installation. Chaque radiateur est d’abord réinitialisé (ses paramètres sont enregistrés), puis vous mettez les radiateurs en mode appairage un par un. Les radiateurs reçoivent de nouveaux numéros à partir de 2 et leurs paramètres sont restaurés. Certains radiateurs anciens ne peuvent pas être réinitialisés par radio et ne peuvent donc pas être déplacés de cette façon. Le pilotage des radiateurs est suspendu pendant l’opération.",
+      "fields": {
+        "entry_id": {
+          "name": "ID de l’entrée de configuration",
+          "description": "L’entrée de configuration de la passerelle radio ou du nanoCUL à utiliser.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Temps d’attente",
+          "description": "Durée d’attente de l’appui sur les boutons d’appairage des radiateurs."
         }
       }
     }

@@ -1,174 +1,396 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
+      "user": {
+        "title": "Kako so povezani vaši grelniki?",
+        "description": "Izberite račun v oblaku, če uporabljate aplikacijo TermoWeb, Ducaheat ali Tevolve. Če želite grelnike upravljati lokalno brez oblaka, je najlažje z USB-ključkom nanoCUL, priključenim v ta računalnik s Home Assistant (brez spajkanja). Radijski prehod ESP32 je za napredne uporabnike: treba ga je sestaviti in spajkati.",
+        "menu_options": {
+          "cloud": "Račun v oblaku (aplikacija TermoWeb, Ducaheat ali Tevolve)",
+          "nanocul": "Lokalni radio: USB-ključek nanoCUL (najlažje, brez spajkanja)",
+          "radio": "Lokalni radijski prehod: ESP32 + CC1101 (napredno, potrebno spajkanje)"
+        }
+      },
       "cloud": {
-        "title": "Povežite se z družinskimi grelniki TermoWeb",
-        "description": "Različica: {version}\n\nIzberite blagovno znamko TermoWeb ali Ducaheat in vnesite poverilnice za račun.",
+        "title": "Povezava z grelniki družine TermoWeb",
+        "description": "Različica: {version}\n\nIzberite blagovno znamko TermoWeb, Ducaheat ali Tevolve in vnesite podatke za prijavo v račun. Tevolve uporablja strežnik Ducaheat.",
         "data": {
           "brand": "Blagovna znamka",
           "username": "E-pošta",
           "password": "Geslo"
         }
+      },
+      "radio": {
+        "title": "Povezava z radijskim prehodom",
+        "description": "Home Assistant radijski prehod ESP32 običajno najde sam: poiščite ga pod **Odkrito** na strani Naprave in storitve. Ta obrazec uporabite le, če se tam ne prikaže. Vnesite IP-naslov prehoda. V naslednjem koraku izberete: dodajte prehod in naj sam najde grelnike, ali seznanite nove grelnike.",
+        "data": {
+          "host": "IP-naslov prehoda"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Napredne nastavitve",
+            "description": "Pustite jih nespremenjene, razen če ste spremenili vdelano programsko opremo prehoda.",
+            "data": {
+              "port": "Vrata"
+            }
+          }
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Najden radijski prehod",
+        "description": "Na naslovu {host} je bil najden radijski prehod TermoWeb. Ga želite nastaviti?\n\nV naslednjem koraku izberete: dodajte prehod (najde in seznani vaše grelnike) ali samo poslušajte."
+      },
+      "radio_method": {
+        "title": "Dodajte prehod",
+        "description": "Izberite »Dodaj prehod«, če želite upravljati grelnike. Nastavitev se konča takoj. Nato:\n\n- Grelniki, ki že delujejo s prehodom ali aplikacijo TermoWeb, se najdejo sami, običajno v nekaj minutah. Grelniki oddajajo, ko začnejo greti, zato pomaga, če enemu grelniku zvišate temperaturo.\n- Novi ali ponastavljeni grelniki: v 30 minutah preklopite vsak grelnik v način seznanjanja. Katere gumbe pritisniti, piše v navodilih grelnika. Vedno le en grelnik naenkrat. Pozneje najprej pritisnite **Seznani nove grelnike** na napravi prehoda.\n\nZa vsak dodan grelnik prejmete obvestilo.\n\nIzberite »Samo poslušaj«, če želite za preizkus posneti radijski promet ob prehodu TermoWeb, ki še deluje. Integracija v tem načinu nikoli ne oddaja in ne doda nobenega grelnika.",
+        "menu_options": {
+          "radio_discover": "Dodaj prehod",
+          "radio_monitor": "Samo poslušaj (snemaj radijski promet, nikoli ne oddajaj)"
+        }
+      },
+      "radio_rescan": { "title": "Iskanje vaših grelnikov" },
+      "reconfigure_radio": {
+        "title": "Spremeni radijski prehod",
+        "description": "Spremenite naslov prehoda. Če ste dodali ali odstranili grelnik, označite »Znova poišči grelnike«.",
+        "data": {
+          "host": "IP-naslov prehoda",
+          "port": "Vrata",
+          "rescan": "Znova poišči grelnike"
+        }
+      },
+      "nanocul": {
+        "title": "Povezava z USB-ključkom nanoCUL",
+        "description": "Izberite vrata ključka nanoCUL. Če je Home Assistant ključek prepoznal, so vrata že izbrana: samo pritisnite Pošlji. V naslednjem koraku izberete: dodajte prehod in naj sam najde grelnike, ali seznanite nove grelnike.",
+        "data": {
+          "device": "USB-vrata"
+        }
+      },
+      "nanocul_manual": {
+        "title": "Vnesite vrata nanoCUL",
+        "description": "Vnesite pot do vrat, na primer /dev/serial/by-id/usb-..., ali omrežni naslov, na primer socket://192.0.2.10:2323, za ključek, ki je v skupni rabi prek omrežja.",
+        "data": {
+          "device": "Pot do vrat ali URL"
+        }
+      },
+      "reconfigure_nanocul": {
+        "title": "Spremeni vrata nanoCUL",
+        "description": "Spremenite pot do vrat ali URL ključka. Če ste dodali ali odstranili grelnik, označite »Znova poišči grelnike«.",
+        "data": {
+          "device": "Pot do vrat ali URL",
+          "rescan": "Znova poišči grelnike"
+        }
+      },
+      "reconfigure": {
+        "title": "Spremeni nastavitve računa",
+        "description": "Različica: {version}\n\nVnesite novo geslo za ta račun. Tukaj ne morete preklopiti na drug račun: za to dodajte nov vnos.",
+        "data": {
+          "brand": "Blagovna znamka",
+          "username": "E-pošta",
+          "password": "Geslo"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Znova se prijavite",
+        "description": "{brand} ni sprejel shranjenega gesla za {username}. Vnesite trenutno geslo.",
+        "data": {
+          "password": "Geslo"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Nepravilno uporabniško ime ali geslo (ali ključ odjemalca).",
-      "cannot_connect": "Ne morem se povezati s TermoWebom - napaka omrežja/DNS/SSL.",
-      "rate_limited": "Začasno omejena stopnja z API. Poskusite znova pozneje.",
-      "unknown": "Neznana napaka"
+      "invalid_auth": "Napačno uporabniško ime ali geslo (ali ključ odjemalca).",
+      "cannot_connect": "Povezava s TermoWeb ni mogoča – napaka omrežja/DNS/SSL.",
+      "rate_limited": "API je začasno omejil število zahtev. Poskusite znova pozneje.",
+      "unknown": "Neznana napaka",
+      "cannot_connect_radio": "Povezava z radijskim prehodom ni mogoča. Preverite IP-naslov in vrata ter ali je prehod vklopljen.",
+      "no_gateway_mac": "Radijski prehod ni sporočil svojega naslova MAC. Posodobite vdelano programsko opremo prehoda.",
+      "no_heaters": "Noben grelnik se ni odzval. Premaknite prehod bližje grelnikom in poskusite znova.",
+      "cannot_connect_nanocul": "Ključka nanoCUL ni mogoče odpreti. Preverite, ali je priključen, ali so vrata pravilna in ali na njem teče vdelana programska oprema termoweb_rx.",
+      "nanocul_radio_missing": "Ključek se odziva, vendar njegov radijski modul ni povezan. Preverite ožičenje.",
+      "gateway_radio_missing": "Prehod se odziva, vendar njegov radijski modul ni povezan. Preverite ožičenje."
+    },
+    "abort": {
+      "already_configured": "Ta prehod je že nastavljen.",
+      "reconfigure_successful": "Nastavitve so shranjene.",
+      "monitor_reconfigure": "Vnosa samo za poslušanje ni mogoče spremeniti. Izbrišite ga in ga dodajte znova.",
+      "unique_id_mismatch": "To je drug račun ali naprava. Če ga želite uporabiti, raje dodajte nov vnos.",
+      "reauth_successful": "Novo geslo je shranjeno.",
+      "cannot_connect_radio": "Povezava z radijskim prehodom ni mogoča. Preverite, ali je prehod vklopljen in povezan v vaše omrežje.",
+      "no_gateway_mac": "Radijski prehod ni sporočil svojega naslova MAC. Posodobite vdelano programsko opremo prehoda.",
+      "gateway_radio_missing": "Prehod se odziva, vendar njegov radijski modul ni povezan. Preverite ožičenje.",
+      "not_ipv4_address": "Radijski prehod je sporočil le naslov IPv6. Dodajte ga ročno z njegovim naslovom IPv4.",
+      "nanocul_firmware_too_old": "Vdelana programska oprema na tem ključku nanoCUL je prestara. Na ključek namestite najnovejšo programsko opremo termoweb_rx (glejte navodila za nanoCUL) in poskusite znova."
+    },
+    "progress": {
+      "radio_rescan": "Preverjanje vseh grelnikov v vašem radijskem omrežju. To traja največ minuto."
     }
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Možnosti TermoWeb"
+      "rehome": {
+        "title": "Premakni grelnike v lastno omrežje te namestitve",
+        "description": "To uporabite, če vaši grelniki še vedno uporabljajo radijsko omrežje starega prehoda TermoWeb. Grelniki: {heaters}.\n\nKaj se zgodi:\n1. Vsak grelnik se ponastavi na tovarniške nastavitve. Home Assistant prej shrani njegove nastavitve.\n2. Grelnike enega za drugim preklopite v način seznanjanja. Katere gumbe pritisniti, piše v navodilih grelnika. Med grelniki počakajte približno 10 sekund. Na voljo imate 5 minut.\n3. Grelniki dobijo nove številke, od 2 naprej. Njihovi ID-ji entitet se spremenijo. Imena grelnikov ostanejo enaka, ko Home Assistant grelnik prepozna.\n4. Home Assistant vsakemu grelniku vrne njegove nastavitve: način, temperature prednastavitev, ročno temperaturo in tedenski program.\n\nMed tem je upravljanje grelnikov začasno ustavljeno. Nekaterih starejših grelnikov ni mogoče ponastaviti prek radia, zato jih na ta način ni mogoče premakniti. Pritisnite **Pošlji** za začetek, nato po približno 10 sekundah preklopite prvi grelnik v način seznanjanja."
+      },
+      "rehome_run": { "title": "Premikanje vaših grelnikov" },
+      "rehome_done": {
+        "title": "Premik končan",
+        "description": "{summary}"
       }
+    },
+    "abort": {
+      "not_loaded": "Integracija ne teče. Najprej jo zaženite in poskusite znova."
+    },
+    "progress": {
+      "rehome": "Ponastavljanje grelnikov, nato čakanje na grelnike v načinu seznanjanja. Zdaj preklopite en grelnik v način seznanjanja, nato naslednjega. To se ustavi 1 minuto po seznanitvi zadnjega grelnika ali po 5 minutah."
+    }
+  },
+  "device": {
+    "heater": {
+      "name": "Grelnik {addr}"
+    },
+    "accumulator": {
+      "name": "Akumulator {addr}"
+    },
+    "thermostat": {
+      "name": "Termostat {addr}"
+    },
+    "power_monitor": {
+      "name": "Merilnik moči {addr}"
+    },
+    "node": {
+      "name": "Vozlišče {addr}"
+    },
+    "site": {
+      "name": "Dom"
     }
   },
   "entity": {
     "binary_sensor": {
-      "gateway_online": {
-        "name": "Spletni portal Gateway"
+      "gateway_online": { "name": "Prehod povezan" },
+      "pairing_open": {
+        "name": "Seznanjanje odprto",
+        "state_attributes": { "ends_at": { "name": "Konča se ob" } }
       },
-      "boost_active": {
-        "name": "Povečati aktivno"
-      }
+      "boost_active": { "name": "Boost aktiven" }
     },
     "button": {
-      "force_refresh": {
-        "name": "Osvežitev na silo"
-      },
-      "accumulator_boost_start": {
-        "name": "Začetni zagon"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Prekliči spodbudo"
-      }
+      "force_refresh": { "name": "Vsili osvežitev" },
+      "pair_new_heaters": { "name": "Seznani nove grelnike" },
+      "accumulator_boost_start": { "name": "Zaženi boost" },
+      "accumulator_boost_cancel": { "name": "Prekliči boost" },
+      "flash_display": { "name": "Utripni z zaslonom" }
     },
     "number": {
-      "accumulator_boost_duration": {
-        "name": "Trajanje povečanja"
-      },
-      "accumulator_boost_temperature": {
-        "name": "Povečanje temperature"
-      }
+      "accumulator_boost_duration": { "name": "Trajanje boosta" },
+      "accumulator_boost_temperature": { "name": "Temperatura boosta" },
+      "heater_priority": { "name": "Prednost" },
+      "installation_power_limit": { "name": "Omejitev moči" },
+      "temperature_offset": { "name": "Odmik temperature" }
     },
     "sensor": {
-      "heater_temperature": {
-        "name": "Temperatura"
+      "heater_temperature": { "name": "Temperatura" },
+      "heater_energy_total": { "name": "Energija" },
+      "heater_power": { "name": "Moč" },
+      "radio_address": { "name": "Radijski naslov" },
+      "power_monitor_energy": { "name": "Energija" },
+      "power_monitor_power": { "name": "Moč" },
+      "installation_total_energy": { "name": "Skupna energija" },
+      "frames_heard": { "name": "Prejeti okvirji" },
+      "boost_minutes_remaining": { "name": "Preostale minute boosta" },
+      "boost_end": { "name": "Konec boosta" },
+      "accumulator_charging": { "name": "Polnjenje" },
+      "accumulator_current_charge": { "name": "Trenutna napolnjenost" },
+      "accumulator_target_charge": { "name": "Ciljna napolnjenost" },
+      "installation_info": { "name": "Lokacija" }
+    },
+    "climate": {
+      "heater": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Brez",
+              "temporary_override": "Začasna sprememba",
+              "boost": "Boost"
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "child_lock": { "name": "Otroška zaščita" }
+    },
+    "switch": {
+      "runback": { "name": "Runback" },
+      "easy_mode": { "name": "Način EASY" },
+      "open_window_detection": { "name": "Zaznavanje odprtega okna" },
+      "true_radiant": { "name": "True radiant" }
+    },
+    "select": {
+      "control_mode": {
+        "name": "Način regulacije",
+        "state": {
+          "pid": "PID",
+          "hysteresis_0_25": "Histereza 0,25 °C",
+          "hysteresis_0_35": "Histereza 0,35 °C",
+          "hysteresis_0_5": "Histereza 0,5 °C",
+          "hysteresis_0_75": "Histereza 0,75 °C"
+        }
       },
-      "heater_energy_total": {
-        "name": "Energija"
-      },
-      "heater_power": {
-        "name": "Napajanje"
-      },
-      "power_monitor_energy": {
-        "name": "Energija"
-      },
-      "power_monitor_power": {
-        "name": "Napajanje"
-      },
-      "installation_total_energy": {
-        "name": "Skupna energija"
-      },
-      "boost_minutes_remaining": {
-        "name": "Preostanek minut do konca tekme"
-      },
-      "boost_end": {
-        "name": "Konec povečanja"
-      },
-      "accumulator_charging": {
-        "name": "Charging"
-      },
-      "accumulator_current_charge": {
-        "name": "Current charge"
-      },
-      "accumulator_target_charge": {
-        "name": "Target charge"
+      "panel_units": {
+        "name": "Enota temperature na plošči",
+        "state": { "celsius": "°C", "fahrenheit": "°F" }
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Konfiguracija prednastavitve povečanja akumulatorja",
-      "description": "Posodobite privzeto trajanje in/ali temperaturo povečanja za akumulator TermoWeb. Število minut mora biti med 60 in 600 v 60-minutnih korakih; če želite ohraniti obstoječo vrednost, polje izpustite.",
+      "name": "Nastavi prednastavitev boosta akumulatorja",
+      "description": "Posodobi privzeto trajanje in/ali temperaturo boosta za akumulator TermoWeb. Minute morajo biti med 60 in 600 v korakih po 60 minut; če polje izpustite, ostane obstoječa vrednost.",
       "fields": {
         "minutes": {
-          "name": "Privzeto trajanje povečanja",
-          "description": "Število minut, ko naj bi ojačevalnik deloval, če ni zagotovljen noben preklic (60-600, korak 60).",
+          "name": "Privzeto trajanje boosta",
+          "description": "Število minut, koliko naj boost traja, če ni podano drugo trajanje (60–600, korak 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Povečanje temperature",
-          "description": "Izbirna nastavitvena vrednost povečanja, ki se uporabi med sejo povečanja (°C ali °F).",
+          "name": "Temperatura boosta",
+          "description": "Neobvezna ciljna temperatura med boostom (°C ali °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Začetek povečanja akumulatorja",
-      "description": "Sprožite takojšnje povečanje v akumulatorju TermoWeb. Navedite trajanje, da spremenite privzeto nastavitev (60-600 minut v 60-minutnih korakih), ali ga izpustite, da uporabite shranjeno prednastavitev.",
+      "name": "Zaženi boost",
+      "description": "Takoj zažene boost na akumulatorju TermoWeb ali na radijskem grelniku, ki podpira boost. Akumulator: podajte trajanje (60–600 minut, v korakih po 60) ali ga izpustite, da se uporabi shranjena prednastavitev. Radijski grelnik: trajanje izpustite; grelnik uporabi svoj čas boosta.",
       "fields": {
         "minutes": {
-          "name": "Trajanje povečanja",
-          "description": "Trajanje seje povečanja v minutah (60-600, korak 60). Neobvezno.",
+          "name": "Trajanje boosta",
+          "description": "Trajanje boosta v minutah (60–600, korak 60). Neobvezno.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Prekliči povečanje akumulatorja",
-      "description": "Prekličite aktivno sejo povečanja v akumulatorju TermoWeb."
+      "name": "Prekliči boost",
+      "description": "Ustavi boost na akumulatorju TermoWeb ali radijskem grelniku."
     },
     "set_schedule": {
-      "name": "Določite tedenski urnik",
-      "description": "Nastavite tedenski program 7×24 za grelnik TermoWeb. Program je seznam 168 celih števil, pri čemer vsaka vrednost ustreza eni uri v tednu, ki se začne v ponedeljek ob 00:00. Uporabite 0 za hladno prednastavitev, 1 za nočno prednastavitev in 2 za dnevno prednastavitev.",
+      "name": "Nastavi tedenski program",
+      "description": "Nastavi tedenski program 7×24 za grelnik TermoWeb. Program je seznam 168 celih števil, kjer vsaka vrednost ustreza eni uri v tednu, z začetkom v ponedeljek ob 00:00. Uporabite 0 za prednastavitev mraz, 1 za prednastavitev noč in 2 za prednastavitev dan.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "Seznam 168 celih števil (0, 1 ali 2), ki predstavljajo tedenski urnik grelnika. Indeks 0 je ponedeljek 00:00, indeks 1 je ponedeljek 01:00 in tako naprej.",
+          "description": "Seznam 168 celih števil (0, 1 ali 2), ki predstavlja tedenski program grelnika. Indeks 0 je ponedeljek ob 00:00, indeks 1 je ponedeljek ob 01:00 in tako naprej.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Nastavitev prednastavljenih temperatur",
-      "description": "Nastavite hladno, nočno in dnevno prednastavljeno temperaturo za grelnik TermoWeb. Vse tri temperature lahko navedete kot en seznam (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "name": "Nastavi temperature prednastavitev",
+      "description": "Nastavi temperature prednastavitev mraz, noč in dan za grelnik TermoWeb. Vse tri temperature lahko podate kot en seznam (``ptemp``) ali vsako posebej (``cold``, ``night`` in ``day``). Prednastavitve, ki jih izpustite, ohranijo trenutno vrednost.",
       "fields": {
         "ptemp": {
-          "name": "Prednastavljene temperature",
-          "description": "Seznam treh temperatur [mraz, noč, dan] v enakih enotah kot pri grelniku (°C ali °F). Če je ta naveden, bo razveljavil posamezne vrednosti za hladno, nočno in dnevno temperaturo.",
+          "name": "Temperature prednastavitev",
+          "description": "Seznam treh temperatur [mraz, noč, dan] v istih enotah kot grelnik (°C ali °F). Če je podan, prepiše posamezne vrednosti mraz, noč in dan.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Hladna prednastavitev",
-          "description": "Temperatura za hladno prednastavitev (°C ali °F).",
+          "name": "Prednastavitev mraz",
+          "description": "Temperatura za prednastavitev mraz (°C ali °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Nočna prednastavitev",
-          "description": "Temperatura za nočno prednastavitev (°C ali °F).",
+          "name": "Prednastavitev noč",
+          "description": "Temperatura za prednastavitev noč (°C ali °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Prednastavitev dneva",
-          "description": "Prednastavljena temperatura za dan (°C ali °F).",
+          "name": "Prednastavitev dan",
+          "description": "Temperatura za prednastavitev dan (°C ali °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Zgodovina uvoza energije",
-      "description": "Uvozite zgodovinske urne števce porabe energije za grelnike TermoWeb do enega leta nazaj v statistiko Home Assistant za vsak konfiguriran grelnik.",
+      "name": "Uvozi zgodovino energije",
+      "description": "Uvozi preteklo urno porabo energije vseh grelnikov in merilnikov moči v statistiko Home Assistant (nadzorna plošča Energija). Napredek se shranjuje: če se uvoz ustavi, ga zaženite znova in nadaljeval se bo.",
       "fields": {
         "reset_progress": {
-          "name": "Ponastavitev napredka",
-          "description": "Izbrišite shranjeni napredek in ponovno uvozite zgodovino od začetka."
+          "name": "Ponastavi napredek",
+          "description": "Pozabi shranjeni napredek in znova uvozi celotno obdobje. Obstoječa statistika se prepiše, ne izbriše."
         },
         "max_history_retrieval": {
           "name": "Največ dni zgodovine",
-          "description": "Število dni zgodovine, ki jih želite priklicati. Nadomešča nastavljeno privzeto vrednost samo za ta uvoz."
+          "description": "Koliko dni nazaj uvoziti (od 1 do 3650, privzeto 7). Če ste že uvozili manj dni, se pridobijo le starejši dnevi."
+        }
+      }
+    },
+    "radio_capture": {
+      "name": "Snemanje radijskega prometa",
+      "description": "Nekaj časa snema vsak radijski okvir, ki ga prehod ali nanoCUL zazna, in ga shrani kot datoteko JSON v konfiguracijsko mapo Home Assistant. Nikoli ne oddaja. Pri običajnem radijskem vnosu ukazi za grelnike počakajo, da se snemanje konča.",
+      "fields": {
+        "entry_id": {
+          "name": "ID konfiguracijskega vnosa",
+          "description": "Konfiguracijski vnos radijskega prehoda ali nanoCUL, ki naj se uporabi, običajno tisti samo za poslušanje.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Trajanje",
+          "description": "Kako dolgo snemati, od 10 do 1800 sekund."
+        },
+        "redact": {
+          "name": "Skrij zasebne podatke",
+          "description": "V datoteki zamenja ID-je omrežja in serijske številke grelnikov. Brez tega datoteka vsebuje ID vašega omrežja: delite jo le zasebno."
+        },
+        "note": {
+          "name": "Opomba",
+          "description": "Neobvezno besedilo, shranjeno v datoteki, na primer kateri grelnik ste uporabili.",
+          "example": "zvišana temperatura grelnika v dnevni sobi"
+        }
+      }
+    },
+    "radio_survey": {
+      "name": "Pregled radijskega prometa",
+      "description": "Nekaj časa posluša ves radijski promet v frekvenčnem pasu grelnikov, tudi promet, ki ga ta integracija ne razume, in shrani datoteko s poročilom v konfiguracijsko mapo Home Assistant. Datoteko priložite k zadevi (issue) na GitHubu, če želite zaprositi za podporo novi vrsti grelnika.",
+      "fields": {
+        "entry_id": {
+          "name": "ID konfiguracijskega vnosa",
+          "description": "Konfiguracijski vnos radijskega prehoda ali nanoCUL, ki naj se uporabi.",
+          "example": "abcd1234deadbeef"
+        },
+        "seconds": {
+          "name": "Trajanje",
+          "description": "Kako dolgo poslušati. Grelniki največ oddajajo, ko začnejo ali nehajo greti."
+        }
+      }
+    },
+    "radio_factory_reset": {
+      "name": "Radijska ponastavitev na tovarniške nastavitve",
+      "description": "UNIČUJOČE. Ponastavi en radijski grelnik na tovarniške nastavitve. Grelnik izgubi vse nastavitve, uro, tedenski program in radijsko seznanitev ter preneha komunicirati s Home Assistant. Njegove zadnje znane nastavitve se prej shranijo. Če želite grelnik znova uporabljati, pritisnite »Seznani nove grelnike« na napravi prehoda in preklopite grelnik v način seznanjanja. Shranjene nastavitve se vrnejo, ko je grelnik prepoznan. Nekaterih starejših grelnikov ni mogoče ponastaviti prek radia: ponastavite jih ročno (glejte navodila grelnika).",
+      "fields": {
+        "entry_id": {
+          "name": "ID konfiguracijskega vnosa",
+          "description": "Konfiguracijski vnos radijskega prehoda ali nanoCUL, ki naj se uporabi.",
+          "example": "abcd1234deadbeef"
+        },
+        "heater": {
+          "name": "Številka grelnika",
+          "description": "Radijska številka grelnika (številka v imenu »Grelnik 6«)."
+        }
+      }
+    },
+    "radio_rehome": {
+      "name": "Radio: premakni grelnike v lastno omrežje",
+      "description": "Premakne vse grelnike radijskega vnosa v lastno radijsko omrežje te namestitve. Vsak grelnik se najprej ponastavi (njegove nastavitve se shranijo), nato grelnike enega za drugim preklopite v način seznanjanja. Grelniki dobijo nove številke od 2 naprej in njihove nastavitve se obnovijo. Nekaterih starejših grelnikov ni mogoče ponastaviti prek radia, zato jih na ta način ni mogoče premakniti. Med tem je upravljanje grelnikov začasno ustavljeno.",
+      "fields": {
+        "entry_id": {
+          "name": "ID konfiguracijskega vnosa",
+          "description": "Konfiguracijski vnos radijskega prehoda ali nanoCUL, ki naj se uporabi.",
+          "example": "abcd1234deadbeef"
+        },
+        "timeout": {
+          "name": "Čas čakanja",
+          "description": "Kako dolgo čakati na pritisk gumbov za seznanjanje na grelnikih."
         }
       }
     }
