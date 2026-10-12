@@ -288,6 +288,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     _attr_supported_features = _HEATER_FEATURES
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
+    _attr_translation_key = "heater"  # preset names; the name comes from the node
     # Only heaters with boost offer presets. ``temporary_override`` (backend
     # ``modified_auto``) is reported as the current preset but cannot be
     # selected: changing the target temperature while in Auto starts it.
