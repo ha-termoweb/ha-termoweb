@@ -153,6 +153,10 @@ This map defines responsibilities for each module family in the final design.
   process-wide samples limiter. `diagnostics.py` — the diagnostics download.
   `boost.py` — boost metadata parsing. `utils.py` — device-info builders and
   small shared helpers. `const.py` — domain, brand and option constants.
+- `schedule_card.py` — called from `async_setup`: serves
+  `assets/termoweb_schedule_card.js` at `/termoweb/termoweb_schedule_card.js`
+  and keeps one versioned dashboard resource for it (storage mode only). The
+  last entry's removal deletes the resource.
 - `radio_pairing.py`, `radio_rehome.py`, `radio_survey.py` — the Home
   Assistant side of radio pairing, rehoming and surveys (settings snapshots,
   new nodes, saved reports); the radio protocol side is in `backend/radio/`.

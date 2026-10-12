@@ -1,7 +1,7 @@
 {
   "domain": "termoweb",
   "name": "TermoWeb",
-  "after_dependencies": ["recorder"],
+  "after_dependencies": ["http", "lovelace", "recorder"],
   "codeowners": ["@ha-termoweb"],
   "config_flow": true,
   "documentation": "https://github.com/ha-termoweb/ha-termoweb#readme",

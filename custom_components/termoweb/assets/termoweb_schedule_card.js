@@ -80,6 +80,7 @@
           name: st.attributes.friendly_name || st.attributes.name || this._config.entity,
         });
       }
+      if (!this._entity && entities.length) this._entity = entities[0].id;
       const entKey = JSON.stringify(entities.map(e => e.id + "|" + e.name));
       if (entKey !== this._entitiesKey) {
         this._entitiesKey = entKey; this._entities = entities;
@@ -91,7 +92,6 @@
         }
         this._syncCopyEntitySelect();
       }
-      if (!this._entity && this._entities.length) this._entity = this._entities[0].id;
 
       const st = this._entity ? hass.states[this._entity] : undefined; this._stateObj = st;
       const u = st?.attributes?.units; this._units = (u === "F" || u === "C") ? u : "C";
@@ -545,5 +545,5 @@
   }
 
   if(!customElements.get("termoweb-schedule-card")) customElements.define("termoweb-schedule-card", TermoWebScheduleCard);
-  window.customCards = window.customCards || []; window.customCards.push({ type:"termoweb-schedule-card", name:"TermoWeb Schedule Card (Vanilla)", description:"Focus-safe scheduler for TermoWeb heaters." });
+  window.customCards = window.customCards || []; window.customCards.push({ type:"termoweb-schedule-card", name:"TermoWeb Schedule", description:"Edit the weekly schedule and preset temperatures of your heaters." });
 })();
