@@ -1,8 +1,6 @@
 # Changelog
 
-## 2.4.0b9 (pre-release, 2026-10-11)
-
-Release candidate for 2.4.0. HACS shows it only when "Show beta versions" is enabled for this repository.
+## 2.4.0 (2026-10-12)
 
 The big change: you can now control your heaters **locally, without the cloud and without the vendor gateway**, through a small 868 MHz radio. Use a nanoCUL USB stick (easiest, no soldering) or a home-built ESP32 radio gateway. Cloud accounts (TermoWeb, Ducaheat, Tevolve) work as before.
 
