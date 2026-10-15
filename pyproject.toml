@@ -18,7 +18,7 @@ test = [
     "pytest-cov",
     "pytest-homeassistant-custom-component==0.13.372",
     "pytest-randomly>=5.0.0",
-    "ruff==0.17.0",
+    "ruff==0.17.1",
 ]
 
 
