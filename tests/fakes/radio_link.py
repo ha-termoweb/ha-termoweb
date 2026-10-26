@@ -181,6 +181,8 @@ class FakeRadioLink:
         self.surveys: list[int] = []
         self.survey_bursts: list[Any] = []
         self.network_ids: list[bytes] = []
+        self.display_lines: list[str] = []
+        self.display_error: Exception | None = None
 
     # --- scripting -----------------------------------------------------------
 
@@ -248,6 +250,11 @@ class FakeRadioLink:
     def add_tx_listener(self, callback: Callable[[bytes], None]):
         self.tx_listeners.append(callback)
         return lambda: None
+
+    async def send_display_line(self, text: str) -> None:
+        if self.display_error is not None:
+            raise self.display_error
+        self.display_lines.append(text)
 
     async def set_dialect(self, dialect: Dialect) -> None:
         if self.dialect_error is not None:

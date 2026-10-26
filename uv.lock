@@ -1127,7 +1127,7 @@ wheels = [
 
 [[package]]
 name = "ha-termoweb"
-version = "2.4.0"
+version = "2.4.0+gw.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

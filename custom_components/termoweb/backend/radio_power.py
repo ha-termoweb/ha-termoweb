@@ -211,6 +211,15 @@ class EnergyEstimator:
         duty = duty_pct / 100 if 0 < duty_pct <= 100 else 1.0
         self._last[addr] = (now, duty if heating else 0.0)
 
+    def current_power_w(self, addr: int) -> float:
+        """Return the draw at the last observation: rated power x duty while heating."""
+
+        rated = self._rated_power(addr)
+        previous = self._last.get(addr)
+        if rated is None or previous is None:
+            return 0.0
+        return rated * previous[1]
+
     def counter_wh(self, addr: int) -> float | None:
         """Return the estimated Wh counter, or None while the power is unknown."""
 

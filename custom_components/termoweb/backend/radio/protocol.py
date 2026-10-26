@@ -177,6 +177,7 @@ ENERGY_COUNTER_LEN = 5  # dialect A: BD + u32 big-endian Wh counter
 
 POWER_REQUEST_A_LEN = 3
 POWER_REQUEST_B_LEN = 9
+POWER_RECORD_SHORT_LEN = 8  # some heaters omit the trailing 00 of the BD reply
 
 ADVANCED_RECORD_LEN = 17  # DB + 16 bytes
 ADVANCED_RECORD_MARKER = OP_ADVANCED_READ + 1  # DB
@@ -707,11 +708,10 @@ class PowerRecord:
 
 
 def decode_power_record(payload: bytes) -> PowerRecord | None:
-    """Decode a dialect-B ``BE`` or ``BD`` power record (9 bytes), else None."""
+    """Decode a dialect-B ``BE`` or ``BD`` power record (9 or 8 bytes), else None."""
     payload = bytes(payload)
-    if len(payload) != POWER_REQUEST_B_LEN or payload[0] not in (
-        OP_POWER_REQUEST,
-        ENERGY_MARKER,
+    if len(payload) not in (POWER_REQUEST_B_LEN, POWER_RECORD_SHORT_LEN) or (
+        payload[0] not in (OP_POWER_REQUEST, ENERGY_MARKER)
     ):
         return None
     return PowerRecord(

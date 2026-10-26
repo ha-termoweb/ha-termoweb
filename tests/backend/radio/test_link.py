@@ -119,6 +119,8 @@ def test_parse_query_line_variants() -> None:
     assert bare.version is None and bare.sync is None and bare.mac is None
     assert parse_query_line("# Q termoweb_rx").version is None
     assert parse_query_line("# termoweb_rx 3.5") is None
+    assert not info.display
+    assert parse_query_line("# Q termoweb_rx 3.7 mac=AA display=on").display
 
 
 def test_constructor_validation() -> None:
@@ -1052,3 +1054,22 @@ async def test_probe_heaters_keeps_only_answering_addresses() -> None:
     assert "A1" in gw.commands
     assert {frame[4] for frame in gw.transmitted()} == {6, 7}
     assert gw.writer.closed
+
+
+@pytest.mark.asyncio
+async def test_send_display_line_needs_firmware_with_a_screen() -> None:
+    """An ``L`` line goes out only to a gateway that advertises display=on."""
+    gw = FakeGateway(DIALECT_B)
+    link = make_link(gw, FakeTime())
+    await link.connect()
+    with pytest.raises(UnsupportedDialectError, match="screen"):
+        await link.send_display_line("0|1|Hall|20|21|0|0")
+    await link.close()
+
+    gw = FakeGateway(DIALECT_B)
+    gw.q_line = gw.q_line + " display=on"
+    link = make_link(gw, FakeTime())
+    await link.connect()
+    await link.send_display_line("0|1|Hall|20|21|0|0")
+    assert gw.commands[-1] == "L0|1|Hall|20|21|0|0"
+    await link.close()

@@ -8,14 +8,17 @@ dispatcher. Only the radio link is faked (``tests.fakes.radio_link``).
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime
 import logging
 from types import SimpleNamespace
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.termoweb.backend import radio_client as rc, radio_ws
 from custom_components.termoweb.backend.radio import protocol as p
@@ -660,3 +663,74 @@ async def test_cancellation_inside_a_refresh_still_stops_the_loop(
     task = radio.listener.start()
     await settle()
     assert task.cancelled()
+
+
+async def test_screen_shows_each_heater_when_the_firmware_has_one(radio: Radio) -> None:
+    """A gateway with a screen gets one ``L`` line per heater after a refresh."""
+
+    radio.listener.start()
+    await settle()
+    link = radio.links[0]
+    assert link.display_lines == []  # firmware without a screen: nothing sent
+
+    link.gateway_info = replace(link.gateway_info, display=True)
+    await radio.listener._refresh_all()
+
+    assert link.display_lines == [
+        "0|2|Living room|22.0|22.0|0|0",
+        "1|2|Hall|22.0|22.0|0|0",
+    ]
+
+
+async def test_screen_uses_the_name_given_in_the_device_registry(
+    hass: HomeAssistant,
+) -> None:
+    """A heater renamed in the UI shows that name on the screen."""
+
+    radio = build(hass)
+    radio.listener.start()
+    await settle()
+    entry = MockConfigEntry(domain="termoweb", entry_id=ENTRY_ID)
+    entry.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=ENTRY_ID,
+        identifiers={("termoweb", DEV_ID, "6")},
+    )
+    dr.async_get(hass).async_update_device(device.id, name_by_user="Bedroom Radiator")
+    link = radio.links[0]
+    link.gateway_info = replace(link.gateway_info, display=True)
+    await radio.listener._update_display()
+    assert link.display_lines[0].startswith("0|2|Bedroom Radiator|")
+    await radio.listener.stop()
+
+
+async def test_screen_name_is_ascii_and_failures_are_not_fatal(
+    hass: HomeAssistant,
+) -> None:
+    """Unprintable names are replaced; a failed screen write only stops the update."""
+
+    radio = build(
+        hass,
+        [
+            {"type": "htr", "addr": "6", "name": "Caf\u00e9|A"},
+            {"type": "acm", "addr": "7", "name": "Hall"},
+        ],
+    )
+    radio.listener.start()
+    await settle()
+    link = radio.links[0]
+    link.gateway_info = replace(link.gateway_info, display=True)
+    await radio.listener._update_display()
+    assert link.display_lines[0] == "0|2|Caf? A|22.0|22.0|0|0"
+
+    link.display_lines.clear()
+    link.display_error = RadioLinkError("gone")
+    await radio.listener._update_display()
+    assert link.display_lines == []
+
+    link.display_error = None
+    radio.listener._latest["6"] = {}
+    radio.listener._latest.pop("7")
+    await radio.listener._update_display()
+    assert link.display_lines == ["0|2|Caf? A|0|0|0|0"]
+    await radio.listener.stop()

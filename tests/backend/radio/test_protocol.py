@@ -472,6 +472,9 @@ def test_power_record_decodes_heating_voltage_and_duty() -> None:
     assert heating.room_temp_c == 21.9 and idle.room_temp_c == 22.0
     assert heating.setpoint_c == 22.0
     assert heating.raw[0] == 0xBD
+    short = p.decode_power_record(bytes.fromhex("BDB40023FA1F0000"))
+    assert short.room_temp_c == 18.0 and short.setpoint_c == 17.5
+    assert short.heating is False and short.duty_pct == 0
     for bad in (
         A_ENERGY,
         bytes([0xBE, 0x23, 0x28]),

@@ -260,6 +260,7 @@ One client at a time. Each new connection resets the gateway session
 | `D` | chip state dump | `# marcstate=..` |
 | `F<kHz>` | retune the carrier | `# freq=..` or `# F? expected kHz` |
 | `R<seconds>` | raw survey: capture every RF burst without sync, length or CRC rules, then return to normal reception | `# survey on secs=N`, survey lines, `# survey off` |
+| `L<text>` | show one heater on the gateway's screen: `page|count|name|temp|setpoint|power|heating` (screen builds only, which add `display=on` to the `Q` line) | none |
 | **`Y<0|1>`** (new) | select the dialect framing: sync word, length rule and ack format. `0` = dialect A, `1` = dialect B | `# ...` |
 | **`N<hex4>`** (new) | network id the firmware writes into its auto-acks, e.g. `N1234` | `# ...` |
 

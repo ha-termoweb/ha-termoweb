@@ -63,6 +63,10 @@ With a **local radio**, Home Assistant talks to your heaters **directly**. Nothi
 | Where it sits | next to your router | in a USB port of the Home Assistant computer | anywhere with Wi-Fi and power |
 | Guide | below: [Set up the integration](#set-up-the-integration) | [Radio stick: use a nanoCUL USB stick](docs/radio_nanocul.md) | [Radio gateway: build your own with an ESP32](docs/radio_gateway.md) |
 
+**Optional screen.** An M5Stack CoreS3 SE gateway can also show your heaters on its touch screen, with the background turning orange while a heater heats. Tap to switch between all heaters and one heater. See [Gateway with a screen](docs/radio_gateway.md#gateway-with-a-screen).
+
+![Condensed view with 2, 3 and 4 heaters](esphome/cores3-se/overview-preview.png)
+
 Prices checked on 2026-10-11 at European shops. They change. The guides list shops and current prices.
 
 **Which one should I pick?**
@@ -156,7 +160,27 @@ If your dashboard shows a preset label, **temporary override** means: “Use thi
 
 ## Install (simple, step-by-step)
 
-### Option A — HACS (recommended)
+### Option A — From this fork with git (has the 8-byte heater fix and the CoreS3 screen)
+
+Do not install this fork through HACS. HACS installs the upstream project and would replace the fixes.
+
+1) In Home Assistant install the **Terminal & SSH** add-on (Settings → Add-ons → Add-on store) and open its terminal. `git` is included.  
+2) Download the fork once, outside `custom_components`:
+   ```
+   cd /config
+   git clone https://github.com/gavinwill/ha-termoweb.git
+   ```
+3) Link the integration folder into `custom_components` (create it if it is missing):
+   ```
+   mkdir -p /config/custom_components
+   ln -s /config/ha-termoweb/custom_components/termoweb /config/custom_components/termoweb
+   ```
+   If you installed TermoWeb before (for example with HACS), remove that copy first: `rm -rf /config/custom_components/termoweb`, and remove TermoWeb in HACS.  
+4) **Restart Home Assistant**.
+
+To update later, run `cd /config/ha-termoweb && git pull`, then restart Home Assistant. The ESPHome firmware files are in `/config/ha-termoweb/esphome`.
+
+### Option B — HACS (upstream project)
 
 1) Open **HACS → Integrations** in Home Assistant.  
 2) Click **⋮** (top-right) → **Custom repositories** → **Add**.  
@@ -166,7 +190,7 @@ If your dashboard shows a preset label, **temporary override** means: “Use thi
 4) Search for **TermoWeb** in HACS and **Install**.  
 5) **Restart Home Assistant** when prompted.
 
-### Option B — Manual
+### Option C — Manual
 
 1) Download this repository.  
 2) Copy the folder **`custom_components/termoweb`** to **`<config>/custom_components/termoweb`** on the HA system.  

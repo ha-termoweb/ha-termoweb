@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Fork build: version 2.4.0-gw.1 and a teal icon with a fork badge, so it is easy to tell apart from the upstream integration. The icon is also in `brand/`, which Home Assistant reads for custom integrations.
+
+### Fixed
+- Some heaters answer the power request with an 8-byte reply (without the last padding byte). These are now accepted, so their temperature, set point and power no longer stay empty.
+
+### Added
+- `esphome/cores3-se/`: a gateway build for the M5Stack CoreS3 SE with a touch screen that shows each heater. See its README. The integration sends each heater to the screen itself, so no entity names are needed. A tap cycles through a condensed view of all heaters (each row with its own heating colour) and one page per heater.
+
 ## 2.4.0 (2026-10-12)
 
 The big change: you can now control your heaters **locally, without the cloud and without the vendor gateway**, through a small 868 MHz radio. Use a nanoCUL USB stick (easiest, no soldering) or a home-built ESP32 radio gateway. Cloud accounts (TermoWeb, Ducaheat, Tevolve) work as before.

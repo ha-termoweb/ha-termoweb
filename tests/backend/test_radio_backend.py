@@ -264,3 +264,8 @@ def test_energy_estimate_integrates_rated_power_times_duty() -> None:
     energy.observe(7, True, 50, 0.0)
     energy.observe(7, True, 50, 100.0)
     assert energy.counter_wh(7) is None  # power unknown: no counter
+    assert energy.current_power_w(6) == 1500.0  # last seen heating, no duty byte
+    assert energy.current_power_w(7) == 0.0  # unknown rating
+    assert energy.current_power_w(8) == 0.0  # never observed
+    energy.observe(6, True, 12, 3900.0)
+    assert energy.current_power_w(6) == pytest.approx(180.0)

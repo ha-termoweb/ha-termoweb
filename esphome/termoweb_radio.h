@@ -439,6 +439,20 @@ class TermowebRadio {
   uint32_t frames_received() const { return this->frames_ok_.load(); }
   std::string version() const { return TERMOWEB_RADIO_VERSION; }
 
+  /* Optional extension point for a local add-on that shares the SPI bus (for
+   * example a screen). setup runs once, after the radio's device is added;
+   * when the receiver is idle and work_pending() is true the radio releases
+   * the bus, calls work(), and takes the bus back. Call before start(). */
+  struct Hooks {
+    void (*setup)(spi_host_device_t host) = nullptr;
+    bool (*work_pending)() = nullptr;
+    void (*work)() = nullptr;
+    void (*line)(const char *text) = nullptr; /* 'L<text>' command line, sans the 'L' */
+  };
+  void set_hooks(const Hooks &hooks) {
+    if (!this->started_) this->hooks_ = hooks;
+  }
+
   /* Called once from ESPHome's on_boot (priority -100, i.e. after WiFi and
    * the rest of the core are set up). Safe to call again: later calls are
    * no-ops. Everything that touches the CC1101 happens inside the radio
@@ -509,7 +523,7 @@ class TermowebRadio {
    * letter: A = uart_getc_blocking, HEX_I/HEX_T = read_hex_line. The
    * ESP32-only commands reuse the same two shapes: Y like A (one digit),
    * HEX_N like I (a hex line, here exactly 2 bytes); DEC_F reads decimal. */
-  enum ParseState : uint8_t { P_IDLE = 0, P_A, P_Y, P_HEX_I, P_HEX_N, P_HEX_T, P_DEC_F, P_DEC_R };
+  enum ParseState : uint8_t { P_IDLE = 0, P_A, P_Y, P_HEX_I, P_HEX_N, P_HEX_T, P_DEC_F, P_DEC_R, P_LINE };
 
   /* ---------------------------------------------------------------- clock */
 
@@ -902,9 +916,10 @@ class TermowebRadio {
     this->freq_str_(f, sizeof(f));
     snprintf(line, sizeof(line),
              "# Q termoweb_rx %s freq=%s pa=%02X sync=%02X%02X mode=dynamic autoack=%s id=%02X dialect=%c net=%04X "
-             "mac=%s",
+             "mac=%s%s",
              TERMOWEB_RADIO_VERSION, f, PA_VAL, SYNC1_VAL, this->sync0_(), this->auto_ack_ ? "on" : "off",
-             this->our_id_, this->dialect_ == DIALECT_B ? 'B' : 'A', (unsigned) this->net_, this->mac_str_);
+             this->our_id_, this->dialect_ == DIALECT_B ? 'B' : 'A', (unsigned) this->net_, this->mac_str_,
+             this->hooks_.line != nullptr ? " display=on" : "");
     this->emit_(line);
   }
 
@@ -1487,6 +1502,15 @@ class TermowebRadio {
         }
         this->parse_fail_();
         return false;
+      case P_LINE:
+        if (c == '\n' || c == '\r') {
+          this->pstate_ = P_IDLE;
+          this->line_[this->line_len_] = '\0';
+          if (this->hooks_.line != nullptr) this->hooks_.line(this->line_);
+          return false;
+        }
+        if (this->line_len_ < sizeof(this->line_) - 1) this->line_[this->line_len_++] = c;
+        return false;
       case P_DEC_R:
         if (c == '\n' || c == '\r') {
           this->pstate_ = P_IDLE;
@@ -1533,6 +1557,10 @@ class TermowebRadio {
         this->pstate_ = P_DEC_F;
         this->f_value_ = 0;
         this->f_digits_ = 0;
+        break;
+      case 'L':
+        this->pstate_ = P_LINE;
+        this->line_len_ = 0;
         break;
       case 'R':
         this->pstate_ = P_DEC_R;
@@ -1623,6 +1651,8 @@ class TermowebRadio {
       ESP_LOGE(TAG, "spi_bus_add_device: %s", esp_err_to_name(err));
       return false;
     }
+    if (this->hooks_.setup) this->hooks_.setup(SPI2_HOST);
+
     /* Only this task ever uses the bus; holding it permanently makes every
      * polling transaction skip the bus arbitration. */
     spi_device_acquire_bus(this->spi_, portMAX_DELAY);
@@ -1701,6 +1731,12 @@ class TermowebRadio {
       if (bits & EV_GDO2) this->on_gdo2_();
       if (bits & EV_GDO0) this->on_gdo0_(this->gdo0_edge_us_);
 
+      if (bits == 0 && this->rx_state_ == RX_IDLE && !this->packet_ready_ && !this->survey_active_ &&
+          this->hooks_.work_pending != nullptr && this->hooks_.work != nullptr && this->hooks_.work_pending()) {
+        spi_device_release_bus(this->spi_);
+        this->hooks_.work();
+        spi_device_acquire_bus(this->spi_, portMAX_DELAY);
+      }
       if (this->packet_ready_) this->handle_packet_();
       if (this->survey_active_) this->survey_tick_();
 
@@ -1941,6 +1977,7 @@ class TermowebRadio {
   TaskHandle_t writer_task_{nullptr};
   TaskHandle_t listener_task_{nullptr};
   spi_device_handle_t spi_{nullptr};
+  Hooks hooks_;
 
   /* Written by the GPIO ISRs, read by the radio task. */
   volatile bool gdo_masked_{true};
@@ -2007,6 +2044,8 @@ class TermowebRadio {
   SemaphoreHandle_t client_mtx_{nullptr};
   int client_fd_{-1};
   ByteRing<1024> cmd_ring_;
+  char line_[96];
+  size_t line_len_{0};
   ByteRing<8192> out_ring_;
 };
 

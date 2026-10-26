@@ -394,6 +394,8 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink.set_network_id
     Switch the network id for new frames and the firmware's auto-acks (``N``).
 custom_components/termoweb/backend/radio/link.py :: RadioLink.set_dialect
     Switch the gateway's dialect at runtime (``Y``); ESP32 firmware only.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.send_display_line
+    Show one heater on the gateway's screen (``L``); never transmits on air.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.add_listener
     Register ``callback`` for every decoded RX frame; return a remover.
 custom_components/termoweb/backend/radio/link.py :: RadioLink.add_listener._remove
@@ -535,7 +537,7 @@ custom_components/termoweb/backend/radio/protocol.py :: decode_power_request
 custom_components/termoweb/backend/radio/protocol.py :: decode_energy_counter
     Decode dialect A's ``BD`` + u32 big-endian cumulative Wh counter, else None.
 custom_components/termoweb/backend/radio/protocol.py :: decode_power_record
-    Decode a dialect-B ``BE`` or ``BD`` power record (9 bytes), else None.
+    Decode a dialect-B ``BE`` or ``BD`` power record (9 or 8 bytes), else None.
 custom_components/termoweb/backend/radio/protocol.py :: classify_unsolicited
     Classify a frame (or bare payload) a heater sent without being asked.
 custom_components/termoweb/backend/radio/serial_link.py :: _default_open
@@ -810,6 +812,8 @@ custom_components/termoweb/backend/radio_power.py :: EnergyEstimator.__init__
     Use ``rated_power(addr)`` (watts or None) for every integration step.
 custom_components/termoweb/backend/radio_power.py :: EnergyEstimator.observe
     Add the energy since the last observation, then store the new state.
+custom_components/termoweb/backend/radio_power.py :: EnergyEstimator.current_power_w
+    Return the draw at the last observation: rated power x duty while heating.
 custom_components/termoweb/backend/radio_power.py :: EnergyEstimator.counter_wh
     Return the estimated Wh counter, or None while the power is unknown.
 custom_components/termoweb/backend/radio_power.py :: _int_map
@@ -836,6 +840,10 @@ custom_components/termoweb/backend/radio_ws.py :: RadioListener._node_type_for
     Return the inventory node type for heater address ``addr``.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._refresh_all
     Keepalive clock sync and status read for each heater; then apply the power limit.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._display_name
+    Return the heater's name as the user sees it, including a rename in the UI.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._update_display
+    Show each heater on the gateway's screen, when the firmware has one.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._refresh_heater
     Keepalive clock sync, status read and energy push for one heater.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._on_frame

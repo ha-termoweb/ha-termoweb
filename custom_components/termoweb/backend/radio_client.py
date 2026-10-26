@@ -73,7 +73,10 @@ RESTORE_MODES: dict[int, str] = {
     protocol.MODE_MANUAL: "manual",
     protocol.MODE_OVERRIDE: "auto",
 }
-POWER_RECORD_REPLY_LENS = (protocol.POWER_REQUEST_B_LEN,)  # dialect-B BD record
+POWER_RECORD_REPLY_LENS = (  # dialect-B BD record, full or without trailing pad
+    protocol.POWER_REQUEST_B_LEN,
+    protocol.POWER_RECORD_SHORT_LEN,
+)
 PROGRAM_REPLY_LENS = (
     protocol.PROGRAM_HOURLY_PAYLOAD_LEN,
     protocol.PROGRAM_HALF_HOURLY_PAYLOAD_LEN,

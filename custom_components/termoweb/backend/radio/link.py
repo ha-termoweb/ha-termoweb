@@ -86,6 +86,7 @@ class GatewayInfo:
     raw: str
     dialect: str | None = None  # None: firmware without runtime dialects (dialect A)
     radio: str | None = None  # "ok" / "missing"; None: firmware without the check
+    display: bool = False  # firmware with a screen that takes ``L`` heater lines
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,7 @@ def parse_query_line(line: str) -> GatewayInfo | None:
         raw=line,
         dialect=fields.get("dialect"),
         radio=fields.get("radio"),
+        display=fields.get("display") == "on",
     )
 
 
@@ -390,6 +392,14 @@ class RadioLink:
             await self._send_command(f"Y{dialect.firmware_mode}")
             self._dialect = dialect
         _LOGGER.debug("Radio dialect switched to %s", dialect.name)
+
+    async def send_display_line(self, text: str) -> None:
+        """Show one heater on the gateway's screen (``L``); never transmits on air."""
+        info = self.gateway_info
+        if info is None or not info.display:
+            raise UnsupportedDialectError("firmware has no screen")
+        async with self._send_lock:
+            await self._send_command(f"L{text}")
 
     # --- listeners -----------------------------------------------------------
 

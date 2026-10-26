@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
@@ -33,6 +34,10 @@ from custom_components.termoweb.const import (
 )
 from custom_components.termoweb.domain.ids import NodeId, NodeType
 from custom_components.termoweb.domain.state import NodeSettingsDelta
+from custom_components.termoweb.identifiers import (
+    build_node_device_identifier,
+    node_key,
+)
 from custom_components.termoweb.inventory import Inventory
 
 from .radio import protocol
@@ -45,6 +50,7 @@ from .ws_client import _WSStatusMixin, forward_ws_sample_updates
 _LOGGER = logging.getLogger(__name__)
 
 GRANT_SETTLE_S = 90.0  # heating starts ~70-90 s after BF 01 (meter-verified)
+DISPLAY_MAX_HEATERS = 4  # pages the gateway screen can show
 REFRESH_INTERVAL_S = 120.0  # keepalive clock sync + status read; heaters need <=150 s
 PAYLOAD_STALE_AFTER_S = 3 * REFRESH_INTERVAL_S
 RECONNECT_BACKOFF_S = (5.0, 10.0, 30.0, 120.0, 300.0)
@@ -84,6 +90,7 @@ class RadioListener(_WSStatusMixin):
         self._remove_frame_listener: Callable[[], None] | None = None
         self._remove_disconnect_listener: Callable[[], None] | None = None
         self._backoff_idx = 0
+        self._latest: dict[str, Mapping[str, Any]] = {}
 
     # --- lifecycle -----------------------------------------------------------
 
@@ -206,6 +213,59 @@ class RadioListener(_WSStatusMixin):
             await self._client.async_balance_power()
         except Exception:
             _LOGGER.exception("Radio power limit check failed unexpectedly")
+        await self._update_display()
+
+    def _display_name(
+        self, node_type: str, addr: str, names: Mapping[str, Mapping[str, str]]
+    ) -> str:
+        """Return the heater's name as the user sees it, including a rename in the UI."""
+
+        key = node_key(self._inventory, node_type, addr)
+        device = dr.async_get(self.hass).async_get_device_by_identifier(
+            build_node_device_identifier(self.dev_id, key), self.entry_id
+        )
+        if device is not None and device.name_by_user:
+            return device.name_by_user
+        return names.get(node_type, {}).get(addr, addr)
+
+    async def _update_display(self) -> None:
+        """Show each heater on the gateway's screen, when the firmware has one."""
+
+        link = self._client.link
+        info = None if link is None else link.gateway_info
+        if link is None or info is None or not info.display:
+            return
+        heaters = sorted(self._heaters(), key=lambda item: item[1])
+        heaters = heaters[:DISPLAY_MAX_HEATERS]
+        names = self._inventory.heater_names_by_type()
+        _LOGGER.debug("Screen update for heaters %s", [addr for _t, addr in heaters])
+        for page, (node_type, addr) in enumerate(heaters):
+            settings = self._latest.get(addr)
+            if settings is None:
+                _LOGGER.debug("Screen: no status yet for heater %s; skipped", addr)
+                continue
+            try:
+                watts = self._client.energy.current_power_w(radio_addr(addr))
+            except ValueError:
+                continue
+            name = self._display_name(node_type, addr, names)
+            name = name.replace("|", " ").encode("ascii", "replace").decode()
+            fields = (
+                page,
+                len(heaters),
+                name,
+                settings.get("mtemp") or 0,
+                settings.get("stemp") or 0,
+                round(watts),
+                1 if settings.get("state") == "on" else 0,
+            )
+            line = "|".join(str(field) for field in fields)
+            _LOGGER.debug("Screen line for heater %s: %s", addr, line)
+            try:
+                await link.send_display_line(line)
+            except RadioLinkError as err:
+                _LOGGER.debug("Gateway screen update failed: %s", err)
+                return
 
     async def _refresh_heater(self, node_type: str, addr: str, radio_id: int) -> None:
         """Keepalive clock sync, status read and energy push for one heater."""
@@ -218,7 +278,10 @@ class RadioListener(_WSStatusMixin):
             self._mark_ws_heartbeat(reason="keepalive")
         settings = await self._client.get_node_settings(self.dev_id, (node_type, addr))
         if settings:
+            _LOGGER.debug("Heater %s status: %s", addr, settings)
             self._push(node_type, addr, settings)
+        else:
+            _LOGGER.debug("Heater %s gave no status reply", addr)
         await self._push_energy(node_type, addr)
 
     # --- unsolicited heater frames ------------------------------------------
@@ -322,6 +385,7 @@ class RadioListener(_WSStatusMixin):
             self._push(node_type, addr, settings_from_power_record(record))
             await self._push_energy(node_type, addr)
         await self._client.async_balance_power()
+        await self._update_display()
 
     async def _push_energy(self, node_type: str, addr: str) -> None:
         """Hand the heater's latest energy counter (read or estimated) to the energy sensors."""
@@ -342,6 +406,7 @@ class RadioListener(_WSStatusMixin):
     def _push(self, node_type: str, addr: str, settings: Mapping[str, Any]) -> None:
         """Send one settings delta to the coordinator and mark the payload fresh."""
 
+        self._latest[addr] = {**self._latest.get(addr, {}), **settings}
         delta = NodeSettingsDelta(NodeId(NodeType(node_type), addr), dict(settings))
         self._coordinator.handle_ws_deltas(self.dev_id, [delta])
         self._mark_ws_payload(timestamp=time.time(), stale_after=PAYLOAD_STALE_AFTER_S)

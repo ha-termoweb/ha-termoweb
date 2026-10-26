@@ -660,6 +660,19 @@ Some older heaters cannot be reset over the radio. The action then stops
 with an error. Reset such a heater by hand: the heater's manual tells you
 how.
 
+### Gateway with a screen
+
+The M5Stack CoreS3 SE has a touch screen. The firmware in
+[`esphome/cores3-se`](../esphome/cores3-se/README.md) shows each heater (name,
+temperature, set point, power) and turns orange while it heats. The integration
+sends the heaters to the screen itself, so you do not enter any entity names.
+Tap the screen to switch between the condensed view (all heaters) and one
+heater at a time.
+
+![Condensed view with 2, 3 and 4 heaters](../esphome/cores3-se/overview-preview.png)
+
+![One heater](../esphome/cores3-se/display-preview.png)
+
 ### Good to know
 
 Only one program can use the gateway at a time. If a second program
