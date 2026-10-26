@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from itertools import pairwise
 import logging
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -14,7 +16,9 @@ from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
+from custom_components.termoweb.backend import radio_client as rc
 from custom_components.termoweb.backend.base import normalise_sample_records
+from custom_components.termoweb.backend.radio_client import RadioClient
 from custom_components.termoweb.backend.rest_client import (
     BackendAuthError,
     BackendRateLimitError,
@@ -36,6 +40,7 @@ from tests.fakes.coordinator import (
     rest_client,
     state_coordinator,
 )
+from tests.fakes.radio_link import HEATER, NET, FakeRadioLink
 
 
 def _samples(*points: tuple[float, float]) -> list[dict[str, float]]:
@@ -636,6 +641,70 @@ async def test_failed_hourly_poll_is_logged_not_raised(
     assert coord.last_update_success is False
     assert "Hourly energy poll failed" in caplog.text
     unsub()
+
+
+async def test_radio_dialect_a_power_follows_the_counter_read_interval(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pushes outpacing counter reads neither spike nor zero the power (#1119).
+
+    A dialect-A heater's Wh counter is re-read every 600 s but pushed on every
+    120 s keepalive and 90 s after a power grant. Power must be the true rate
+    (to whole-Wh quantisation), and pushes of an unchanged reading must leave
+    the published power alone.
+    """
+    rate_w = 800.0  # a 1 kW heater at an 80 % duty
+    base_wh = 123_456
+    clock = Clock(1_700_000_000.0).install(monkeypatch)
+    start = clock.now
+    monkeypatch.setattr(rc, "time", SimpleNamespace(time=clock))
+    client = RadioClient(
+        "radio.local",
+        2323,
+        "A",
+        [{"type": "htr", "addr": "6", "name": "Heater"}],
+        network_id=NET,
+        link_factory=FakeRadioLink,
+        clock=clock,
+    )
+    client.reply_timeout = 0.01
+    link = await client.async_connect()
+
+    def _counter_now(_dst: int, payload: bytes) -> None:
+        if payload == b"\xbc":
+            wh = base_wh + int(rate_w * (clock.now - start) / 3600)
+            link.reply(0xBC, b"\xbd" + wh.to_bytes(4, "big"))
+
+    link.on_send = _counter_now
+    coord = energy_coordinator(hass, rest_client(), {"htr": ["6"]})
+
+    keepalives = {k * 120.0 for k in range(31)}  # one hour
+    grants = {k * 120.0 + 90.0 for k in (1, 4, 7, 13, 22)}
+    missed_read_at = 1_800.0  # the heater does not answer this re-read
+    published: list[tuple[float, float | None]] = []
+    for offset in sorted(keepalives | grants):
+        clock.now = start + offset
+        if offset == missed_read_at:
+            link.no_ack.add(HEATER)
+        samples = await client.get_node_samples(DEV_ID, ("htr", "6"), 0, 0)
+        link.no_ack.discard(HEATER)
+        coord.handle_ws_samples(DEV_ID, {"htr": {"6": samples[-1]}})
+        published.append((offset, power(coord, "htr", "6")))
+
+    # Reads are asked at 0, 600, 1200, 1800 (unanswered), 2400, 3000, 3600 s.
+    assert link.payloads().count(b"\xbc") == 7
+    assert energy(coord, "htr", "6") == pytest.approx((base_wh + rate_w) / 1000)
+    # Nothing to derive from until the second read; never a spike or a negative.
+    assert all(p is None for t, p in published if t < 600)
+    after_second_read = [p for t, p in published if t >= 600]
+    assert all(p is not None for p in after_second_read)
+    tolerance = 3600 / 600  # one whole Wh over the shortest read interval
+    assert all(abs((p or 0.0) - rate_w) <= tolerance for p in after_second_read)
+    # Between reads, re-pushed readings leave the power exactly as it was.
+    reads = {0.0, 600.0, 1_200.0, 2_400.0, 3_000.0, 3_600.0}
+    for (_, before), (t, after) in pairwise(published):
+        if t not in reads:
+            assert after == before
 
 
 async def test_listeners_follow_ws_energy_updates(

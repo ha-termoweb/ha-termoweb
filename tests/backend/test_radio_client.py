@@ -934,6 +934,45 @@ async def test_dialect_a_counter_read_failure_keeps_the_last_value() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dialect_a_sample_is_stamped_with_the_read_time_not_the_push_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached counter keeps its read time, so re-pushing it is a duplicate (#1119)."""
+
+    wall = [1_700_000_000.0]
+    monkeypatch.setattr(rc, "time", SimpleNamespace(time=lambda: wall[0]))
+    client, links, clock = make_dialect_a_client()
+    link = await client.async_connect()
+    link.reply(0xBC, COUNTER_A, COUNTER_A_LATER)
+    read_at = wall[0]
+    assert await client.get_node_samples("dev", ("htr", "6"), 0, 1) == [
+        {"t": read_at, "counter": 123456}
+    ]
+
+    # Keepalive pushes inside the refresh window re-send the cached reading.
+    for _ in range(4):
+        clock.now += 120
+        wall[0] += 120
+        (sample,) = await client.get_node_samples("dev", ("htr", "6"), 0, 1)
+        assert sample == {"t": read_at, "counter": 123456}
+    assert link.payloads() == [b"\xbc"]
+
+    # A missed re-read keeps both the value and its original read time.
+    link.no_ack.add(HEATER)
+    clock.now += 120
+    wall[0] += 120
+    (sample,) = await client.get_node_samples("dev", ("htr", "6"), 0, 1)
+    assert sample == {"t": read_at, "counter": 123456}
+
+    # The next successful read is stamped with its own time.
+    link.no_ack.clear()
+    clock.now += client.energy_counter_refresh_s
+    wall[0] += client.energy_counter_refresh_s
+    (sample,) = await client.get_node_samples("dev", ("htr", "6"), 0, 1)
+    assert sample == {"t": wall[0], "counter": 123556}
+
+
+@pytest.mark.asyncio
 async def test_dialect_a_heater_that_never_answers_has_no_sample() -> None:
     """No counter yet means no sample; the estimate is never mixed in."""
 
