@@ -204,7 +204,8 @@ class RadioClient:
         self._runback_restore: dict[int, tuple[int, float | None]] = {}
         self._identities_read: set[int] = set()  # heaters whose 5A reply decoded
         self._identity_failures: dict[int, float] = {}  # last unanswered 5A read
-        self._energy_counters: dict[int, int] = {}  # last dialect-A Wh counter read
+        # Last dialect-A Wh counter read and the wall-clock time it was read at.
+        self._energy_counters: dict[int, tuple[int, float]] = {}
         self._energy_reads: dict[int, float] = {}  # when that counter was last asked
         self.power = power or PowerManager()
         self.advanced = advanced or AdvancedSetupStore()
@@ -719,6 +720,16 @@ class RadioClient:
         dialect without a counter, or before the heater first answered.
         """
 
+        reading = await self._energy_counter_reading(addr)
+        return None if reading is None else reading[0]
+
+    async def _energy_counter_reading(self, addr: int) -> tuple[int, float] | None:
+        """Return the dialect-A ``(counter, read_at)``; ``read_at`` is wall-clock.
+
+        ``read_at`` stays the time of the last successful read while the cached
+        value is served, so a re-pushed counter is recognisably the same sample.
+        """
+
         if not self._dialect.energy_counter:
             return None
         now = self._clock()
@@ -736,7 +747,9 @@ class RadioClient:
             else:
                 counter = protocol.decode_energy_counter(reply.payload)
                 assert counter is not None  # the reply predicate only accepts BD + 4
-                self._energy_counters[addr] = counter
+                # Wall clock, not self._clock (monotonic): the energy coordinator
+                # compares sample times against time.time() and its own history.
+                self._energy_counters[addr] = (counter, time.time())
         return self._energy_counters.get(addr)
 
     async def _program(self, addr: int) -> list[int] | None:
@@ -1025,17 +1038,24 @@ class RadioClient:
     ) -> list[dict[str, float]]:
         """Return the heater's Wh counter as one sample (no history).
 
-        Dialect A: the heater's own counter. Dialect B keeps none: the estimate.
+        Dialect A: the heater's own counter, stamped with when it was read (not
+        when it is pushed): power is derived from consecutive samples, so a
+        cached counter stamped with the push time would read 0 W and the next
+        read would credit ten minutes of energy to a two-minute gap.
+        Dialect B keeps none: the estimate, current as of now.
         """
 
         _node_type, addr = self._resolve_node(node)
         if self._dialect.energy_counter:
-            counter: float | None = await self.read_energy_counter(addr)
-        else:
-            counter = self.energy.counter_wh(addr)
-        if counter is None:
+            reading = await self._energy_counter_reading(addr)
+            if reading is None:
+                return []
+            counter, read_at = reading
+            return [{"t": read_at, "counter": counter}]
+        estimate = self.energy.counter_wh(addr)
+        if estimate is None:
             return []
-        return [{"t": time.time(), "counter": round(counter, 3)}]
+        return [{"t": time.time(), "counter": round(estimate, 3)}]
 
     async def get_geo_data(self, dev_id: str) -> None:
         """Return None: the radio gateway has no account location."""

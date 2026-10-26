@@ -718,6 +718,8 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.read_power_rec
     Return the heater's dialect-B power record (``BC`` → ``BD``), or None.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.read_energy_counter
     Return a dialect-A heater's own cumulative Wh counter (``BC`` → ``BD`` + u32).
+custom_components/termoweb/backend/radio_client.py :: RadioClient._energy_counter_reading
+    Return the dialect-A ``(counter, read_at)``; ``read_at`` is wall-clock.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._program
     Return the heater's ``prog``, re-reading it after ``program_refresh_s``.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.list_devices
