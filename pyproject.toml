@@ -16,7 +16,7 @@ test = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
-    "pytest-homeassistant-custom-component==0.13.372",
+    "pytest-homeassistant-custom-component==0.13.375",
     "pytest-randomly>=5.0.0",
     "ruff==0.17.0",
 ]
