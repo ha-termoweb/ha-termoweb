@@ -168,7 +168,7 @@ IDENTITY_SHORT_FORM = 0x55
 IDENTITY_RATED_POWER_INDEX = 10  # short form: rated power in 100 W units
 RATED_POWER_UNIT_W = 100
 RATED_POWER_RANGE_W = (100, 4000)  # anything else is not taken as a rating
-SERIAL_HEX_BYTES = 4  # no ASCII serial: the identity's last 4 bytes as 8 hex digits
+SERIAL_HEX_BYTES = 4  # no ASCII serial: identity's first+last 4 bytes as 16 hex digits
 # An ASCII serial usable as a name and identifier: no spaces or colons, has a digit.
 _SERIAL_RE = re.compile(r"(?=[^0-9]*[0-9])[A-Za-z0-9._-]{4,32}")
 
@@ -625,10 +625,22 @@ class IdentityRecord:
 
 
 def serial_token(identity: bytes, ascii_serial: str | None = None) -> str:
-    """Return a heater's stable serial: its ASCII serial, else the identity's last 8 hex digits."""
+    """Return a heater's stable serial: its ASCII serial, else 16 hex digits of identity.
+
+    The identity's printable-ASCII tail is a model code on some heaters (ATC
+    Sun Ray: "...P60-" for an RF 1800, "...Q59-" for an RF 1000), identical for
+    every unit of that model, while the unit-unique bytes sit at the front. A
+    token built from the tail alone collides between two heaters of the same
+    model: pairing then re-issues the stored heater's radio id to the new one,
+    and merge_heaters "moves" one stored node back and forth between the two
+    addresses instead of adding the second heater. Include the leading bytes.
+    Serials stored by older versions keep matching nothing: a heater whose
+    address is already stored is skipped, so existing entities are unaffected.
+    """
     if ascii_serial is not None and _SERIAL_RE.fullmatch(ascii_serial):
         return ascii_serial
-    return bytes(identity)[-SERIAL_HEX_BYTES:].hex()
+    ident = bytes(identity)
+    return ident[:SERIAL_HEX_BYTES].hex() + ident[-SERIAL_HEX_BYTES:].hex()
 
 
 def decode_identity(payload: bytes) -> IdentityRecord | None:
