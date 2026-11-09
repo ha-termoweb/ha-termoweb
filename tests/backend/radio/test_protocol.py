@@ -252,6 +252,20 @@ def test_status_e5_report() -> None:
     assert record.boost_end_day is None
 
 
+def test_status_b9_e2_reply() -> None:
+    """Dialect A answers B8 with B9 + an E2 record (captured, ATC Sun Ray RF 1800)."""
+    record = p.decode_status(bytes.fromhex("B9E20E242A0200C32747231D012D00"))
+    assert record is not None and record.form == "E2"
+    assert (record.anti_frost_c, record.eco_c, record.comfort_c) == (7.0, 18.0, 21.0)
+    assert record.mode == "manual"
+    assert (record.room_temp_c, record.setpoint_c) == (19.5, 19.5)
+    assert record.measured_power_w == 1821.1
+    assert (record.duty, record.flags) == (0x1D, 0x01)
+    assert record.boost_end_day is None
+    # Same length as an E5 report: only the B9 E2 lead selects this form.
+    assert p.decode_status(bytes.fromhex("B9000E242A0200C32747231D012D00")) is None
+
+
 def test_status_e6_e4_e3() -> None:
     """E6 drops the 56 marker; E4 and E3 add the boost tail."""
     e6 = p.decode_status(A_E6)

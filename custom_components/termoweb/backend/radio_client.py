@@ -66,6 +66,7 @@ STATUS_REPLY_LENS = (
     protocol.STATUS_SHORT_LEN,
     protocol.STATUS_E6_LEN,
     protocol.STATUS_E4_LEN,
+    protocol.STATUS_B9_E2_LEN,
 )
 # Mode to give back to a heater the power manager switched off (override -> program).
 RESTORE_MODES: dict[int, str] = {

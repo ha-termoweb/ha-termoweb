@@ -158,7 +158,9 @@ STATUS_E6_LEN = 14
 STATUS_E4_LEN = 16  # E6 + 2-byte boost tail
 STATUS_E5_LEN = 15  # 56 + E6
 STATUS_E3_LEN = 17  # 56 + E4
+STATUS_B9_E2_LEN = 15  # B9 + E2 record: dialect A's reply to B8 (same length as E5)
 STATUS_MARKER = OP_STATUS + 1  # B9
+STATUS_E2_FORM = 0xE2  # leads the 14-byte record inside dialect A's B8 reply
 
 IDENTITY_E0_LEN = 20
 IDENTITY_SHORT_LEN = 18
@@ -376,7 +378,7 @@ def reply_verdict(payload: bytes, opcode: int) -> bool | None:
 class StatusRecord:
     """A decoded status record; fields the form does not carry are None."""
 
-    form: str  # "E5", "E3", "E6", "E4" or "short"
+    form: str  # "E5", "E3", "E6", "E4", "E2" or "short"
     mode_code: int
     anti_frost_c: float
     eco_c: float
@@ -406,15 +408,25 @@ _STATUS_FORMS = {
 
 
 def decode_status(payload: bytes) -> StatusRecord | None:
-    """Decode an E5/E3 report, E6/E4 status reply or short ``B9`` record."""
+    """Decode an E5/E3 report, E6/E4 or B9+E2 status reply, or short ``B9`` record."""
     payload = bytes(payload)
-    form_info = _STATUS_FORMS.get(len(payload))
-    if form_info is None:
-        return None
-    form, has_report_marker = form_info
-    body = payload[1:] if has_report_marker else payload
-    if (has_report_marker and payload[0] != OP_REPORT) or body[0] != STATUS_MARKER:
-        return None
+    if (
+        len(payload) == STATUS_B9_E2_LEN
+        and payload[0] == STATUS_MARKER
+        and payload[1] == STATUS_E2_FORM
+    ):
+        # Dialect A answers B8 with B9 + a 14-byte record led by E2, laid out
+        # like E6 (observed on ATC Sun Ray heaters; the record DB replies carry).
+        # Same length as an E5 report, which instead starts with 56.
+        form, body = "E2", payload[1:]
+    else:
+        form_info = _STATUS_FORMS.get(len(payload))
+        if form_info is None:
+            return None
+        form, has_report_marker = form_info
+        body = payload[1:] if has_report_marker else payload
+        if (has_report_marker and payload[0] != OP_REPORT) or body[0] != STATUS_MARKER:
+            return None
     full = len(body) >= STATUS_E6_LEN
     tail = len(body) == STATUS_E4_LEN
     raw_tail = int.from_bytes(body[-2:], "big") if tail else None
