@@ -158,7 +158,9 @@ STATUS_E6_LEN = 14
 STATUS_E4_LEN = 16  # E6 + 2-byte boost tail
 STATUS_E5_LEN = 15  # 56 + E6
 STATUS_E3_LEN = 17  # 56 + E4
+STATUS_B9_E2_LEN = 15  # B9 + E2 record: dialect A's reply to B8 (same length as E5)
 STATUS_MARKER = OP_STATUS + 1  # B9
+STATUS_E2_FORM = 0xE2  # leads the 14-byte record inside dialect A's B8 reply
 
 IDENTITY_E0_LEN = 20
 IDENTITY_SHORT_LEN = 18
@@ -168,7 +170,7 @@ IDENTITY_SHORT_FORM = 0x55
 IDENTITY_RATED_POWER_INDEX = 10  # short form: rated power in 100 W units
 RATED_POWER_UNIT_W = 100
 RATED_POWER_RANGE_W = (100, 4000)  # anything else is not taken as a rating
-SERIAL_HEX_BYTES = 4  # no ASCII serial: the identity's last 4 bytes as 8 hex digits
+SERIAL_HEX_BYTES = 4  # no ASCII serial: identity's first+last 4 bytes as 16 hex digits
 # An ASCII serial usable as a name and identifier: no spaces or colons, has a digit.
 _SERIAL_RE = re.compile(r"(?=[^0-9]*[0-9])[A-Za-z0-9._-]{4,32}")
 
@@ -376,7 +378,7 @@ def reply_verdict(payload: bytes, opcode: int) -> bool | None:
 class StatusRecord:
     """A decoded status record; fields the form does not carry are None."""
 
-    form: str  # "E5", "E3", "E6", "E4" or "short"
+    form: str  # "E5", "E3", "E6", "E4", "E2" or "short"
     mode_code: int
     anti_frost_c: float
     eco_c: float
@@ -406,15 +408,25 @@ _STATUS_FORMS = {
 
 
 def decode_status(payload: bytes) -> StatusRecord | None:
-    """Decode an E5/E3 report, E6/E4 status reply or short ``B9`` record."""
+    """Decode an E5/E3 report, E6/E4 or B9+E2 status reply, or short ``B9`` record."""
     payload = bytes(payload)
-    form_info = _STATUS_FORMS.get(len(payload))
-    if form_info is None:
-        return None
-    form, has_report_marker = form_info
-    body = payload[1:] if has_report_marker else payload
-    if (has_report_marker and payload[0] != OP_REPORT) or body[0] != STATUS_MARKER:
-        return None
+    if (
+        len(payload) == STATUS_B9_E2_LEN
+        and payload[0] == STATUS_MARKER
+        and payload[1] == STATUS_E2_FORM
+    ):
+        # Dialect A answers B8 with B9 + a 14-byte record led by E2, laid out
+        # like E6 (observed on ATC Sun Ray heaters; the record DB replies carry).
+        # Same length as an E5 report, which instead starts with 56.
+        form, body = "E2", payload[1:]
+    else:
+        form_info = _STATUS_FORMS.get(len(payload))
+        if form_info is None:
+            return None
+        form, has_report_marker = form_info
+        body = payload[1:] if has_report_marker else payload
+        if (has_report_marker and payload[0] != OP_REPORT) or body[0] != STATUS_MARKER:
+            return None
     full = len(body) >= STATUS_E6_LEN
     tail = len(body) == STATUS_E4_LEN
     raw_tail = int.from_bytes(body[-2:], "big") if tail else None
@@ -625,10 +637,22 @@ class IdentityRecord:
 
 
 def serial_token(identity: bytes, ascii_serial: str | None = None) -> str:
-    """Return a heater's stable serial: its ASCII serial, else the identity's last 8 hex digits."""
+    """Return a heater's stable serial: its ASCII serial, else 16 hex digits of identity.
+
+    The identity's printable-ASCII tail is a model code on some heaters (ATC
+    Sun Ray: "...P60-" for an RF 1800, "...Q59-" for an RF 1000), identical for
+    every unit of that model, while the unit-unique bytes sit at the front. A
+    token built from the tail alone collides between two heaters of the same
+    model: pairing then re-issues the stored heater's radio id to the new one,
+    and merge_heaters "moves" one stored node back and forth between the two
+    addresses instead of adding the second heater. Include the leading bytes.
+    Serials stored by older versions keep matching nothing: a heater whose
+    address is already stored is skipped, so existing entities are unaffected.
+    """
     if ascii_serial is not None and _SERIAL_RE.fullmatch(ascii_serial):
         return ascii_serial
-    return bytes(identity)[-SERIAL_HEX_BYTES:].hex()
+    ident = bytes(identity)
+    return ident[:SERIAL_HEX_BYTES].hex() + ident[-SERIAL_HEX_BYTES:].hex()
 
 
 def decode_identity(payload: bytes) -> IdentityRecord | None:

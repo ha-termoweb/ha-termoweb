@@ -252,6 +252,20 @@ def test_status_e5_report() -> None:
     assert record.boost_end_day is None
 
 
+def test_status_b9_e2_reply() -> None:
+    """Dialect A answers B8 with B9 + an E2 record (captured, ATC Sun Ray RF 1800)."""
+    record = p.decode_status(bytes.fromhex("B9E20E242A0200C32747231D012D00"))
+    assert record is not None and record.form == "E2"
+    assert (record.anti_frost_c, record.eco_c, record.comfort_c) == (7.0, 18.0, 21.0)
+    assert record.mode == "manual"
+    assert (record.room_temp_c, record.setpoint_c) == (19.5, 19.5)
+    assert record.measured_power_w == 1821.1
+    assert (record.duty, record.flags) == (0x1D, 0x01)
+    assert record.boost_end_day is None
+    # Same length as an E5 report: only the B9 E2 lead selects this form.
+    assert p.decode_status(bytes.fromhex("B9000E242A0200C32747231D012D00")) is None
+
+
 def test_status_e6_e4_e3() -> None:
     """E6 drops the 56 marker; E4 and E3 add the boost tail."""
     e6 = p.decode_status(A_E6)
@@ -348,14 +362,21 @@ def test_identity_e0_form() -> None:
 
 
 def test_identity_serial_token() -> None:
-    """The serial is the ASCII serial, else the identity's last 8 hex digits."""
+    """The serial is the ASCII serial, else the identity's first+last 8 hex digits."""
     assert p.decode_identity(B_IDENTITY).serial == "X123456"
-    assert p.decode_identity(A_IDENTITY).serial == "29304a5b"  # dialect A: hex
+    assert p.decode_identity(A_IDENTITY).serial == "a1b2c3d429304a5b"  # dialect A: hex
     no_ascii = p.decode_identity(bytes([0x5B, 0x55]) + bytes(15) + b"\x01")
-    assert no_ascii.serial == "00000001"
+    assert no_ascii.serial == "0000000000000001"
     tail = bytes(range(12))
     for unusable in ("AB:12", "ABCDEF", "X1", None):  # colon, no digit, too short
-        assert p.serial_token(tail, unusable) == "08090a0b"
+        assert p.serial_token(tail, unusable) == "0001020308090a0b"
+
+
+def test_serial_token_distinguishes_same_model_heaters() -> None:
+    """Two ATC heaters of one model share the ASCII tail; the tokens must differ."""
+    rf1000_a = bytes.fromhex("0c0001000b") + b"C0MQ59-"  # two real RF 1000s
+    rf1000_b = bytes.fromhex("028010000b") + b"C0MQ59-"
+    assert p.serial_token(rf1000_a) != p.serial_token(rf1000_b)
 
 
 def _rated_identity(rating: int) -> bytes:

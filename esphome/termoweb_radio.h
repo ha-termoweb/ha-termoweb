@@ -33,9 +33,12 @@
  *   'I<hex>'   -> our station id (default 01), used by auto-ack -> "# id=<hex>"
  *   'T<hex>'   -> transmit these bytes verbatim, up to 255; "TX <micros> <n> <hex>"
  *                 or "TXERR empty or bad hex" / "TXERR underflow" / "TXERR marcstate=<hex>"
- *   'D'        -> "# marcstate=.. pktstatus=.. rxbytes=.. syncs=<n> rxreset=<n>"
+ *   'D'        -> "# marcstate=.. pktstatus=.. rxbytes=.. syncs=<n> rxreset=<n> freqest=<n>"
  *   received frame -> "RX <micros> <rssi_dbm> <lqi> <crc_ok> <hex bytes as received>"
- *                     crc_ok is the current dialect's CRC verdict (1 = valid)
+ *                     crc_ok is the current dialect's CRC verdict (1 = valid);
+ *                     a CRC-valid frame also prints "# freqest=<n> (<hz> Hz)",
+ *                     the demodulator's carrier-offset estimate (see
+ *                     TERMOWEB_RADIO_FREQ_KHZ below for what to do with it)
  *   sent ack        -> "ACK <micros> <hex bytes as sent>"
  * ESP32-only commands (none of them changes a termoweb_rx reply):
  *   'Y0'/'Y1'  -> dialect A/B; retunes the sync word live.
@@ -153,6 +156,19 @@ static const char *const TAG = "termoweb_radio";
 #define TERMOWEB_RADIO_PA 0xC0
 #endif
 
+/* Carrier in kHz. Override for a module whose crystal is off frequency: when
+ * received heater frames print a steady "# freqest=<n>" with |n| beyond a few
+ * LSB, this module's carrier sits n * 1587 Hz away from the heaters' channel.
+ * Reception still works (the 270.8 kHz RX filter forgives the offset) but the
+ * heaters' narrower receivers never hear the gateway: pairing assignments and
+ * commands are ignored at any range while RX looks perfect. Rebuild with e.g.
+ * build_flags: -DTERMOWEB_RADIO_FREQ_KHZ=869592 until freqest reads ~0. Note
+ * FREQEST clamps at the FOC limit (~BW/4, +-42 LSB): a pinned reading means
+ * "at least this much". One field unit needed +81 kHz (~93 ppm crystal). */
+#ifndef TERMOWEB_RADIO_FREQ_KHZ
+#define TERMOWEB_RADIO_FREQ_KHZ 869525
+#endif
+
 /* Default wiring: ESP32-S3 (N16R8) to the CC1101 module. Overridable at
  * runtime with set_pins() before start(), which is how the YAML's
  * substitutions reach this file. */
@@ -184,7 +200,7 @@ static constexpr uint16_t TX_MAX_LEN = 255;
  * 779-928 MHz window accepted by 'F' is the CC1101's own 868/915 MHz
  * synthesiser band; the register table (PA value, FSCAL, TEST regs) is the
  * 868 MHz one, so the lower 315/433 MHz bands are deliberately refused. */
-static constexpr uint32_t DEFAULT_FREQ_KHZ = 869525;
+static constexpr uint32_t DEFAULT_FREQ_KHZ = TERMOWEB_RADIO_FREQ_KHZ;
 static constexpr uint32_t FREQ_KHZ_MIN = 779000;
 static constexpr uint32_t FREQ_KHZ_MAX = 928000;
 
@@ -234,6 +250,7 @@ static constexpr uint8_t CC1101_TEST0 = 0x2E;
 static constexpr uint8_t CC1101_PARTNUM = 0x30;
 static constexpr uint8_t CC1101_RSSI = 0x34; /* status register; read with the burst bit */
 static constexpr uint8_t CC1101_VERSION = 0x31;
+static constexpr uint8_t CC1101_FREQEST = 0x32; /* RX carrier-offset estimate, f_xosc/2^14 per LSB */
 static constexpr uint8_t CC1101_MARCSTATE = 0x35;
 static constexpr uint8_t CC1101_PKTSTATUS = 0x38;
 static constexpr uint8_t CC1101_TXBYTES = 0x3A;
@@ -1041,6 +1058,12 @@ class TermowebRadio {
    * printed exactly as received, CRC-valid or not, for the host to judge. */
   void handle_packet_() {
     this->packet_ready_ = false;
+    /* Read the demodulator's carrier-offset estimate before anything else
+     * touches the radio: signed, f_xosc/2^14 (~1587 Hz) per LSB, clamped at
+     * the FOC limit (~BW/4). A steady non-zero value on heater frames means
+     * this module's own transmissions land that far off the heaters' channel
+     * (see TERMOWEB_RADIO_FREQ_KHZ). */
+    uint8_t freqest_raw = this->read_status_(CC1101_FREQEST);
     uint16_t total = this->rx_total_;
     uint16_t have = this->rx_have_;
     uint32_t t = this->rx_done_micros_;
@@ -1050,6 +1073,14 @@ class TermowebRadio {
 
     bool crc_ok = have >= total && frame_crc_ok_(d, this->rx_buf_, total);
     if (crc_ok) this->frames_ok_.fetch_add(1);
+    if (crc_ok) {
+      /* Only valid frames: their offset estimate is meaningful, and the line
+       * doubles as a per-frame health readout while a heater transmits. */
+      int8_t fe = (int8_t) freqest_raw;
+      char femsg[48];
+      snprintf(femsg, sizeof(femsg), "# freqest=%d (%ld Hz)", (int) fe, (long) fe * 1587L);
+      this->emit_(femsg);
+    }
 
     if (this->auto_ack_ && crc_ok) {
       uint8_t src = field_(d, this->rx_buf_, 3);
@@ -1544,9 +1575,11 @@ class TermowebRadio {
         uint8_t marcstate = this->read_status_(CC1101_MARCSTATE);
         uint8_t pktstatus = this->read_status_(CC1101_PKTSTATUS);
         uint8_t rxbytes = this->read_status_(CC1101_RXBYTES);
+        int8_t freqest = (int8_t) this->read_status_(CC1101_FREQEST);
         char line[128];
-        snprintf(line, sizeof(line), "# marcstate=%02X pktstatus=%02X rxbytes=%02X syncs=%u rxreset=%u", marcstate,
-                 pktstatus, rxbytes, (unsigned) this->sync_count_, (unsigned) this->rxreset_count_);
+        snprintf(line, sizeof(line), "# marcstate=%02X pktstatus=%02X rxbytes=%02X syncs=%u rxreset=%u freqest=%d",
+                 marcstate, pktstatus, rxbytes, (unsigned) this->sync_count_, (unsigned) this->rxreset_count_,
+                 (int) freqest);
         this->emit_(line);
         break;
       }
